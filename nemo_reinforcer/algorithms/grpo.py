@@ -69,7 +69,7 @@ from nemo_reinforcer.utils.checkpoint import CheckpointManager, CheckpointingCon
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
-    num_steps: int
+    max_num_steps: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
@@ -445,7 +445,7 @@ def grpo_train(
 
     # Run grpo training (single-turn)
     for batch in dataloader:
-        print(f"\n{'=' * 25} Step {step + 1}/{len(dataloader)} {'=' * 25}")
+        print(f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}")
 
         with timer.time("total_step_time"):
             # Prepare batch
@@ -654,7 +654,7 @@ def grpo_train(
 
         timer.reset()
         step += 1
-        if step >= master_config["grpo"]["num_steps"]:
+        if step >= master_config["grpo"]["max_num_steps"]:
             break
 
 
