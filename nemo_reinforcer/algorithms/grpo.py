@@ -241,10 +241,7 @@ def setup(
     policy = HfPolicy(
         cluster=cluster,
         config=policy_config,
-        weights_path=Path(last_checkpoint_path) / "policy.pt"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy_optimizer.pt"
+        checkpoint_dir=Path(last_checkpoint_path) / "policy"
         if last_checkpoint_path
         else None,
         init_optimizer=True,
@@ -623,7 +620,6 @@ def grpo_train(
                     )
                     policy.save_checkpoint(
                         os.path.join(checkpoint_path, "policy.pt"),
-                        os.path.join(checkpoint_path, "policy_optimizer.pt"),
                     )
                     torch.save(
                         dataloader.state_dict(),

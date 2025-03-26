@@ -175,10 +175,7 @@ def setup(
     policy = HfPolicy(
         cluster=cluster,
         config=policy_config,
-        weights_path=Path(last_checkpoint_path) / "policy.pt"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy_optimizer.pt"
+        checkpoint_dir=Path(last_checkpoint_path) / "policy"
         if last_checkpoint_path
         else None,
         init_optimizer=True,
@@ -406,11 +403,7 @@ def sft_train(
                         step + 1, sft_save_state, master_config
                     )
                     policy.save_checkpoint(
-                        os.path.join(checkpoint_path, "policy.pt"),
-                        os.path.join(checkpoint_path, "policy_optimizer.pt"),
-                        ## NOTE: below is a workaround to avoid a bug with checkpointing
-                        ## this should be removed once the bug is fixed
-                        offload_to_cpu=False,
+                        os.path.join(checkpoint_path, "policy"),
                     )
                     torch.save(
                         train_dataloader.state_dict(),

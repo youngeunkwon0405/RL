@@ -28,6 +28,8 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
@@ -46,6 +48,7 @@ from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
+from nemo_reinforcer.utils.checkpoint import ExpState
 
 
 @ray.remote
@@ -65,8 +68,7 @@ class HfPolicyWorker:
     def __init__(
         self,
         config: PolicyConfig,
-        weights_path: Optional[str] = None,
-        optimizer_path: Optional[str] = None,
+        checkpoint_dir: Optional[str] = None,
         init_optimizer: bool = True,
     ):
         self.cfg = config
@@ -170,8 +172,8 @@ class HfPolicyWorker:
             )
 
         # restore
-        if weights_path:
-            self.load_checkpoint(weights_path, optimizer_path)
+        if checkpoint_dir:
+            self.load_checkpoint(checkpoint_dir)
         else:
             print(
                 "No weights path provided. Starting from scratch (default policy init)"
@@ -786,80 +788,23 @@ class HfPolicyWorker:
 
     def save_checkpoint(
         self,
-        weights_path: str,
-        optimizer_path: Optional[str] = None,
-        offload_to_cpu: bool = True,
+        save_path: str,
     ):
-        # Config to save full state dict on rank 0, offloaded to CPU
-        state_dict_config = FullStateDictConfig(
-            offload_to_cpu=offload_to_cpu, rank0_only=True
+        state_dict = {
+            "experiment": ExpState(self.model, self.optimizer, self.scheduler)
+        }
+        dcp.save(state_dict, checkpoint_id=save_path)
+
+    def load_checkpoint(self, save_path: str):
+        print(f"Loading weights from {save_path}")
+
+        state_dict = {
+            "experiment": ExpState(self.model, self.optimizer, self.scheduler)
+        }
+        dcp.load(
+            state_dict=state_dict,
+            checkpoint_id=save_path,
         )
-
-        with FullyShardedDataParallel.state_dict_type(
-            self.model,
-            state_dict_type=StateDictType.FULL_STATE_DICT,
-            state_dict_config=state_dict_config,
-        ):
-            # Save model state dict
-            model_state_dict = self.model.state_dict()
-            optim_state_dict = FullyShardedDataParallel.optim_state_dict(
-                self.model, self.optimizer
-            )
-            scheduler_state_dict = self.scheduler.state_dict()
-
-            optim_and_scheduler_state_dict = {
-                "optimizer": optim_state_dict,
-                "scheduler": scheduler_state_dict,
-            }
-
-            if torch.distributed.get_rank() == 0:
-                # check if weights_path dir exists
-                weights_dir = os.path.dirname(weights_path)
-                if not os.path.exists(weights_dir):
-                    print(
-                        f"Creating weights directory {weights_dir} DOESN'T EXIST SOMEHOW"
-                    )
-                    os.makedirs(weights_dir)
-                torch.save(model_state_dict, weights_path)
-                if optimizer_path is not None:
-                    torch.save(optim_and_scheduler_state_dict, optimizer_path)
-
-    def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
-        print(f"Loading Policy from {weights_path} and optimizer from {optimizer_path}")
-        state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-
-        state_dict = torch.load(weights_path)
-        if optimizer_path is not None:
-            optim_data = torch.load(optimizer_path)
-            optimizer_state_dict = optim_data["optimizer"]
-            scheduler_state_dict = optim_data.get("scheduler")
-        else:
-            optimizer_state_dict = None
-            scheduler_state_dict = None
-        with FullyShardedDataParallel.state_dict_type(
-            self.model,
-            state_dict_type=StateDictType.FULL_STATE_DICT,
-            state_dict_config=state_dict_config,
-        ):
-            # Load model weights
-            self.model.load_state_dict(state_dict if state_dict else None)
-
-            # Load optimizer state
-            if optimizer_state_dict is not None:
-                optim_state_dict = FullyShardedDataParallel.shard_full_optim_state_dict(
-                    optimizer_state_dict, self.model
-                )
-                if self.optimizer is not None:
-                    self.optimizer.load_state_dict(optim_state_dict)
-                else:
-                    print("WARNING: initializing without optimizer")
-            else:
-                print("WARNING: No optimizer checkpoint provided")
-
-            if scheduler_state_dict is not None:
-                self.scheduler.load_state_dict(scheduler_state_dict)
-            else:
-                print("WARNING: No scheduler checkpoint provided")
 
     def shutdown(self):
         """Shutdown the policy."""
@@ -875,20 +820,16 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         name_prefix: str = "hf_policy",
         workers_per_node: Optional[Union[int, List[int]]] = None,
         init_optimizer: bool = True,
-        weights_path: Optional[str] = None,
-        optimizer_path: Optional[str] = None,
+        checkpoint_dir: Optional[str] = None,
     ):
-        if weights_path:
-            weights_path = os.path.abspath(weights_path)
-        if optimizer_path:
-            optimizer_path = os.path.abspath(optimizer_path)
+        if checkpoint_dir:
+            checkpoint_dir = os.path.abspath(checkpoint_dir)
 
         worker_builder = RayWorkerBuilder(
             HfPolicyWorker,
             config,
             init_optimizer=init_optimizer,
-            weights_path=weights_path,
-            optimizer_path=optimizer_path,
+            checkpoint_dir=checkpoint_dir,
         )
         self.worker_group = RayWorkerGroup(
             cluster,
@@ -1073,16 +1014,12 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
     def save_checkpoint(
         self,
-        weights_path: str,
-        optimizer_path: Optional[str] = None,
-        offload_to_cpu: bool = True,
+        save_path: str,
     ):
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
-            weights_path,
-            optimizer_path,
-            offload_to_cpu=offload_to_cpu,
+            save_path,
             respect_tied_workers=True,
         )
         ray.get(futures)
