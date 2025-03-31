@@ -48,7 +48,7 @@ from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
-from nemo_reinforcer.utils.checkpoint import ExpState
+from nemo_reinforcer.utils.checkpoint import ModelState, OptimizerState
 
 
 @ray.remote
@@ -68,7 +68,8 @@ class HfPolicyWorker:
     def __init__(
         self,
         config: PolicyConfig,
-        checkpoint_dir: Optional[str] = None,
+        weights_path: Optional[str] = None,
+        optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,
     ):
         self.cfg = config
@@ -172,8 +173,11 @@ class HfPolicyWorker:
             )
 
         # restore
-        if checkpoint_dir:
-            self.load_checkpoint(checkpoint_dir)
+        if weights_path:
+            self.load_checkpoint(
+                weights_path,
+                optimizer_path,
+            )
         else:
             print(
                 "No weights path provided. Starting from scratch (default policy init)"
@@ -788,23 +792,35 @@ class HfPolicyWorker:
 
     def save_checkpoint(
         self,
-        save_path: str,
+        weights_path: str,
+        optimizer_path: str,
     ):
-        state_dict = {
-            "experiment": ExpState(self.model, self.optimizer, self.scheduler)
+        model_state_dict = {"model": ModelState(self.model)}
+        dcp.save(model_state_dict, checkpoint_id=weights_path)
+
+        optimizer_state_dict = {
+            "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
         }
-        dcp.save(state_dict, checkpoint_id=save_path)
+        dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
 
-    def load_checkpoint(self, save_path: str):
-        print(f"Loading weights from {save_path}")
+    def load_checkpoint(self, weights_path: str, optimizer_path: str):
+        print(f"Loading weights from {weights_path}")
 
-        state_dict = {
-            "experiment": ExpState(self.model, self.optimizer, self.scheduler)
+        model_state_dict = {"model": ModelState(self.model)}
+        dcp.load(
+            state_dict=model_state_dict,
+            checkpoint_id=weights_path,
+        )
+
+        optimizer_state_dict = {
+            "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
         }
         dcp.load(
-            state_dict=state_dict,
-            checkpoint_id=save_path,
+            state_dict=optimizer_state_dict,
+            checkpoint_id=optimizer_path,
         )
+
+        print(f"{self.scheduler.state_dict()=}")
 
     def shutdown(self):
         """Shutdown the policy."""
@@ -820,16 +836,19 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         name_prefix: str = "hf_policy",
         workers_per_node: Optional[Union[int, List[int]]] = None,
         init_optimizer: bool = True,
-        checkpoint_dir: Optional[str] = None,
+        weights_path: Optional[str] = None,
+        optimizer_path: Optional[str] = None,
     ):
-        if checkpoint_dir:
-            checkpoint_dir = os.path.abspath(checkpoint_dir)
+        if weights_path:
+            weights_path = os.path.abspath(weights_path)
+            optimizer_path = os.path.abspath(optimizer_path)
 
         worker_builder = RayWorkerBuilder(
             HfPolicyWorker,
             config,
             init_optimizer=init_optimizer,
-            checkpoint_dir=checkpoint_dir,
+            weights_path=weights_path,
+            optimizer_path=optimizer_path,
         )
         self.worker_group = RayWorkerGroup(
             cluster,
@@ -1014,12 +1033,14 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
     def save_checkpoint(
         self,
-        save_path: str,
+        weights_path: str,
+        optimizer_path: str,
     ):
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
-            save_path,
+            weights_path,
+            optimizer_path,
             respect_tied_workers=True,
         )
         ray.get(futures)

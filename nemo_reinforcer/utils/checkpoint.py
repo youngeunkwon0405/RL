@@ -27,21 +27,50 @@ import torch
 import numpy as np
 
 from torch.distributed.checkpoint.stateful import Stateful
-from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
+    set_model_state_dict,
+    get_optimizer_state_dict,
+    set_optimizer_state_dict,
+)
 
 
 ## modified from pytorch tutorial https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html
-class ExpState(Stateful):
+class ModelState(Stateful):
     """This is a useful wrapper for checkpointing the Application State. Since this object is compliant with the Stateful protocol, DCP will automatically call state_dict/load_stat_dict as needed in the dcp.save/load APIs."""
 
-    def __init__(self, model, optimizer=None, scheduler=None):
+    def __init__(self, model):
+        self.model = model
+
+    def state_dict(self):
+        # this line automatically manages FSDP FQN's, as well as sets the default state dict type to FSDP.SHARDED_STATE_DICT
+        model_state_dict = get_model_state_dict(
+            self.model,
+            options=torch.distributed.checkpoint.state_dict.StateDictOptions(
+                cpu_offload=True
+            ),
+        )
+        return {
+            "model": model_state_dict,
+        }
+
+    def load_state_dict(self, state_dict):
+        # sets our state dicts on the model and optimizer, now that we've loaded
+        set_model_state_dict(
+            self.model,
+            state_dict["model"],
+        )
+
+
+class OptimizerState(Stateful):
+    def __init__(self, model, optimizer, scheduler=None):
         self.model = model
         self.optimizer = optimizer
         self.scheduler = scheduler
 
     def state_dict(self):
         # this line automatically manages FSDP FQN's, as well as sets the default state dict type to FSDP.SHARDED_STATE_DICT
-        model_state_dict, optimizer_state_dict = get_state_dict(
+        optimizer_state_dict = get_optimizer_state_dict(
             self.model,
             self.optimizer,
             options=torch.distributed.checkpoint.state_dict.StateDictOptions(
@@ -49,18 +78,16 @@ class ExpState(Stateful):
             ),
         )
         return {
-            "model": model_state_dict,
             "optim": optimizer_state_dict,
             "sched": self.scheduler.state_dict(),
         }
 
     def load_state_dict(self, state_dict):
         # sets our state dicts on the model and optimizer, now that we've loaded
-        set_state_dict(
+        set_optimizer_state_dict(
             self.model,
             self.optimizer,
-            model_state_dict=state_dict["model"],
-            optim_state_dict=state_dict["optim"],
+            state_dict["optim"],
         )
 
         scheduler_state_dict = state_dict["sched"]
