@@ -812,15 +812,15 @@ class HfPolicyWorker:
             checkpoint_id=weights_path,
         )
 
-        optimizer_state_dict = {
-            "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
-        }
-        dcp.load(
-            state_dict=optimizer_state_dict,
-            checkpoint_id=optimizer_path,
-        )
-
-        print(f"{self.scheduler.state_dict()=}")
+        if optimizer_path:
+            print(f"Loading optimizer from {optimizer_path}")
+            optimizer_state_dict = {
+                "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
+            }
+            dcp.load(
+                state_dict=optimizer_state_dict,
+                checkpoint_id=optimizer_path,
+            )
 
     def shutdown(self):
         """Shutdown the policy."""
