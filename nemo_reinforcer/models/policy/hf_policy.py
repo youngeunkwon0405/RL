@@ -93,14 +93,6 @@ class HfPolicyWorker:
             device_map="cpu",  # load weights onto CPU initially
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
         )
-        if init_reference_model:
-            self.reference_model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                device_map="cpu",  # load weights onto CPU initially
-                torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
-            )
-        else:
-            self.reference_model = None
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         # If no pad token is defined, you might need:
         if self.tokenizer.pad_token is None:
@@ -135,8 +127,9 @@ class HfPolicyWorker:
         do_fsdp(self.model)
         self.model = self.move_to_cpu(self.model)
 
-        # TODO: change this from deepcopy to a better method
-        self._held_reference_model_params = deepcopy(self.model.state_dict())
+        if init_reference_model:
+            # TODO: change this from deepcopy to a better method
+            self._held_reference_model_params = deepcopy(self.model.state_dict())
 
         # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
@@ -716,6 +709,9 @@ class HfPolicyWorker:
         # Create a copy of parameters in the desired dtype (bfloat16 or float32)
         dtype_params = {}
         for name, param in params.items():
+            if isinstance(param, DTensor):
+                param = param.full_tensor()
+
             # Convert parameters to the configured dtype
             dtype_params[name] = param.to(device="cuda", dtype=self.dtype, non_blocking=True)
 

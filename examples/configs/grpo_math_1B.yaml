@@ -31,7 +31,7 @@ policy:
   logprob_batch_size: 1
   max_total_sequence_length: 512
   precision: "bfloat16"
-  offload_policy: True
+  offload_policy: False
 
   optimizer:
     name: "torch.optim.SGD"
