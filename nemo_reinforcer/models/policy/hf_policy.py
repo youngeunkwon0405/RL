@@ -367,7 +367,8 @@ class HfPolicyWorker:
                         logits = self.model.lm_head(outputs.last_hidden_state)
                     else:
                         logits = outputs.logits
-
+                
+                logits = logits.full_tensor()
                 loss, loss_metrics = loss_fn(logits, mb)
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
 
