@@ -794,7 +794,14 @@ class HfPolicyWorker:
         self,
         weights_path: str,
         optimizer_path: str,
+        save_hf: bool = False,  ## whether to save the model in hf format
     ):
+        ## gathers the model weights and saves in HF format
+        ## note that HF format has no way to save optimizer state
+        if save_hf:
+            self.model.save_pretrained(weights_path)
+            return
+
         model_state_dict = {"model": ModelState(self.model)}
         dcp.save(model_state_dict, checkpoint_id=weights_path)
 
