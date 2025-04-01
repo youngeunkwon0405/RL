@@ -140,7 +140,7 @@ class HfPolicyWorker:
         else:
             self.optimizer = None
 
-        if "scheduler" in self.cfg:
+        if "scheduler" in self.cfg and self.optimizer is not None:
             if isinstance(self.cfg["scheduler"], dict):
                 scheduler_cls = import_class_from_path(self.cfg["scheduler"]["name"])
                 self.scheduler = scheduler_cls(
@@ -166,7 +166,7 @@ class HfPolicyWorker:
                     self.optimizer, schedulers, milestones
                 )
 
-        else:
+        elif self.optimizer is not None:
             ## default to a passthrough LR schedule
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(
                 self.optimizer, lr_lambda=lambda epoch: 1
@@ -1031,7 +1031,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
     def save_checkpoint(
         self,
         weights_path: str,
-        optimizer_path: str,
+        optimizer_path: Optional[str] = None,
         save_torch_dist: bool = True,
         save_hf: bool = False,
     ):
