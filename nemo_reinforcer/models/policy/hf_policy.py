@@ -439,12 +439,16 @@ class HfPolicyWorker:
                 input_lengths = lp_batch.get("input_lengths")
 
                 # Create attention mask for right-padded data
-                attention_mask = torch.zeros(
+                # attention_mask = torch.zeros(
+                #     (batch_size, seq_len), dtype=torch.long, device=input_ids.device
+                # )
+                # for i, length in enumerate(input_lengths):
+                #     # For right-padded sequence, set 1s at the beginning of the sequence
+                #     attention_mask[i, :length] = 1
+
+                attention_mask = torch.ones(
                     (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                 )
-                for i, length in enumerate(input_lengths):
-                    # For right-padded sequence, set 1s at the beginning of the sequence
-                    attention_mask[i, :length] = 1
 
                 # Process with the model directly using right-padded inputs
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
