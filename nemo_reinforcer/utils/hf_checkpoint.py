@@ -135,6 +135,7 @@ def save_checkpoint(
     optimizer: Optional[torch.optim.Optimizer] = None,
     scheduler: Optional[Any] = None,
     optimizer_path: Optional[str] = None,
+    save_torch_dist: bool = True,
     save_hf: bool = False,
 ) -> None:
     """Save a checkpoint of the model and optionally optimizer state.
@@ -148,19 +149,21 @@ def save_checkpoint(
         save_hf: Whether to save in HuggingFace format instead of DCP format
     """
     if save_hf:
-        model.save_pretrained(weights_path)
-        return
+        model.save_pretrained(os.path.join(weights_path, "hf_weights"))
 
-    model_state_dict = {"model": ModelState(model)}
-    dcp.save(model_state_dict, checkpoint_id=weights_path)
+    if save_torch_dist:
+        model_state_dict = {"model": ModelState(model)}
+        dcp.save(model_state_dict, checkpoint_id=weights_path)
 
-    if optimizer is not None:
-        if optimizer_path is None:
-            raise ValueError(
-                "optimizer_path must be provided when saving optimizer state"
-            )
-        optimizer_state_dict = {"optim": OptimizerState(model, optimizer, scheduler)}
-        dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
+        if optimizer is not None:
+            if optimizer_path is None:
+                raise ValueError(
+                    "optimizer_path must be provided when saving optimizer state"
+                )
+            optimizer_state_dict = {
+                "optim": OptimizerState(model, optimizer, scheduler)
+            }
+            dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
 
 
 def load_checkpoint(

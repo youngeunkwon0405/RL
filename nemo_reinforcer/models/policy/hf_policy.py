@@ -793,6 +793,7 @@ class HfPolicyWorker:
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        save_torch_dist: bool = True,
         save_hf: bool = False,
     ):
         """Save a checkpoint of the model."""
@@ -802,6 +803,7 @@ class HfPolicyWorker:
             optimizer=self.optimizer if optimizer_path else None,
             scheduler=self.scheduler if optimizer_path else None,
             optimizer_path=optimizer_path,
+            save_torch_dist=save_torch_dist,
             save_hf=save_hf,
         )
 
