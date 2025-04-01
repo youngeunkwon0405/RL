@@ -256,6 +256,9 @@ def batched_message_log_to_flat_message(
             if isinstance(value, torch.Tensor):
                 tensor_keys.append(key)
                 max_len = max(max_len, value.size(0))
+    
+    if max_len % 256 != 0:
+        max_len = ((max_len // 256) + 1) * 256
 
     # Handle non-tensor case
     if not tensor_keys:

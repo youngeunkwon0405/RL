@@ -51,6 +51,42 @@ from nemo_reinforcer.distributed.virtual_cluster import (
 
 from torch.distributed.fsdp import fully_shard, CPUOffloadPolicy, MixedPrecisionPolicy
 from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import Shard, Replicate
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    RowwiseParallel,
+    parallelize_module,
+    SequenceParallel,
+)
+
+true_model_tp_plan = {
+    "lm_head": ColwiseParallel(input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False)
+}
+
+model_tp_plan = {
+    # TODO: i think we can also just sequence parllel it post embedding
+    # this also dicatates if we want to use SP on the input layer norm, currently not but maybe a todo?
+    "embed_tokens": RowwiseParallel(
+        input_layouts=Replicate(),
+        output_layouts=Shard(1),
+    ),
+    "rotary_emb": RotaryEmbedParallel(),
+    "norm": SequenceParallel()
+}
+
+layer_tp_plan = {
+    #TODO: a lot of gathers??
+    "input_layernorm": SequenceParallel(),
+    "self_attn.q_proj": ColwiseParallel(use_local_output=False),
+    "self_attn.k_proj": ColwiseParallel(use_local_output=False),
+    "self_attn.v_proj": ColwiseParallel(use_local_output=False),
+    "self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
+    "post_attention_layernorm": SequenceParallel(),
+    "mlp.up_proj": ColwiseParallel(),
+    "mlp.gate_proj": ColwiseParallel(),
+    "mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
+}
 
 @ray.remote
 class HfPolicyWorker:
@@ -104,8 +140,10 @@ class HfPolicyWorker:
         # ------------------------------------------------
 
         def do_fsdp(model):
+            tp_size = self.cfg["tensor_parallel_size"]
+            dp_size = world_size // tp_size
             # Create a device mesh with 'world_size' GPUs in a 1D arrangement.
-            mesh_2d = init_device_mesh("cuda", (world_size, 1), mesh_dim_names=("dp", "tp"))
+            mesh_2d = init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
 
             dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
 
@@ -114,6 +152,16 @@ class HfPolicyWorker:
                 reduce_dtype=torch.float32,
                 output_dtype=torch.float32,
             )
+            # dtensor doesn't work well when TP_size is 1
+            if tp_size > 1:
+                parallelize_module(model, tp_mesh, true_model_tp_plan)
+                parallelize_module(model.model, tp_mesh, model_tp_plan)
+
+                for layer in model.model.layers:
+                    parallelize_module(layer, tp_mesh, layer_tp_plan)
+
+                for i in range(len(model.model.layers)):
+                    model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
 
             offload_policy = CPUOffloadPolicy(pin_memory=False) if self.cfg["offload_policy"] else torch.distributed.fsdp.OffloadPolicy
             for layer in model.model.layers:
@@ -292,6 +340,7 @@ class HfPolicyWorker:
                     attention_mask[i, :length] = 1
 
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
+                    print("### TRAIN INPUT ID SIZE", input_ids.shape)
                     outputs = self.model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
@@ -383,6 +432,7 @@ class HfPolicyWorker:
 
                 # Process with the model directly using right-padded inputs
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
+                    print("### INPUT ID SIZE", input_ids.shape)
                     outputs = self.model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,

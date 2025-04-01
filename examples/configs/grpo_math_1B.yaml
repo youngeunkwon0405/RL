@@ -32,6 +32,7 @@ policy:
   max_total_sequence_length: 512
   precision: "bfloat16"
   offload_policy: False
+  tensor_parallel_size: 1
 
   optimizer:
     name: "torch.optim.SGD"
