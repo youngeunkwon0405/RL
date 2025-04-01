@@ -26,14 +26,6 @@ from pathlib import Path
 import torch
 import numpy as np
 
-from torch.distributed.checkpoint.stateful import Stateful
-from torch.distributed.checkpoint.state_dict import (
-    get_model_state_dict,
-    set_model_state_dict,
-    get_optimizer_state_dict,
-    set_optimizer_state_dict,
-)
-
 
 class CheckpointingConfig(TypedDict):
     """Configuration for checkpoint management.
