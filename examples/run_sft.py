@@ -100,7 +100,7 @@ def setup_data(data_config: DataConfig, policy_config: PolicyConfig):
     val_dataset = data.formatted_ds["validation"]
     sft_task_spec = data.task_spec
 
-    tokenizer = AutoTokenizer.from_pretrained(policy_config["model_name"])
+    tokenizer = AutoTokenizer.from_pretrained(policy_config["tokenizer_name"])
 
     train_dataset = AllTaskProcessedDataset(
         train_dataset,

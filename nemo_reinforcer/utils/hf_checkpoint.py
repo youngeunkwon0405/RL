@@ -14,6 +14,8 @@
 
 """Checkpoint management utilities for HF models."""
 
+import os
+from pathlib import Path
 from typing import Any, Optional
 import torch
 
@@ -146,10 +148,13 @@ def save_checkpoint(
         optimizer: Optional optimizer to save
         scheduler: Optional scheduler to save
         optimizer_path: Path to save optimizer state (required if optimizer provided)
-        save_hf: Whether to save in HuggingFace format instead of DCP format
+        save_torch_dist: Whether to save in PyTorch distributed format
+        save_hf: Whether to save in HuggingFace format
     """
     if save_hf:
-        model.save_pretrained(os.path.join(weights_path, "hf_weights"))
+        # Create a new path by appending "-hf" to the weights path
+        hf_weights_path = f"{Path(weights_path)}-hf"
+        model.save_pretrained(hf_weights_path)
 
     if save_torch_dist:
         model_state_dict = {"model": ModelState(model)}

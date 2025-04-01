@@ -77,6 +77,7 @@ class HfPolicyWorker:
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
+        tokenizer_name = self.cfg["tokenizer_name"]
         if self.cfg["precision"] == "float32":
             self.dtype = torch.float32
         elif self.cfg["precision"] == "bfloat16":
@@ -96,7 +97,7 @@ class HfPolicyWorker:
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
         )
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         # If no pad token is defined, you might need:
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -1031,12 +1032,16 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self,
         weights_path: str,
         optimizer_path: str,
+        save_torch_dist: bool = True,
+        save_hf: bool = False,
     ):
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
             weights_path,
             optimizer_path,
+            save_torch_dist,
+            save_hf,
             respect_tied_workers=True,
         )
         ray.get(futures)

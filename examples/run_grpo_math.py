@@ -187,7 +187,7 @@ def setup_data(data_config: DataConfig, policy_config: PolicyConfig, env_configs
     else:
         raise ValueError(f"No processor for dataset {data_config['dataset_name']}.")
 
-    tokenizer = AutoTokenizer.from_pretrained(policy_config["model_name"])
+    tokenizer = AutoTokenizer.from_pretrained(policy_config["tokenizer_name"])
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
