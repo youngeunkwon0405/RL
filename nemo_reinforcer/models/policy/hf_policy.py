@@ -14,6 +14,7 @@
 import gc
 import warnings
 import os
+from copy import  deepcopy
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Union
@@ -26,6 +27,7 @@ from torch.distributed.fsdp import (
     FullStateDictConfig,
     MixedPrecision,
     StateDictType,
+    FSDPModule
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -47,6 +49,8 @@ from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
 
+from torch.distributed.fsdp import fully_shard, CPUOffloadPolicy, MixedPrecisionPolicy
+from torch.distributed.tensor import DTensor
 
 @ray.remote
 class HfPolicyWorker:
@@ -109,29 +113,31 @@ class HfPolicyWorker:
 
         def do_fsdp(model):
             # Create a device mesh with 'world_size' GPUs in a 1D arrangement.
-            mesh = init_device_mesh("cuda", (world_size,))
-            mp_policy = MixedPrecision(
+            mesh_2d = init_device_mesh("cuda", (world_size, 1), mesh_dim_names=("dp", "tp"))
+
+            dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
+
+            mp_policy = MixedPrecisionPolicy(
                 param_dtype=self.dtype,
                 reduce_dtype=torch.float32,
-                buffer_dtype=torch.float32,
+                output_dtype=torch.float32,
             )
 
-            return FullyShardedDataParallel(
-                model,
-                device_mesh=mesh,
-                auto_wrap_policy=size_based_auto_wrap_policy,
-                mixed_precision=mp_policy,
-            )
+            offload_policy = CPUOffloadPolicy(pin_memory=False) if self.cfg["offload_policy"] else torch.distributed.fsdp.OffloadPolicy
+            for layer in model.model.layers:
+                fully_shard(layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
+            
+            fully_shard(model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
 
-        self.model.to("cuda")
-        self.model = do_fsdp(self.model)
+            return model
+
+        self.model = self.move_to_cuda(self.model)
+        do_fsdp(self.model)
         self.model = self.move_to_cpu(self.model)
-        if self.reference_model is not None:
-            self.reference_model.to("cuda")
-            self.reference_model = do_fsdp(self.reference_model)
-            self.reference_model = self.move_to_cpu(self.reference_model)
-        self.model.to("cuda")
-        self._held_reference_model_params = None
+
+        # TODO: change this from deepcopy to a better method
+        self._held_reference_model_params = deepcopy(self.model.state_dict())
+
         # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
@@ -281,7 +287,7 @@ class HfPolicyWorker:
             for mb in data.slice(
                 gb_start, gb_start + local_gbs
             ).make_microbatch_iterator(mbs):
-                input_ids = mb.get("input_ids")
+                input_ids = mb.get("input_ids").cuda()
 
                 input_lengths = mb.get("input_lengths")
                 batch_size, seq_len = input_ids.shape
@@ -317,8 +323,8 @@ class HfPolicyWorker:
                 all_mb_metrics.append(loss_metrics)
 
             # Clip gradients
-            if not eval_mode:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            # if not eval_mode:
+            #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
                 # Update parameters
                 self.optimizer.step()
@@ -431,26 +437,16 @@ class HfPolicyWorker:
 
         """
         try:
-            # Save original references
-            original_model = self.model
-            original_reference_model = self.reference_model
+            current_state_dict = self.model.state_dict()
+            self.model.load_state_dict(self._held_reference_model_params)
 
-            self.model = self.move_to_cpu(self.model)
-            self.reference_model = self.reference_model.to("cuda")
-
-            # Swap the references
-            self.model, self.reference_model = self.reference_model, self.model
             gc.collect()
             torch.cuda.empty_cache()
-
-            # - self.model is the original reference_model, now on CUDA
-            # - self.reference_model is the original model, now on CPU
             yield
 
         finally:
             # Restore original references and device placement
-            self.reference_model = self.move_to_cpu(original_reference_model)
-            self.model = original_model.to("cuda")
+            self.model.load_state_dict(current_state_dict)
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -500,10 +496,20 @@ class HfPolicyWorker:
 
         self.model.eval()
 
+        @contextmanager
+        def unshard(model):
+            try:
+                for module in model.modules():
+                    if isinstance(module, FSDPModule):
+                        module.unshard()
+                yield
+            finally:
+                for module in model.modules():
+                    if isinstance(module, FSDPModule):
+                        module.reshard()
+
         # Right padded tokens are converted to left padded tokens for HF generate (https://huggingface.co/docs/transformers/main/en/llm_tutorial?padding=right+pad#padding-side)
-        with torch.distributed.fsdp.FullyShardedDataParallel.summon_full_params(
-            self.model, recurse=False
-        ):
+        with unshard(self.model):
             # Get generation config from self.cfg
             generation_batch_size = self.cfg["generation_batch_size"]
             gen_cfg = self.cfg["generation"]
@@ -681,13 +687,11 @@ class HfPolicyWorker:
 
     def zero_out_weights(self):
         """Zero out the weights of the model."""
-        # TODO @sahilj: do this without a summon (maybe FSDP2)
-        with torch.distributed.fsdp.FullyShardedDataParallel.summon_full_params(
-            self.model, recurse=True
-        ):
-            for p in self.model.parameters():
-                p.data.zero_()
-        torch.cuda.synchronize()
+        # TODO @sahilj: do this without a summon
+        for v in self.model.parameters():
+            if isinstance(v, DTensor):
+                v = v.full_tensor()
+            v.zero_()
 
     def report_device_id(self) -> str:
         """Report the UUID of the current CUDA device using NVML.
@@ -713,11 +717,11 @@ class HfPolicyWorker:
         dtype_params = {}
         for name, param in params.items():
             # Convert parameters to the configured dtype
-            dtype_params[name] = param.to(self.dtype, non_blocking=True)
+            dtype_params[name] = param.to(device="cuda", dtype=self.dtype, non_blocking=True)
 
         # Replace the original params with the converted ones
         params = dtype_params
-        self._held_reference_model_params = params
+        # self._held_reference_model_params = params
         data = {}
         device_uuid = self.report_device_id()
         for name, p in params.items():
@@ -730,13 +734,13 @@ class HfPolicyWorker:
         return {device_uuid: data}
 
     def prepare_for_lp_inference(self):
-        self.model.to("cuda")
+        self.move_to_cuda(self.model)
         self.model.eval()
         self.offload_before_refit()
 
     def prepare_for_training(self, *args, **kwargs):
         # onload models and optimizer state to cuda
-        self.model.to("cuda")
+        self.move_to_cuda(self.model)
         self.model.train()
 
         # Move optimizer state to CUDA if it exists
@@ -779,10 +783,6 @@ class HfPolicyWorker:
         torch.randn(1).cuda()  # wake up torch allocator
         self.offload_before_refit()  # rerun the old offload function
 
-        if self._held_reference_model_params is not None:
-            del self._held_reference_model_params
-            self._held_reference_model_params = None
-
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -791,18 +791,21 @@ class HfPolicyWorker:
         print(
             f"GPU Memory after refit complete: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
-
-    def move_to_cpu(self, model):
-        for param in model.parameters():
-            param.data = param.data.to("cpu")
-
-        for buffer in model.buffers():
-            buffer.data = buffer.data.to("cpu")
-
-        if hasattr(model, "_fsdp_wrapped_module"):
-            model._fsdp_wrapped_module.to("cpu")
+    
+    def move_to_device(self, model, device):
+        for v in self.model.state_dict().values():
+            if isinstance(v, DTensor):
+                v._local_tensor.data = v._local_tensor.data.to(device)
+            else:
+                v.data = v.data.to(device)
 
         return model
+
+    def move_to_cuda(self, model):
+        return self.move_to_device(model, "cuda")
+    
+    def move_to_cpu(self, model):
+        return self.move_to_device(model, "cpu")
 
     def save_checkpoint(
         self,
