@@ -69,7 +69,7 @@ class ModelState(Stateful):
         Args:
             state_dict (dict): State dictionary to load.
         """
-        # sets our state dicts on the model and optimizer, now that we've loaded
+        # sets our state dicts on the model, now that we've loaded
         set_model_state_dict(
             self.model,
             state_dict["model"],
@@ -107,10 +107,14 @@ class OptimizerState(Stateful):
                 cpu_offload=True
             ),
         )
-        return {
+
+        state_dict = {
             "optim": optimizer_state_dict,
-            "sched": self.scheduler.state_dict(),
         }
+        if self.scheduler is not None:
+            state_dict["sched"] = self.scheduler.state_dict()
+
+        return state_dict
 
     def load_state_dict(self, state_dict):
         """Load the state dictionaries into the optimizer and scheduler.
@@ -118,12 +122,77 @@ class OptimizerState(Stateful):
         Args:
             state_dict (dict): State dictionary containing optimizer and scheduler states to load.
         """
-        # sets our state dicts on the model and optimizer, now that we've loaded
+        # sets our state dicts on the optimizer, now that we've loaded
         set_optimizer_state_dict(
             self.model,
             self.optimizer,
             state_dict["optim"],
         )
 
-        scheduler_state_dict = state_dict["sched"]
-        self.scheduler.load_state_dict(scheduler_state_dict)
+        ## load the scheduler state if it exists
+        if "sched" in state_dict:
+            self.scheduler.load_state_dict(state_dict["sched"])
+
+
+def save_checkpoint(
+    model,
+    weights_path: str,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scheduler: Optional[Any] = None,
+    optimizer_path: Optional[str] = None,
+    save_hf: bool = False,
+) -> None:
+    """Save a checkpoint of the model and optionally optimizer state.
+
+    Args:
+        model: The PyTorch model to save
+        weights_path: Path to save model weights
+        optimizer: Optional optimizer to save
+        scheduler: Optional scheduler to save
+        optimizer_path: Path to save optimizer state (required if optimizer provided)
+        save_hf: Whether to save in HuggingFace format instead of DCP format
+    """
+    if save_hf:
+        model.save_pretrained(weights_path)
+        return
+
+    model_state_dict = {"model": ModelState(model)}
+    dcp.save(model_state_dict, checkpoint_id=weights_path)
+
+    if optimizer is not None:
+        if optimizer_path is None:
+            raise ValueError(
+                "optimizer_path must be provided when saving optimizer state"
+            )
+        optimizer_state_dict = {"optim": OptimizerState(model, optimizer, scheduler)}
+        dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
+
+
+def load_checkpoint(
+    model,
+    weights_path: str,
+    optimizer: Optional[torch.optim.Optimizer] = None,
+    scheduler: Optional[Any] = None,
+    optimizer_path: Optional[str] = None,
+) -> None:
+    """Load a checkpoint into the model and optionally optimizer.
+
+    Args:
+        model: The PyTorch model to load into
+        weights_path: Path to load model weights from
+        optimizer: Optional optimizer to load state into
+        scheduler: Optional scheduler to load state into
+        optimizer_path: Path to load optimizer state from (required if optimizer provided)
+    """
+    print(f"Loading weights from {weights_path}")
+    model_state_dict = {"model": ModelState(model)}
+    dcp.load(state_dict=model_state_dict, checkpoint_id=weights_path)
+
+    if optimizer is not None:
+        if optimizer_path is None:
+            raise ValueError(
+                "optimizer_path must be provided when loading optimizer state"
+            )
+        print(f"Loading optimizer from {optimizer_path}")
+        optimizer_state_dict = {"optim": OptimizerState(model, optimizer, scheduler)}
+        dcp.load(state_dict=optimizer_state_dict, checkpoint_id=optimizer_path)

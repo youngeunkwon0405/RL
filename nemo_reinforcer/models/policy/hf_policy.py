@@ -48,7 +48,12 @@ from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
-from nemo_reinforcer.utils.hf_checkpoint import ModelState, OptimizerState
+from nemo_reinforcer.utils.hf_checkpoint import (
+    ModelState,
+    OptimizerState,
+    save_checkpoint,
+    load_checkpoint,
+)
 
 
 @ray.remote
@@ -794,41 +799,27 @@ class HfPolicyWorker:
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
-        save_hf: bool = False,  ## whether to save the model in hf format
+        save_hf: bool = False,
     ):
-        ## gathers the model weights and saves in HF format
-        ## note that HF format has no way to save optimizer state
-        if save_hf:
-            self.model.save_pretrained(weights_path)
-            return
-
-        model_state_dict = {"model": ModelState(self.model)}
-        dcp.save(model_state_dict, checkpoint_id=weights_path)
-
-        if optimizer_path:
-            optimizer_state_dict = {
-                "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
-            }
-            dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
-
-    def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
-        print(f"Loading weights from {weights_path}")
-
-        model_state_dict = {"model": ModelState(self.model)}
-        dcp.load(
-            state_dict=model_state_dict,
-            checkpoint_id=weights_path,
+        """Save a checkpoint of the model."""
+        save_checkpoint(
+            model=self.model,
+            weights_path=weights_path,
+            optimizer=self.optimizer if optimizer_path else None,
+            scheduler=self.scheduler if optimizer_path else None,
+            optimizer_path=optimizer_path,
+            save_hf=save_hf,
         )
 
-        if optimizer_path:
-            print(f"Loading optimizer from {optimizer_path}")
-            optimizer_state_dict = {
-                "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
-            }
-            dcp.load(
-                state_dict=optimizer_state_dict,
-                checkpoint_id=optimizer_path,
-            )
+    def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
+        """Load a checkpoint into the model."""
+        load_checkpoint(
+            model=self.model,
+            weights_path=weights_path,
+            optimizer=self.optimizer if optimizer_path else None,
+            scheduler=self.scheduler if optimizer_path else None,
+            optimizer_path=optimizer_path,
+        )
 
     def shutdown(self):
         """Shutdown the policy."""
