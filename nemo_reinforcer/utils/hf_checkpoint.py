@@ -1,0 +1,129 @@
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Checkpoint management utilities for HF models."""
+
+import os
+import json
+import glob
+from typing import Dict, Any, Optional, List, Tuple, TypedDict
+import shutil
+from pathlib import Path
+import torch
+import numpy as np
+
+from torch.distributed.checkpoint.stateful import Stateful
+from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
+    set_model_state_dict,
+    get_optimizer_state_dict,
+    set_optimizer_state_dict,
+)
+
+
+## modified from pytorch tutorial https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html
+class ModelState(Stateful):
+    """Helper class for tracking model state in distributed checkpointing.
+
+    This class is compliant with the Stateful protocol, allowing DCP to automatically
+    call state_dict/load_state_dict as needed in the dcp.save/load APIs.
+
+    Args:
+        model: The PyTorch model to track.
+    """
+
+    def __init__(self, model):
+        self.model = model
+
+    def state_dict(self):
+        """Get the model's state dictionary.
+
+        Returns:
+            dict: Dictionary containing the model's state dict with CPU offloading enabled.
+        """
+        # this line automatically manages FSDP FQN's, as well as sets the default state dict type to FSDP.SHARDED_STATE_DICT
+        model_state_dict = get_model_state_dict(
+            self.model,
+            options=torch.distributed.checkpoint.state_dict.StateDictOptions(
+                cpu_offload=True
+            ),
+        )
+        return {
+            "model": model_state_dict,
+        }
+
+    def load_state_dict(self, state_dict):
+        """Load the state dictionary into the model.
+
+        Args:
+            state_dict (dict): State dictionary to load.
+        """
+        # sets our state dicts on the model and optimizer, now that we've loaded
+        set_model_state_dict(
+            self.model,
+            state_dict["model"],
+        )
+
+
+class OptimizerState(Stateful):
+    """Helper class for tracking optimizer state in distributed checkpointing.
+
+    This class is compliant with the Stateful protocol, allowing DCP to automatically
+    call state_dict/load_state_dict as needed in the dcp.save/load APIs.
+
+    Args:
+        model: The PyTorch model associated with the optimizer.
+        optimizer: The optimizer to track.
+        scheduler: Optional learning rate scheduler.
+    """
+
+    def __init__(self, model, optimizer, scheduler=None):
+        self.model = model
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+
+    def state_dict(self):
+        """Get the optimizer and scheduler state dictionaries.
+
+        Returns:
+            dict: Dictionary containing the optimizer and scheduler state dicts with CPU offloading enabled.
+        """
+        # this line automatically manages FSDP FQN's, as well as sets the default state dict type to FSDP.SHARDED_STATE_DICT
+        optimizer_state_dict = get_optimizer_state_dict(
+            self.model,
+            self.optimizer,
+            options=torch.distributed.checkpoint.state_dict.StateDictOptions(
+                cpu_offload=True
+            ),
+        )
+        return {
+            "optim": optimizer_state_dict,
+            "sched": self.scheduler.state_dict(),
+        }
+
+    def load_state_dict(self, state_dict):
+        """Load the state dictionaries into the optimizer and scheduler.
+
+        Args:
+            state_dict (dict): State dictionary containing optimizer and scheduler states to load.
+        """
+        # sets our state dicts on the model and optimizer, now that we've loaded
+        set_optimizer_state_dict(
+            self.model,
+            self.optimizer,
+            state_dict["optim"],
+        )
+
+        scheduler_state_dict = state_dict["sched"]
+        self.scheduler.load_state_dict(scheduler_state_dict)

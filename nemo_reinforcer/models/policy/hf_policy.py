@@ -48,7 +48,7 @@ from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
-from nemo_reinforcer.utils.checkpoint import ModelState, OptimizerState
+from nemo_reinforcer.utils.hf_checkpoint import ModelState, OptimizerState
 
 
 @ray.remote
@@ -793,7 +793,7 @@ class HfPolicyWorker:
     def save_checkpoint(
         self,
         weights_path: str,
-        optimizer_path: str,
+        optimizer_path: Optional[str] = None,
         save_hf: bool = False,  ## whether to save the model in hf format
     ):
         ## gathers the model weights and saves in HF format
@@ -805,12 +805,13 @@ class HfPolicyWorker:
         model_state_dict = {"model": ModelState(self.model)}
         dcp.save(model_state_dict, checkpoint_id=weights_path)
 
-        optimizer_state_dict = {
-            "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
-        }
-        dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
+        if optimizer_path:
+            optimizer_state_dict = {
+                "optim": OptimizerState(self.model, self.optimizer, self.scheduler)
+            }
+            dcp.save(optimizer_state_dict, checkpoint_id=optimizer_path)
 
-    def load_checkpoint(self, weights_path: str, optimizer_path: str):
+    def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
         print(f"Loading weights from {weights_path}")
 
         model_state_dict = {"model": ModelState(self.model)}
@@ -848,6 +849,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
     ):
         if weights_path:
             weights_path = os.path.abspath(weights_path)
+        if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
 
         worker_builder = RayWorkerBuilder(
