@@ -23,13 +23,9 @@ import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     FullyShardedDataParallel,
-    FullStateDictConfig,
     MixedPrecision,
-    StateDictType,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-import torch.distributed.checkpoint as dcp
-from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
@@ -49,8 +45,6 @@ from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
 from nemo_reinforcer.utils.hf_checkpoint import (
-    ModelState,
-    OptimizerState,
     save_checkpoint,
     load_checkpoint,
 )
