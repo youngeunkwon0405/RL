@@ -60,6 +60,21 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 
+class RotaryEmbedParallel(SequenceParallel):
+    @staticmethod
+    def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
+        """NOTE: this function will hang if the sequence length is not properly divisible by TP size
+        """
+        new_inputs = list(inputs)
+
+        if not isinstance(inputs[0], DTensor):
+            new_inputs[0] = DTensor.from_local(local_tensor=inputs[0], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
+
+        if not isinstance(inputs[1], DTensor):
+            new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
+
+        return type(inputs)(new_inputs)
+
 true_model_tp_plan = {
     "lm_head": ColwiseParallel(input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False)
 }
@@ -87,6 +102,7 @@ layer_tp_plan = {
     "mlp.gate_proj": ColwiseParallel(),
     "mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
 }
+
 
 @ray.remote
 class HfPolicyWorker:
@@ -438,8 +454,11 @@ class HfPolicyWorker:
                         attention_mask=attention_mask,
                         use_cache=False,
                     )
+                
+                full_logits = outputs.logits.full_tensor().float()
+                
                 log_probs = torch.nn.functional.log_softmax(
-                    outputs.logits.to(torch.float32), dim=-1
+                    full_logits, dim=-1
                 )
 
                 # Extract logprobs for each token in the sequence by gathering the logprob
