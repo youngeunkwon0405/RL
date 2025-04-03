@@ -225,6 +225,8 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer):
         "max_new_tokens": 16,
         "do_sample": False,
         "precision": "float32",
+        "expandable_segments_enabled": False,
+        "fsdp_offload_enabled": False,
         "optimizer": {
             "name": "torch.optim.AdamW",
             "kwargs": {
@@ -481,6 +483,8 @@ def test_vllm_policy_weight_update(cluster, tokenizer, tensor_parallel_size):
         "max_new_tokens": 16,
         "do_sample": False,
         "precision": "float32",
+        "expandable_segments_enabled": False,
+        "fsdp_offload_enabled": False,
         "optimizer": {
             "name": "torch.optim.AdamW",
             "kwargs": {

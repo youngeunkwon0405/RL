@@ -33,6 +33,8 @@ basic_llama_test_config: PolicyConfig = {
     "learning_rate": 5e-6,
     "logprob_batch_size": 1,
     "precision": "float32",
+    "expandable_segments_enabled": False,
+    "fsdp_offload_enabled": False,
     "generation": {
         "backend": "hf",
         "temperature": 1.0,
