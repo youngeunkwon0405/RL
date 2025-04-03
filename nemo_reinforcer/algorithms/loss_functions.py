@@ -102,27 +102,28 @@ class ClippedPGLossFn(LossFunction):
         ).squeeze(-1)
 
         # Calculate KL regularization.
-        if self.reference_policy_kl_penalty != 0:
-            kl = self.reference_policy_kl_penalty * calculate_kl_penalty_joschu2020(
-                logprobs_policy=curr_logprobs,
-                logprobs_reference=reference_policy_logprobs,
-            )
-            kl = masked_mean(kl, mask)
-        else:
-            kl = 0
+# if self.reference_policy_kl_penalty != 0:
+# kl = self.reference_policy_kl_penalty * calculate_kl_penalty_joschu2020(
+# logprobs_policy=curr_logprobs,
+# logprobs_reference=reference_policy_logprobs,
+# )
+# kl = masked_mean(kl, mask)
+# else:
+        kl = 0
 
         # Calculate clipped loss function if ppo ratio is enabled.
-        if not self.disable_ppo_ratio:
-            ratios = (curr_logprobs - prev_logprobs).exp()
-            ratios_clamped = ratios.clamp(
-                1.0 - self.ratio_eps_min, 1.0 + self.ratio_eps_max
-            )
-        else:
-            ratios = curr_logprobs
-            ratios_clamped = curr_logprobs
+# if not self.disable_ppo_ratio:
+# ratios = (curr_logprobs - prev_logprobs).exp()
+# ratios_clamped = ratios.clamp(
+# 1.0 - self.ratio_eps_min, 1.0 + self.ratio_eps_max
+# )
+# else:
+        ratios = curr_logprobs
+        ratios_clamped = curr_logprobs
 
         loss1 = -advantages * ratios
         loss2 = -advantages * ratios_clamped
+        
 
         if mask.sum() > 0:
             actor_loss = masked_mean(torch.max(loss1, loss2), mask)
@@ -130,6 +131,16 @@ class ClippedPGLossFn(LossFunction):
         else:
             # disable this update since there are no valid tokens
             loss = loss1.view(-1)[0] * 0
+
+        print("### LOSSS", loss)
+        print("### ratio max", ratios.max())
+        print("### ratio min", ratios.min())
+        print("#### CURR LOG PROBS MAX", curr_logprobs.max())
+        print("#### CURR LOG PROBS MIN", curr_logprobs.min())
+        print("#### PREV LOG PROBS MAX", prev_logprobs.max())
+        print("#### PREV LOG PROBS MIN", prev_logprobs.min())
+        print("#### MAX DIFF", (curr_logprobs - prev_logprobs).exp().max())
+        print("### LOG PROB ERRROR", mult_prob_error)
 
         with torch.no_grad():
             probs_ratio = masked_mean(ratios.detach(), mask).item()

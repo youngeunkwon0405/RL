@@ -359,6 +359,7 @@ class RayWorkerGroup:
         data: List[SlicedDataDict],
         common_kwargs: Optional[Dict[str, Any]] = None,
         respect_tied_workers: bool = True,
+        run_even_if_tp: bool = False,
     ):
         """Run a method on all workers in parallel with different data.
 
@@ -402,13 +403,24 @@ class RayWorkerGroup:
                 tied_worker_group = self.tied_workers_groups[tied_worker_idx]
                 tied_worker_data = data[tied_worker_idx]
 
-                # Running only on the leader of the tied worker group for vllm case
-                futures.append(
-                    getattr(self._workers[tied_worker_group[0]], method_name).remote(
-                        tied_worker_data, **common_kwargs
+                if run_even_if_tp:
+                    # Running on all workers in the non-vllm case
+                    for worker_idx in tied_worker_group:
+                        futures.append(
+                            getattr(self._workers[worker_idx], method_name).remote(
+                                tied_worker_data, **common_kwargs
+                            )
+                        )
+
+                        used_workers.append(worker_idx)
+                else:
+                    # Running only on the leader of the tied worker group for vllm case
+                    futures.append(
+                        getattr(self._workers[tied_worker_group[0]], method_name).remote(
+                            tied_worker_data, **common_kwargs
+                        )
                     )
-                )
-                used_workers.append(tied_worker_group[0])
+                    used_workers.append(tied_worker_group[0])
                 # for worker_idx in tied_worker_group:
                 #     worker = self._workers[worker_idx]
                 #     method = getattr(worker, method_name)

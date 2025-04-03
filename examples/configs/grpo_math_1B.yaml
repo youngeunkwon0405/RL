@@ -32,7 +32,7 @@ policy:
   max_total_sequence_length: 512
   precision: "bfloat16"
   offload_policy: False
-  tensor_parallel_size: 1
+  tensor_parallel_size: 2
 
   optimizer:
     name: "torch.optim.SGD"
@@ -61,7 +61,7 @@ policy:
     top_p: 1.0
     top_k: null
     vllm_cfg:
-      tensor_parallel_size: 1
+      tensor_parallel_size: 2
       gpu_memory_utilization: 0.2
       max_model_len: ${policy.max_total_sequence_length}
 

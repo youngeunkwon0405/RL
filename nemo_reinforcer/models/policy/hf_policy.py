@@ -67,11 +67,13 @@ class RotaryEmbedParallel(SequenceParallel):
         """
         new_inputs = list(inputs)
 
+        print("### INPUTS", torch.distributed.get_rank(), inputs[1], inputs[1].shape)
+
         if not isinstance(inputs[0], DTensor):
             new_inputs[0] = DTensor.from_local(local_tensor=inputs[0], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
 
         if not isinstance(inputs[1], DTensor):
-            new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
+            new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=(Replicate(),), run_check=False)
 
         return type(inputs)(new_inputs)
 
@@ -80,7 +82,7 @@ true_model_tp_plan = {
 }
 
 model_tp_plan = {
-    # TODO: i think we can also just sequence parllel it post embedding
+    # TODO: i think we can also just sequence parallel it post embedding
     # this also dicatates if we want to use SP on the input layer norm, currently not but maybe a todo?
     "embed_tokens": RowwiseParallel(
         input_layouts=Replicate(),
@@ -164,10 +166,12 @@ class HfPolicyWorker:
             dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
 
             mp_policy = MixedPrecisionPolicy(
-                param_dtype=self.dtype,
+                # param_dtype=self.dtype,
+                param_dtype=torch.float32,
                 reduce_dtype=torch.float32,
                 output_dtype=torch.float32,
             )
+
             # dtensor doesn't work well when TP_size is 1
             if tp_size > 1:
                 parallelize_module(model, tp_mesh, true_model_tp_plan)
@@ -193,7 +197,8 @@ class HfPolicyWorker:
 
         if init_reference_model:
             # TODO: change this from deepcopy to a better method
-            self._held_reference_model_params = deepcopy(self.model.state_dict())
+            # self._held_reference_model_params = deepcopy(self.model.state_dict())
+            self._held_reference_model_params = self.model.state_dict()
 
         # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
@@ -354,12 +359,14 @@ class HfPolicyWorker:
                 for i, length in enumerate(input_lengths):
                     # For right-padded sequence, set 1s at the beginning of the sequence
                     attention_mask[i, :length] = 1
-
+                
+                position_ids = torch.arange(seq_len, device=input_ids.device).view(1, -1)
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
                     print("### TRAIN INPUT ID SIZE", input_ids.shape)
                     outputs = self.model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
+                        position_ids=position_ids,
                         use_cache=False,
                     )
                     # Get logprobs
@@ -425,6 +432,7 @@ class HfPolicyWorker:
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
+        print("### HIT THE LOG PROB FUNCTION", torch.distributed.get_rank(), torch.distributed.get_world_size())
         logprob_batch_size = self.cfg["logprob_batch_size"]
         all_log_probs = []
         self.model.eval()
@@ -452,16 +460,47 @@ class HfPolicyWorker:
                 )
 
                 # Process with the model directly using right-padded inputs
-                with torch.autocast(device_type="cuda", dtype=self.dtype):
-                    print("### INPUT ID SIZE", input_ids.shape)
-                    outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        use_cache=False,
-                    )
-                
+                # with torch.autocast(device_type="cuda", dtype=self.dtype):
+                # print("### INPUT ID SIZE", input_ids.shape)
+                print("### INPUT ID TP", torch.distributed.get_rank(), input_ids.float().sum())
+
+                position_ids = torch.arange(seq_len, device=input_ids.device).view(1, -1)
+                outputs = self.model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    position_ids=position_ids,
+                    use_cache=False,
+                )
+
+                new_model = AutoModelForCausalLM.from_pretrained(
+                    self.cfg["model_name"],
+                    device_map="cpu",  # load weights onto CPU initially
+                    torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
+                ).cuda()
+                # compute it locally
+                local_outputs = new_model(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    use_cache=False,
+                    position_ids=position_ids,
+                ).logits.float()
+            
+                print("### BEFORE GATHER", outputs.logits.to_local().shape)
                 full_logits = outputs.logits.full_tensor().float()
-                
+                print("### AFTER GATHER", full_logits.shape)
+
+                if not torch.allclose(local_outputs, full_logits):
+                    print("### Local outputs", local_outputs)
+                    print("### Full logits", full_logits)
+
+                    print("### LOCAL AND FULL LOGITS ARE NOT CLOSE")
+                    print("### LOCAL MAX", local_outputs.max())
+                    print("### LOCAL MIN", local_outputs.min())
+                    print("### FULL MAX", full_logits.max())
+                    print("### FULL MIN", full_logits.min())
+                    print("### LOCAL AND FULL DIFF", (local_outputs - full_logits).abs().max())
+                    exit()
+
                 log_probs = torch.nn.functional.log_softmax(
                     full_logits, dim=-1
                 )
@@ -566,14 +605,16 @@ class HfPolicyWorker:
         @contextmanager
         def unshard(model):
             try:
-                for module in model.modules():
-                    if isinstance(module, FSDPModule):
-                        module.unshard()
                 yield
+                # for module in model.modules():
+                #     if isinstance(module, FSDPModule):
+                #         module.unshard()
+                # yield
             finally:
-                for module in model.modules():
-                    if isinstance(module, FSDPModule):
-                        module.reshard()
+                ...
+                # for module in model.modules():
+                #     if isinstance(module, FSDPModule):
+                #         module.reshard()
 
         # Right padded tokens are converted to left padded tokens for HF generate (https://huggingface.co/docs/transformers/main/en/llm_tutorial?padding=right+pad#padding-side)
         with unshard(self.model):
@@ -872,9 +913,11 @@ class HfPolicyWorker:
         return model
 
     def move_to_cuda(self, model):
+        return model
         return self.move_to_device(model, "cuda")
     
     def move_to_cpu(self, model):
+        return model
         return self.move_to_device(model, "cpu")
 
     def save_checkpoint(
@@ -985,14 +1028,57 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             optimizer_path=optimizer_path,
             init_reference_model=init_reference_model,
         )
-        self.worker_group = RayWorkerGroup(
-            cluster,
-            worker_builder,
-            name_prefix=name_prefix,
-            workers_per_node=workers_per_node,
-        )
-        self.dp_size = self.worker_group.world_size
         self.cfg = config
+
+        if config["tensor_parallel_size"] > 1:
+            # For tensor parallelism, create node-aware worker groups
+            node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
+            print("### CREATING NODE BUNDLE INDICES", node_bundle_indices)
+
+            self.worker_group = RayWorkerGroup(
+                cluster,
+                worker_builder,
+                name_prefix=name_prefix,
+                bundle_indices_list=node_bundle_indices,
+            )
+        else:
+            self.worker_group = RayWorkerGroup(
+                cluster,
+                worker_builder,
+                name_prefix=name_prefix,
+                workers_per_node=workers_per_node,
+            )
+
+        self.dp_size = self.worker_group.world_size // config["tensor_parallel_size"]
+
+    def _get_tied_worker_bundle_indices(self, cluster):
+        """Calculate bundle indices for tensor parallel workers."""
+        # Get the placement groups (nodes) from the cluster
+        placement_groups = cluster.get_placement_groups()
+
+        tied_worker_groups = []
+
+        # For each node (placement group), create tied worker groups of size tensor_parallel_size
+        for node_idx, pg in enumerate(placement_groups):
+            # How many bundles (GPUs) are on this node
+            bundles_on_node = pg.bundle_count
+            tied_worker_groups_on_node = bundles_on_node // self.cfg["tensor_parallel_size"]
+
+            if tied_worker_groups_on_node > 0:
+                for group_idx in range(tied_worker_groups_on_node):
+                    # Local bundle indices for this tied worker group (consecutive GPUs on this node)
+                    start_idx = group_idx * self.cfg["tensor_parallel_size"]
+                    end_idx = start_idx + self.cfg["tensor_parallel_size"]
+                    local_bundle_indices = list(range(start_idx, end_idx))
+                    tied_worker_groups.append((node_idx, local_bundle_indices))
+
+        if not tied_worker_groups:
+            raise ValueError(
+                f"Cannot create any tensor parallel tied worker groups with size {self.tensor_parallel_size}. "
+                f"Make sure each node has at least {self.tensor_parallel_size} GPUs."
+            )
+
+        return tied_worker_groups
 
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
@@ -1006,7 +1092,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         """
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "get_logprobs", sharded_data
+            "get_logprobs", sharded_data, run_even_if_tp=True
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -1022,7 +1108,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         """
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "get_reference_policy_logprobs", sharded_data
+            "get_reference_policy_logprobs", sharded_data, run_even_if_tp=True
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -1054,6 +1140,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
                 "gbs": gbs,
                 "mbs": mbs,
             },
+            run_even_if_tp=True,
         )
         results = self.worker_group.get_all_worker_results(futures)
 
@@ -1084,7 +1171,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "generate", sharded_data, common_kwargs={"greedy": greedy}
+            "generate", sharded_data, common_kwargs={"greedy": greedy}, run_even_if_tp=True
         )
         result = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
