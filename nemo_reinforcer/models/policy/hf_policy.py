@@ -60,14 +60,91 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 
+@torch.no_grad()
+def _compute_distributed_log_softmax(vocab_parallel_logits, group):
+    """Expects a size B x S x V//TP tensor, computes a stable distributed softmax
+        return shape B x S x V//TP but softmaxed across the V dimension. More stable than just computing softmax
+    """
+    logits_max = torch.amax(vocab_parallel_logits, dim=-1, keepdim=True)
+    torch.distributed.all_reduce(
+        logits_max, op=torch.distributed.ReduceOp.MAX, group=group,
+    )
+
+    # Subtract the maximum value.
+    vocab_parallel_logits = vocab_parallel_logits - logits_max
+
+    sum_exp_logits = vocab_parallel_logits.exp().sum(-1, keepdim=True).float()
+
+    torch.distributed.all_reduce(
+        sum_exp_logits, op=torch.distributed.ReduceOp.SUM, group=group,
+    )
+
+    return vocab_parallel_logits - sum_exp_logits.log_().to(vocab_parallel_logits.dtype)
+
+class DistributedLogprob(torch.autograd.Function):
+    """Function to get logprobs out and differentiate through it
+    """
+
+    @staticmethod
+    def forward(ctx, vocab_parallel_logits, target, vocab_start_index, vocab_end_index, group, inference_only=False):
+        # Create a mask of valid vocab ids (1 means it needs to be masked).
+        target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
+        masked_target = target - vocab_start_index
+        masked_target[target_mask] = 0
+
+        log_softmax_output = _compute_distributed_log_softmax(vocab_parallel_logits, group=group)
+        log_probs = log_softmax_output.clone()
+        softmax_output = log_softmax_output.exp_()
+
+        log_probs = torch.gather(log_probs, -1, masked_target.unsqueeze(-1)).squeeze(-1)
+        log_probs[target_mask] = 0.0
+
+        torch.distributed.all_reduce(
+            log_probs, op=torch.distributed.ReduceOp.SUM, group=group,
+        )
+
+        if not inference_only:
+            # only save for backward when we have inference only=False
+            ctx.save_for_backward(softmax_output, target_mask, masked_target)
+
+        return log_probs
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        softmax, target_mask, masked_target = ctx.saved_tensors
+        partition_vocab_size = softmax.size(-1)
+
+        # 1 if it's the chosen log prob, 0 otherwise
+        is_chosen = (~target_mask).unsqueeze(-1) * torch.nn.functional.one_hot(
+            masked_target, num_classes=partition_vocab_size
+        )
+
+        grad_input = is_chosen.float().sub_(softmax)
+
+        grad_input.mul_(grad_output.unsqueeze(dim=-1))
+
+        # if you add an argument to the forward method, then you must add a corresponding None here
+        return grad_input, None, None, None, None, None, None
+
+def from_parallel_logits_to_logprobs(
+    vocab_parallel_logits, target, vocab_start_index, vocab_end_index, group, inference_only=False
+):
+    """get log probs out of a B x S x V//TP tensor
+        NOTE: this function shifts the target, which means you must give it the unmodified targets
+
+    Returns a B x S-1 tensor
+    """
+    target = target.roll(shifts=-1, dims=-1)
+    probs = DistributedLogprob.apply(vocab_parallel_logits, target, vocab_start_index, vocab_end_index, group, inference_only).contiguous()
+    return probs[:, :-1]
+
+
 class RotaryEmbedParallel(SequenceParallel):
     @staticmethod
     def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
         """NOTE: this function will hang if the sequence length is not properly divisible by TP size
         """
         new_inputs = list(inputs)
-
-        print("### INPUTS", torch.distributed.get_rank(), inputs[1], inputs[1].shape)
 
         if not isinstance(inputs[0], DTensor):
             new_inputs[0] = DTensor.from_local(local_tensor=inputs[0], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
@@ -156,14 +233,18 @@ class HfPolicyWorker:
         # 3) Move to GPU + Composable FSDP
         #    (Initialize device mesh, shard submodules, then shard entire model)
         # ------------------------------------------------
+        tp_size = self.cfg["tensor_parallel_size"]
+        dp_size = world_size // tp_size
+
+        mesh_2d = init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
+
+        dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
+
+        self.dp_mesh = dp_mesh
+        self.tp_mesh = tp_mesh
 
         def do_fsdp(model):
-            tp_size = self.cfg["tensor_parallel_size"]
-            dp_size = world_size // tp_size
             # Create a device mesh with 'world_size' GPUs in a 1D arrangement.
-            mesh_2d = init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
-
-            dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
 
             mp_policy = MixedPrecisionPolicy(
                 # param_dtype=self.dtype,
@@ -353,35 +434,39 @@ class HfPolicyWorker:
 
                 input_lengths = mb.get("input_lengths")
                 batch_size, seq_len = input_ids.shape
-                attention_mask = torch.ones(
+
+                attention_mask = torch.zeros(
                     (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                 )
                 for i, length in enumerate(input_lengths):
                     # For right-padded sequence, set 1s at the beginning of the sequence
                     attention_mask[i, :length] = 1
-                
-                position_ids = torch.arange(seq_len, device=input_ids.device).view(1, -1)
+
+
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
-                    print("### TRAIN INPUT ID SIZE", input_ids.shape)
+                    attention_mask_input = torch.ones(
+                        (batch_size, seq_len), dtype=torch.long, device=input_ids.device
+                    )
+                    position_ids = torch.arange(seq_len, device=input_ids.device).repeat(batch_size, 1)
+
                     outputs = self.model(
                         input_ids=input_ids,
-                        attention_mask=attention_mask,
+                        attention_mask=attention_mask_input,
                         position_ids=position_ids,
                         use_cache=False,
                     )
-                    # Get logprobs
-                    if not hasattr(outputs, "logits"):
-                        logits = self.model.lm_head(outputs.last_hidden_state)
-                    else:
-                        logits = outputs.logits
+
+                # Get logprobs
+                if not hasattr(outputs, "logits"):
+                    logits = self.model.lm_head(outputs.last_hidden_state)
+                else:
+                    logits = outputs.logits
                 
-                logits = logits.full_tensor()
                 loss, loss_metrics = loss_fn(logits, mb)
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-
                 # Backward pass
 
-                # Loss is accumulated across microbatches, so we need to scale by the number of microbatches
+                # Loss is accumulated across microbatches,/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/run.sub so we need to scale by the number of microbatches
                 loss = loss / num_microbatches
                 if not eval_mode:
                     loss.backward()
@@ -432,7 +517,6 @@ class HfPolicyWorker:
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
-        print("### HIT THE LOG PROB FUNCTION", torch.distributed.get_rank(), torch.distributed.get_world_size())
         logprob_batch_size = self.cfg["logprob_batch_size"]
         all_log_probs = []
         self.model.eval()
@@ -448,62 +532,59 @@ class HfPolicyWorker:
                 input_lengths = lp_batch.get("input_lengths")
 
                 # Create attention mask for right-padded data
-                # attention_mask = torch.zeros(
-                #     (batch_size, seq_len), dtype=torch.long, device=input_ids.device
-                # )
-                # for i, length in enumerate(input_lengths):
-                #     # For right-padded sequence, set 1s at the beginning of the sequence
-                #     attention_mask[i, :length] = 1
-
-                attention_mask = torch.ones(
+                attention_mask = torch.zeros(
                     (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                 )
+                for i, length in enumerate(input_lengths):
+                    # For right-padded sequence, set 1s at the beginning of the sequence
+                    attention_mask[i, :length] = 1
 
                 # Process with the model directly using right-padded inputs
-                # with torch.autocast(device_type="cuda", dtype=self.dtype):
-                # print("### INPUT ID SIZE", input_ids.shape)
-                print("### INPUT ID TP", torch.distributed.get_rank(), input_ids.float().sum())
+                position_ids = torch.arange(seq_len, device=input_ids.device).repeat(batch_size, 1)
+                with torch.autocast(device_type="cuda", dtype=self.dtype):
 
-                position_ids = torch.arange(seq_len, device=input_ids.device).view(1, -1)
-                outputs = self.model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    use_cache=False,
-                )
+                    attention_mask_input = torch.ones(
+                        (batch_size, seq_len), dtype=torch.long, device=input_ids.device
+                    )
+                    outputs = self.model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask_input,
+                        position_ids=position_ids,
+                        use_cache=False,
+                    )
 
-                new_model = AutoModelForCausalLM.from_pretrained(
-                    self.cfg["model_name"],
-                    device_map="cpu",  # load weights onto CPU initially
-                    torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
-                ).cuda()
-                # compute it locally
-                local_outputs = new_model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    use_cache=False,
-                    position_ids=position_ids,
-                ).logits.float()
+                # new_model = AutoModelForCausalLM.from_pretrained(
+                #     self.cfg["model_name"],
+                #     device_map="cpu",  # load weights onto CPU initially
+                #     torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
+                # ).cuda()
+                # # compute it locally
+                # local_outputs = new_model(
+                #     input_ids=input_ids,
+                #     attention_mask=attention_mask,
+                #     use_cache=False,
+                #     position_ids=position_ids,
+                # ).logits.float()
             
-                print("### BEFORE GATHER", outputs.logits.to_local().shape)
-                full_logits = outputs.logits.full_tensor().float()
-                print("### AFTER GATHER", full_logits.shape)
+                # print("### BEFORE GATHER", outputs.logits.to_local().shape)
+                # full_logits = outputs.logits.full_tensor().float()
+                # print("### AFTER GATHER", full_logits.shape)
 
-                if not torch.allclose(local_outputs, full_logits):
-                    print("### Local outputs", local_outputs)
-                    print("### Full logits", full_logits)
+                # if not torch.allclose(local_outputs, full_logits):
+                #     print("### Local outputs", local_outputs)
+                #     print("### Full logits", full_logits)
 
-                    print("### LOCAL AND FULL LOGITS ARE NOT CLOSE")
-                    print("### LOCAL MAX", local_outputs.max())
-                    print("### LOCAL MIN", local_outputs.min())
-                    print("### FULL MAX", full_logits.max())
-                    print("### FULL MIN", full_logits.min())
-                    print("### LOCAL AND FULL DIFF", (local_outputs - full_logits).abs().max())
-                    exit()
-
-                log_probs = torch.nn.functional.log_softmax(
-                    full_logits, dim=-1
-                )
+                #     print("### LOCAL AND FULL LOGITS ARE NOT CLOSE")
+                #     print("### LOCAL MAX", local_outputs.max())
+                #     print("### LOCAL MIN", local_outputs.min())
+                #     print("### FULL MAX", full_logits.max())
+                #     print("### FULL MIN", full_logits.min())
+                #     print("### LOCAL AND FULL DIFF", (local_outputs - full_logits).abs().max())
+                    # exit()
+                
+                # log_probs = torch.nn.functional.log_softmax(
+                #     full_logits, dim=-1
+                # )
 
                 # Extract logprobs for each token in the sequence by gathering the logprob
                 # corresponding to the next token at each position
@@ -513,12 +594,17 @@ class HfPolicyWorker:
                 # Output shape: [batch_size, sequence_length] - logprob of each token given previous
                 # We get logprob of token[t+1] from logits[t], prepending 0 to maintain sequence length
                 token_ids = input_ids
-                next_tokens = token_ids[:, 1:]  # Skip first token
-                log_probs = log_probs[:, :-1]  # Remove last position's logits
-                token_logprobs = log_probs.gather(
-                    dim=-1, index=next_tokens.unsqueeze(-1)
-                ).squeeze(-1)
+                # next_tokens = token_ids[:, 1:]  # Skip first token
+                # log_probs = log_probs[:, :-1]  # Remove last position's logits
+                # token_logprobs = log_probs.gather(
+                #     dim=-1, index=next_tokens.unsqueeze(-1)
+                # ).squeeze(-1)
 
+                tp_rank: int = self.tp_mesh.get_local_rank()
+                vocab_interval_per_rank = outputs.logits.shape[-1] // self.tp_mesh.size()
+
+                token_logprobs = from_parallel_logits_to_logprobs(outputs.logits.to_local(), token_ids, vocab_interval_per_rank* tp_rank, (tp_rank + 1)* vocab_interval_per_rank, self.tp_mesh.get_group(), inference_only=False)
+                # print("### DIFF", torch.distributed.get_rank(), torch.mean(torch.abs(token_logprobs - fast_log_probs)))
                 # Prepend 0 logprob for first token to maintain same sequence length as input
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
@@ -1033,7 +1119,6 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         if config["tensor_parallel_size"] > 1:
             # For tensor parallelism, create node-aware worker groups
             node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
-            print("### CREATING NODE BUNDLE INDICES", node_bundle_indices)
 
             self.worker_group = RayWorkerGroup(
                 cluster,

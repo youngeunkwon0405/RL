@@ -20,6 +20,8 @@ from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
 )
+
+from nemo_reinforcer.models.policy.hf_policy import from_parallel_logits_to_logprobs
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 
 
@@ -93,13 +95,20 @@ class ClippedPGLossFn(LossFunction):
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
 
-        next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
-        next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
+        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+            tp_mesh = next_token_logits.device_mesh
+            tp_rank: int = tp_mesh.get_local_rank()
+            vocab_interval_per_rank = next_token_logits.shape[-1] // tp_mesh.size()
 
-        next_tokens = data["input_ids"][:, 1:]  # Skip first token
-        curr_logprobs = next_token_logprobs.gather(
-            dim=-1, index=next_tokens.unsqueeze(-1)
-        ).squeeze(-1)
+            # print("#### SHAPER", next_token_logits.to_local().shape)
+            curr_logprobs = from_parallel_logits_to_logprobs(next_token_logits.to_local(), data["input_ids"], vocab_interval_per_rank* tp_rank, (tp_rank + 1)* vocab_interval_per_rank, tp_mesh.get_group(), inference_only=False)
+        else:
+            next_token_logits = next_token_logits.full_tensor()[:, :-1]  # Remove last position's logits
+            next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
+            next_tokens = data["input_ids"][:, 1:]  # Skip first tokebatch_size, 1)
+            curr_logprobs = next_token_logprobs.gather(
+                dim=-1, index=next_tokens.unsqueeze(-1)
+            ).squeeze(-1)
 
         # Calculate KL regularization.
 # if self.reference_policy_kl_penalty != 0:
@@ -113,16 +122,16 @@ class ClippedPGLossFn(LossFunction):
 
         # Calculate clipped loss function if ppo ratio is enabled.
 # if not self.disable_ppo_ratio:
-# ratios = (curr_logprobs - prev_logprobs).exp()
-# ratios_clamped = ratios.clamp(
-# 1.0 - self.ratio_eps_min, 1.0 + self.ratio_eps_max
-# )
+        ratios = (curr_logprobs - prev_logprobs).exp()
+        ratios_clamped = ratios.clamp(
+            1.0 - self.ratio_eps_min, 1.0 + self.ratio_eps_max
+        )
 # else:
-        ratios = curr_logprobs
-        ratios_clamped = curr_logprobs
-
+        # ratios = curr_logprobs
+        # ratios_clamped = curr_logprobs
         loss1 = -advantages * ratios
         loss2 = -advantages * ratios_clamped
+        # print("### RATIOS", ratios)
         
 
         if mask.sum() > 0:
@@ -131,16 +140,6 @@ class ClippedPGLossFn(LossFunction):
         else:
             # disable this update since there are no valid tokens
             loss = loss1.view(-1)[0] * 0
-
-        print("### LOSSS", loss)
-        print("### ratio max", ratios.max())
-        print("### ratio min", ratios.min())
-        print("#### CURR LOG PROBS MAX", curr_logprobs.max())
-        print("#### CURR LOG PROBS MIN", curr_logprobs.min())
-        print("#### PREV LOG PROBS MAX", prev_logprobs.max())
-        print("#### PREV LOG PROBS MIN", prev_logprobs.min())
-        print("#### MAX DIFF", (curr_logprobs - prev_logprobs).exp().max())
-        print("### LOG PROB ERRROR", mult_prob_error)
 
         with torch.no_grad():
             probs_ratio = masked_mean(ratios.detach(), mask).item()
