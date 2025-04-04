@@ -261,8 +261,8 @@ class HfPolicyWorker:
                 for layer in model.model.layers:
                     parallelize_module(layer, tp_mesh, layer_tp_plan)
 
-                for i in range(len(model.model.layers)):
-                    model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
+                # for i in range(len(model.model.layers)):
+                #     model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
 
             offload_policy = CPUOffloadPolicy(pin_memory=False) if self.cfg["offload_policy"] else torch.distributed.fsdp.OffloadPolicy
             for layer in model.model.layers:
@@ -541,8 +541,9 @@ class HfPolicyWorker:
 
                 # Process with the model directly using right-padded inputs
                 position_ids = torch.arange(seq_len, device=input_ids.device).repeat(batch_size, 1)
-                with torch.autocast(device_type="cuda", dtype=self.dtype):
 
+
+                with torch.autocast(device_type="cuda", dtype=self.dtype):
                     attention_mask_input = torch.ones(
                         (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                     )

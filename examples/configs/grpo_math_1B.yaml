@@ -24,11 +24,11 @@ checkpointing:
   save_period: 10
 
 policy:
-  model_name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+  model_name: "Qwen/Qwen2-1.5B"
   train_global_batch_size: 512
-  train_micro_batch_size: 4
+  train_micro_batch_size: 1
   generation_batch_size: 1
-  logprob_batch_size: 16 
+  logprob_batch_size: 1 
   max_total_sequence_length: 2048
   precision: "bfloat16"
   offload_policy: False

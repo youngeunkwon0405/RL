@@ -179,7 +179,7 @@ class VllmGenerationWorker:
             enable_prefix_caching=True,
             dtype="auto",
             # Use cuda-graph by default for performance, set to True to use eager execution
-            enforce_eager=False,
+            enforce_eager=True,
             max_model_len=self.cfg["vllm_cfg"]["max_model_len"],
             trust_remote_code=True,
             worker_cls=UpdatableVllmInternalWorker,
