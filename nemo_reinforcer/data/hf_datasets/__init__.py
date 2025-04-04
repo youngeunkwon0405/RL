@@ -14,5 +14,6 @@
 
 from nemo_reinforcer.data.hf_datasets.oasst import OasstDataset
 from nemo_reinforcer.data.hf_datasets.squad import SquadDataset
+from nemo_reinforcer.data.hf_datasets.json_dataset import JsonDataset
 
-__all__ = ["OasstDataset", "SquadDataset"]
+__all__ = ["OasstDataset", "SquadDataset", "JsonDataset"]
