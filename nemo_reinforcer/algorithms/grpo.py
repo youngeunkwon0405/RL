@@ -456,7 +456,7 @@ def grpo_train(
         logger.log_metrics(validation_timings, step, prefix="timing/validation")
 
     # Run grpo training (single-turn)
-    for batch in dataloader:
+    for i, batch in enumerate(dataloader):
         print(
             f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
         )
@@ -562,6 +562,7 @@ def grpo_train(
                     }
                 )
                 train_data.to("cpu")
+                torch.save(train_data, "/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/train_data_{}.pt".format(i))
 
             print("▶ Preparing for logprob inference...")
             with timer.time("logprob_inference_prep"):
@@ -569,12 +570,14 @@ def grpo_train(
 
             print("▶ Computing logprobs...")
             with timer.time("policy_and_reference_logprobs"):
+                print("### START LOGPROB")
                 fprop_logprobs = policy.get_logprobs(train_data)["logprobs"]
                 reference_logprobs = policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
                 ]
                 train_data["prev_logprobs"] = fprop_logprobs
                 train_data["reference_policy_logprobs"] = reference_logprobs
+                print("### FINISH LOGPROB")
 
             print("▶ Preparing for training...")
             with timer.time("training_prep"):
@@ -583,7 +586,9 @@ def grpo_train(
 
             print("▶ Training policy...")
             with timer.time("policy_training"):
+                print("### START TRAINING")
                 train_results = policy.train(train_data, loss_fn)
+                print("### FINISH TRAINING")
 
             # Run validation if it's a validation step
             if val_period > 0 and (step + 1) % val_period == 0:

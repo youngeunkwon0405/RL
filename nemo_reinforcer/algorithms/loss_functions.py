@@ -21,7 +21,7 @@ from nemo_reinforcer.algorithms.utils import (
     masked_mean,
 )
 
-from nemo_reinforcer.models.policy.hf_policy import from_parallel_logits_to_logprobs
+from nemo_reinforcer.models.policy.dtensor_policy_worker import from_parallel_logits_to_logprobs
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 
 
@@ -89,19 +89,31 @@ class ClippedPGLossFn(LossFunction):
         prev_logprobs = data["prev_logprobs"][:, 1:]
         generation_logprobs = data["generation_logprobs"][:, 1:]
         reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
-
         mask = token_mask * sample_mask.unsqueeze(-1)
+
+        # saved_batch = torch.load("/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/0_ratios_error.pt", map_location="cuda")
+        # data["input_ids"] = saved_batch["input_ids"]
+        # mask = saved_batch["mask"]
+        # advantages = saved_batch["advantages"]
+        # generation_logprobs = saved_batch["generation_logprobs"]
+        # reference_policy_logprobs = saved_batch["reference_policy_logprobs"]
+        # sample_mask = saved_batch["sample_mask"]
+        # token_mask = saved_batch["token_mask"]
 
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
+
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             tp_mesh = next_token_logits.device_mesh
             tp_rank: int = tp_mesh.get_local_rank()
             vocab_interval_per_rank = next_token_logits.shape[-1] // tp_mesh.size()
 
+            print("### INPUT IDS TRAINING LOG PROB", data["input_ids"].sum(), data["input_ids"].shape)
+
             # print("#### SHAPER", next_token_logits.to_local().shape)
             curr_logprobs = from_parallel_logits_to_logprobs(next_token_logits.to_local(), data["input_ids"], vocab_interval_per_rank* tp_rank, (tp_rank + 1)* vocab_interval_per_rank, tp_mesh.get_group(), inference_only=False)
+            print("#### LOG PROBS and input ids", curr_logprobs.sum(), data["input_ids"].sum(), data["input_ids"].shape)
         else:
             next_token_logits = next_token_logits.full_tensor()[:, :-1]  # Remove last position's logits
             next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
@@ -131,7 +143,24 @@ class ClippedPGLossFn(LossFunction):
         # ratios_clamped = curr_logprobs
         loss1 = -advantages * ratios
         loss2 = -advantages * ratios_clamped
-        # print("### RATIOS", ratios)
+
+        if mask.sum() > 0:
+            print("### RATIOS diff", (ratios[mask.bool()] - 1).abs().max())
+            if (ratios[mask.bool()] - 1).abs().max() > 0.01:
+                print("### RATIOS exceeded", (ratios[mask.bool()] - 1).abs().max())
+                # torch.save(
+                #     {
+                #         "mask": mask,
+                #         "advantages": advantages,
+                #         "input_ids": data["input_ids"],
+                #         "generation_logprobs": generation_logprobs,
+                #         "reference_policy_logprobs": reference_policy_logprobs,
+                #         "sample_mask": sample_mask,
+                #         "token_mask": token_mask,
+                #     },
+                #     "/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/{}_ratios_error.pt".format(torch.distributed.get_rank()),
+                # )
+                exit()
         
 
         if mask.sum() > 0:

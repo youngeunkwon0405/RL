@@ -185,6 +185,7 @@ class VllmGenerationWorker:
             worker_cls=UpdatableVllmInternalWorker,
             enable_sleep_mode=True,
             disable_log_stats=True,
+            seed=42069,
             **vllm_kwargs,
         )
 
