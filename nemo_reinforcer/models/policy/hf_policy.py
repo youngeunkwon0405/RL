@@ -59,6 +59,16 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     SequenceParallel,
 )
+import random
+import numpy as np
+
+
+def set_seed(seed: int):
+    """Sets the seed for python, numpy, and pytorch."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 @torch.no_grad()
 def _compute_distributed_log_softmax(vocab_parallel_logits, group):
@@ -207,6 +217,8 @@ class HfPolicyWorker:
     ):
         self.cfg = config
         # torch distributed init. Envars for rank, world_size, and master_addr and master_port are set from the ray remote call
+        self.store = None
+        set_seed(420)
         torch.distributed.init_process_group(backend="nccl")
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
@@ -235,6 +247,7 @@ class HfPolicyWorker:
         # ------------------------------------------------
         tp_size = self.cfg["tensor_parallel_size"]
         dp_size = world_size // tp_size
+        self.dp_size = dp_size
 
         mesh_2d = init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
 
@@ -318,6 +331,7 @@ class HfPolicyWorker:
 
         else:
             ## default to a passthrough LR schedule
+
             self.scheduler = torch.optim.lr_scheduler.LambdaLR(
                 self.optimizer, lr_lambda=lambda epoch: 1
             )
@@ -407,7 +421,7 @@ class HfPolicyWorker:
             gbs = self.cfg["train_global_batch_size"]
         if mbs is None:
             mbs = self.cfg["train_micro_batch_size"]
-        local_gbs = gbs // torch.distributed.get_world_size()
+        local_gbs = gbs // self.dp_size
         dataset_size = data.get("input_ids").shape[0]
 
         # Ensure model is in training mode
@@ -478,8 +492,10 @@ class HfPolicyWorker:
             #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
                 # Update parameters
-                self.optimizer.step()
-                self.scheduler.step()
+            self.optimizer.step()
+            self.scheduler.step()
+            
+
             losses.append(torch.tensor(mb_losses).sum().item())
 
         # Compute global loss across all ranks
@@ -487,7 +503,7 @@ class HfPolicyWorker:
             local_loss = torch.tensor(losses, device="cuda")
             global_loss = torch.zeros_like(local_loss)
             torch.distributed.all_reduce(local_loss)
-            global_loss = local_loss / torch.distributed.get_world_size()
+            global_loss = local_loss / self.dp_size
 
         # Aggregate metrics across all microbatches
         mb_metrics = defaultdict(list)
