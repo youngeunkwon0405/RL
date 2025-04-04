@@ -945,15 +945,11 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             optimizer_path=optimizer_path,
             init_reference_model=init_reference_model,
         )
-        additional_env_vars = {}
-        if config["expandable_segments_enabled"]:
-            additional_env_vars["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
         self.worker_group = RayWorkerGroup(
             cluster,
             worker_builder,
             name_prefix=name_prefix,
             workers_per_node=workers_per_node,
-            additional_env_vars=additional_env_vars,
         )
         self.dp_size = self.worker_group.world_size
         self.cfg = config

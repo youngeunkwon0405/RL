@@ -25,5 +25,4 @@ class PolicyConfig(TypedDict):
     logprob_batch_size: int
     generation: GenerationConfig
     precision: str
-    expandable_segments_enabled: bool
     fsdp_offload_enabled: bool
