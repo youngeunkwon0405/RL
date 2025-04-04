@@ -241,9 +241,17 @@ def training_setup():
         cluster.shutdown()
         policy.worker_group.shutdown()
 
+def get_max_gpu_utilization(policy):
+    max_memory_allocated = 0
+    max_memory_reserved = 0
+    gpu_infos = ray.get([w.get_gpu_info.remote() for w in policy.worker_group.workers])
+    for info in gpu_infos:
+        max_memory_allocated = max(max_memory_allocated, info["memory_allocated_mb"])
+        max_memory_reserved = max(max_memory_reserved, info["memory_reserved_mb"])
+    return max_memory_allocated, max_memory_reserved
 
 @pytest.mark.timeout(180)
-def test_hf_policy_training(training_setup):
+def test_hf_policy_training(training_setup, tracker):
     def verify_loss_tensor(loss_tensor):
         assert not torch.isnan(loss_tensor).any(), "Loss should not be NaN"
         assert not torch.isinf(loss_tensor).any(), "Loss should not be Inf"
@@ -274,10 +282,26 @@ def test_hf_policy_training(training_setup):
         print(f"Training loss: {results['loss']}")
 
     policy.finish_training()
-
-    # Verify loss changed between iterations (model parameters were updated)
     assert losses[0] > losses[-1], "Loss should decrease over training iterations"
 
+    after_training_mem_allocated, after_training_mem_reserved = get_max_gpu_utilization(policy)
+    print(f"Max GPU Utilization after training: {after_training_mem_allocated:,.1f} MB allocated, " \
+          f"{after_training_mem_reserved:,.1f} MB reserved")
+    tracker.track("after_training_mem_allocated", after_training_mem_allocated)
+    tracker.track("after_training_mem_reserved", after_training_mem_reserved)
+
+    policy.offload_after_refit()
+    after_offload_mem_allocated, after_offload_mem_reserved = get_max_gpu_utilization(policy)
+    print(f"Max GPU Utilization after offload: {after_offload_mem_allocated:,.1f} MB allocated, " \
+          f"{after_offload_mem_reserved:,.1f} MB reserved")
+    tracker.track("after_offload_mem_allocated", after_offload_mem_allocated)
+    tracker.track("after_offload_mem_reserved", after_offload_mem_reserved)
+
+    # Verify loss changed between iterations (model parameters were updated)
+
+    # Compare memory after offload to memory after training
+    assert after_training_mem_allocated > 10_000, "Memory after training should be more than 10GB"
+    assert after_offload_mem_allocated < 1_200, "Memory after offload should be less than 1.2GB"
 
 @pytest.fixture
 def generation_setup(request):
