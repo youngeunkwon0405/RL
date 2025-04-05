@@ -815,6 +815,8 @@ class HfPolicyWorker:
                 param._local_shard = param.data
             if param.grad is not None:
                 param.grad = param.grad.to("cpu", non_blocking=True)
+        for buffer in model.buffers():
+            buffer.data = buffer.data.to("cpu", non_blocking=True)
 
         if hasattr(model, "_fsdp_wrapped_module"):
             self.manual_offload_to_cpu(model._fsdp_wrapped_module)
@@ -831,6 +833,8 @@ class HfPolicyWorker:
                 param._local_shard = param.data
             if param.grad is not None:
                 param.grad = param.grad.to("cuda", non_blocking=True)
+        for buffer in model.buffers():
+            buffer.data = buffer.data.to("cuda", non_blocking=True)
 
         if hasattr(model, "_fsdp_wrapped_module"):
             self.manual_load_to_gpu(model._fsdp_wrapped_module)
