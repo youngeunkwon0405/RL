@@ -227,6 +227,7 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer):
         "do_sample": False,
         "precision": "float32",
         "fsdp_offload_enabled": False,
+        "activation_checkpointing_enabled": False,
         "optimizer": {
             "name": "torch.optim.AdamW",
             "kwargs": {
@@ -516,6 +517,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
         "do_sample": False,
         "precision": "float32",
         "fsdp_offload_enabled": False,
+        "activation_checkpointing_enabled": False,
         "optimizer": {"name": "torch.optim.AdamW", "kwargs": {"lr": 1e-6}},
     }
 

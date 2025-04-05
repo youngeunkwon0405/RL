@@ -34,6 +34,7 @@ basic_llama_test_config: PolicyConfig = {
     "logprob_batch_size": 1,
     "precision": "float32",
     "fsdp_offload_enabled": False,
+    "activation_checkpointing_enabled": False,
     "generation": {
         "backend": "hf",
         "temperature": 1.0,

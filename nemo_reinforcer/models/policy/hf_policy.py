@@ -133,7 +133,9 @@ class HfPolicyWorker:
 
         self.model.to("cuda")
         if self.cfg["activation_checkpointing_enabled"]:
-            self.model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={'use_reentrant': False})
+            self.model.gradient_checkpointing_enable(
+                gradient_checkpointing_kwargs={"use_reentrant": False}
+            )
         self.model = do_fsdp(self.model)
         self.model = self.manual_offload_to_cpu(self.model)
         if self.reference_model is not None:
