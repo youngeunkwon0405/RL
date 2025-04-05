@@ -15,6 +15,7 @@ policy:
   precision: "bfloat16"
   expandable_segments_enabled: false
   fsdp_offload_enabled: false
+  activation_checkpointing_enabled: false
 
   optimizer:
     name: "torch.optim.AdamW"
