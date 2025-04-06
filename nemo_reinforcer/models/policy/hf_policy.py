@@ -14,7 +14,7 @@
 import gc
 import warnings
 import os
-from copy import  deepcopy
+from copy import deepcopy
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Union
@@ -27,7 +27,7 @@ from torch.distributed.fsdp import (
     FullStateDictConfig,
     MixedPrecision,
     StateDictType,
-    FSDPModule
+    FSDPModule,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -52,7 +52,9 @@ from nemo_reinforcer.distributed.virtual_cluster import (
 from torch.distributed.fsdp import fully_shard, CPUOffloadPolicy, MixedPrecisionPolicy
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard, Replicate
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     RowwiseParallel,
@@ -62,6 +64,7 @@ from torch.distributed.tensor.parallel import (
 import random
 import numpy as np
 from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
+
 
 class HfPolicy(PolicyInterface, GenerationInterface):
     def __init__(
@@ -118,7 +121,9 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         for node_idx, pg in enumerate(placement_groups):
             # How many bundles (GPUs) are on this node
             bundles_on_node = pg.bundle_count
-            tied_worker_groups_on_node = bundles_on_node // self.cfg["tensor_parallel_size"]
+            tied_worker_groups_on_node = (
+                bundles_on_node // self.cfg["tensor_parallel_size"]
+            )
 
             if tied_worker_groups_on_node > 0:
                 for group_idx in range(tied_worker_groups_on_node):
@@ -227,7 +232,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "generate", sharded_data, common_kwargs={"greedy": greedy}, run_even_if_tp=True
+            "generate",
+            sharded_data,
+            common_kwargs={"greedy": greedy},
+            run_even_if_tp=True,
         )
         result = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)

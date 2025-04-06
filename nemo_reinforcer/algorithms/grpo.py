@@ -454,7 +454,7 @@ def grpo_train(
         policy_generation.finish_generation()
         logger.log_metrics(val_metrics, step, prefix="validation")
         logger.log_metrics(validation_timings, step, prefix="timing/validation")
-    
+
     # Run grpo training (single-turn)
     for i, batch in enumerate(dataloader):
         print(
@@ -482,7 +482,7 @@ def grpo_train(
                         "input_lengths": input_lengths,
                     }
                 )
-            
+
             # Generate responses - this updates the LLMMessageLogType in repeated_batch
             print(f"▶ Generating responses for batch of size {len(input_ids)}...")
             with timer.time("prepare_for_generation"):

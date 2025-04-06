@@ -21,7 +21,9 @@ from nemo_reinforcer.algorithms.utils import (
     masked_mean,
 )
 
-from nemo_reinforcer.models.policy.dtensor_policy_worker import from_parallel_logits_to_logprobs
+from nemo_reinforcer.models.policy.dtensor_policy_worker import (
+    from_parallel_logits_to_logprobs,
+)
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 
 
@@ -100,10 +102,21 @@ class ClippedPGLossFn(LossFunction):
             tp_rank: int = tp_mesh.get_local_rank()
             vocab_interval_per_rank = next_token_logits.shape[-1] // tp_mesh.size()
 
-            curr_logprobs = from_parallel_logits_to_logprobs(next_token_logits.to_local(), data["input_ids"], vocab_interval_per_rank* tp_rank, (tp_rank + 1)* vocab_interval_per_rank, tp_mesh.get_group(), inference_only=False)
+            curr_logprobs = from_parallel_logits_to_logprobs(
+                next_token_logits.to_local(),
+                data["input_ids"],
+                vocab_interval_per_rank * tp_rank,
+                (tp_rank + 1) * vocab_interval_per_rank,
+                tp_mesh.get_group(),
+                inference_only=False,
+            )
         else:
-            next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
-            next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
+            next_token_logits = next_token_logits[
+                :, :-1
+            ]  # Remove last position's logits
+            next_token_logprobs = torch.nn.functional.log_softmax(
+                next_token_logits, dim=-1
+            )
             next_tokens = data["input_ids"][:, 1:]  # Skip first tokebatch_size, 1)
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
@@ -149,7 +162,6 @@ class ClippedPGLossFn(LossFunction):
                 #     "/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/{}_ratios_error.pt".format(torch.distributed.get_rank()),
                 # )
                 exit()
-        
 
         if mask.sum() > 0:
             actor_loss = masked_mean(torch.max(loss1, loss2), mask)

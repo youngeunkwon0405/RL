@@ -416,9 +416,9 @@ class RayWorkerGroup:
                 else:
                     # Running only on the leader of the tied worker group for vllm case
                     futures.append(
-                        getattr(self._workers[tied_worker_group[0]], method_name).remote(
-                            tied_worker_data, **common_kwargs
-                        )
+                        getattr(
+                            self._workers[tied_worker_group[0]], method_name
+                        ).remote(tied_worker_data, **common_kwargs)
                     )
                     used_workers.append(tied_worker_group[0])
                 # for worker_idx in tied_worker_group:
@@ -443,7 +443,12 @@ class RayWorkerGroup:
         )
 
     def run_all_workers_single_data(
-        self, method_name: str, *args, respect_tied_workers: bool = True, run_even_if_tp: bool = False, **kwargs
+        self,
+        method_name: str,
+        *args,
+        respect_tied_workers: bool = True,
+        run_even_if_tp: bool = False,
+        **kwargs,
     ):
         """Run a method on all workers in parallel with the same data.
 
@@ -459,7 +464,6 @@ class RayWorkerGroup:
         futures = []
         if respect_tied_workers:
             for tied_worker_group in self.tied_workers_groups:
-
                 if run_even_if_tp:
                     # Running on all workers in the non-vllm case
                     for worker_idx in tied_worker_group:
@@ -470,9 +474,9 @@ class RayWorkerGroup:
                         )
                 else:
                     futures.append(
-                        getattr(self._workers[tied_worker_group[0]], method_name).remote(
-                            *args, **kwargs
-                        )
+                        getattr(
+                            self._workers[tied_worker_group[0]], method_name
+                        ).remote(*args, **kwargs)
                     )
         else:
             for worker in self.workers:

@@ -1,7 +1,7 @@
 import gc
 
 import os
-from copy import  deepcopy
+from copy import deepcopy
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Union
@@ -14,7 +14,7 @@ from torch.distributed.fsdp import (
     FullStateDictConfig,
     MixedPrecision,
     StateDictType,
-    FSDPModule
+    FSDPModule,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -41,7 +41,9 @@ from nemo_reinforcer.distributed.virtual_cluster import (
 from torch.distributed.fsdp import fully_shard, CPUOffloadPolicy, MixedPrecisionPolicy
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard, Replicate
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     RowwiseParallel,
@@ -51,23 +53,36 @@ from torch.distributed.tensor.parallel import (
 import random
 import numpy as np
 
+
 class RotaryEmbedParallel(SequenceParallel):
     @staticmethod
     def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
-        """NOTE: this function will hang if the sequence length is not properly divisible by TP size
-        """
+        """NOTE: this function will hang if the sequence length is not properly divisible by TP size"""
         new_inputs = list(inputs)
 
         if not isinstance(inputs[0], DTensor):
-            new_inputs[0] = DTensor.from_local(local_tensor=inputs[0], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
+            new_inputs[0] = DTensor.from_local(
+                local_tensor=inputs[0],
+                device_mesh=device_mesh,
+                placements=sequence_sharding,
+                run_check=False,
+            )
 
         if not isinstance(inputs[1], DTensor):
-            new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=(Replicate(),), run_check=False)
+            new_inputs[1] = DTensor.from_local(
+                local_tensor=inputs[1],
+                device_mesh=device_mesh,
+                placements=(Replicate(),),
+                run_check=False,
+            )
 
         return type(inputs)(new_inputs)
 
+
 true_model_tp_plan = {
-    "lm_head": ColwiseParallel(input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False)
+    "lm_head": ColwiseParallel(
+        input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
+    )
 }
 
 model_tp_plan = {
@@ -78,11 +93,11 @@ model_tp_plan = {
         output_layouts=Shard(1),
     ),
     "rotary_emb": RotaryEmbedParallel(),
-    "norm": SequenceParallel()
+    "norm": SequenceParallel(),
 }
 
 layer_tp_plan = {
-    #TODO: a lot of gathers??
+    # TODO: a lot of gathers??
     "input_layernorm": SequenceParallel(),
     "self_attn.q_proj": ColwiseParallel(use_local_output=False),
     "self_attn.k_proj": ColwiseParallel(use_local_output=False),
@@ -94,7 +109,16 @@ layer_tp_plan = {
     "mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
 }
 
-def parallelize_qwen(model, dp_mesh, tp_mesh, mp_policy, offload_policy, sequence_parallel=False, activation_checkpointing=False):
+
+def parallelize_qwen(
+    model,
+    dp_mesh,
+    tp_mesh,
+    mp_policy,
+    offload_policy,
+    sequence_parallel=False,
+    activation_checkpointing=False,
+):
     parallelize_module(model, tp_mesh, true_model_tp_plan)
     parallelize_module(model.model, tp_mesh, model_tp_plan)
 
@@ -106,29 +130,55 @@ def parallelize_qwen(model, dp_mesh, tp_mesh, mp_policy, offload_policy, sequenc
             model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
 
     for layer in model.model.layers:
-        fully_shard(layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
-    
+        fully_shard(
+            layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+        )
+
     fully_shard(model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
 
     return model
 
-def parallelize_model(model, dp_mesh, tp_mesh, param_dtype, sequence_parallel=False, activation_checkpointing=False, cpu_offload=False):
+
+def parallelize_model(
+    model,
+    dp_mesh,
+    tp_mesh,
+    param_dtype,
+    sequence_parallel=False,
+    activation_checkpointing=False,
+    cpu_offload=False,
+):
     mp_policy = MixedPrecisionPolicy(
         param_dtype=param_dtype,
         reduce_dtype=torch.float32,
         output_dtype=torch.float32,
     )
-    offload_policy = CPUOffloadPolicy(pin_memory=False) if cpu_offload else torch.distributed.fsdp.OffloadPolicy
-    return parallelize_qwen(model, dp_mesh, tp_mesh, mp_policy, offload_policy, sequence_parallel, activation_checkpointing)
+    offload_policy = (
+        CPUOffloadPolicy(pin_memory=False)
+        if cpu_offload
+        else torch.distributed.fsdp.OffloadPolicy
+    )
+    return parallelize_qwen(
+        model,
+        dp_mesh,
+        tp_mesh,
+        mp_policy,
+        offload_policy,
+        sequence_parallel,
+        activation_checkpointing,
+    )
+
 
 @torch.no_grad()
 def _compute_distributed_log_softmax(vocab_parallel_logits, group):
     """Expects a size B x S x V//TP tensor, computes a stable distributed softmax
-        return shape B x S x V//TP but softmaxed across the V dimension. More stable than just computing softmax
+    return shape B x S x V//TP but softmaxed across the V dimension. More stable than just computing softmax
     """
     logits_max = torch.amax(vocab_parallel_logits, dim=-1, keepdim=True)
     torch.distributed.all_reduce(
-        logits_max, op=torch.distributed.ReduceOp.MAX, group=group,
+        logits_max,
+        op=torch.distributed.ReduceOp.MAX,
+        group=group,
     )
 
     # Subtract the maximum value.
@@ -137,23 +187,35 @@ def _compute_distributed_log_softmax(vocab_parallel_logits, group):
     sum_exp_logits = vocab_parallel_logits.exp().sum(-1, keepdim=True).float()
 
     torch.distributed.all_reduce(
-        sum_exp_logits, op=torch.distributed.ReduceOp.SUM, group=group,
+        sum_exp_logits,
+        op=torch.distributed.ReduceOp.SUM,
+        group=group,
     )
 
     return vocab_parallel_logits - sum_exp_logits.log_().to(vocab_parallel_logits.dtype)
 
+
 class DistributedLogprob(torch.autograd.Function):
-    """Function to get logprobs out and differentiate through it
-    """
+    """Function to get logprobs out and differentiate through it"""
 
     @staticmethod
-    def forward(ctx, vocab_parallel_logits, target, vocab_start_index, vocab_end_index, group, inference_only=False):
+    def forward(
+        ctx,
+        vocab_parallel_logits,
+        target,
+        vocab_start_index,
+        vocab_end_index,
+        group,
+        inference_only=False,
+    ):
         # Create a mask of valid vocab ids (1 means it needs to be masked).
         target_mask = (target < vocab_start_index) | (target >= vocab_end_index)
         masked_target = target - vocab_start_index
         masked_target[target_mask] = 0
 
-        log_softmax_output = _compute_distributed_log_softmax(vocab_parallel_logits, group=group)
+        log_softmax_output = _compute_distributed_log_softmax(
+            vocab_parallel_logits, group=group
+        )
         log_probs = log_softmax_output.clone()
         softmax_output = log_softmax_output.exp_()
 
@@ -161,7 +223,9 @@ class DistributedLogprob(torch.autograd.Function):
         log_probs[target_mask] = 0.0
 
         torch.distributed.all_reduce(
-            log_probs, op=torch.distributed.ReduceOp.SUM, group=group,
+            log_probs,
+            op=torch.distributed.ReduceOp.SUM,
+            group=group,
         )
 
         if not inference_only:
@@ -187,17 +251,31 @@ class DistributedLogprob(torch.autograd.Function):
         # if you add an argument to the forward method, then you must add a corresponding None here
         return grad_input, None, None, None, None, None, None
 
+
 def from_parallel_logits_to_logprobs(
-    vocab_parallel_logits, target, vocab_start_index, vocab_end_index, group, inference_only=False
+    vocab_parallel_logits,
+    target,
+    vocab_start_index,
+    vocab_end_index,
+    group,
+    inference_only=False,
 ):
-    """get log probs out of a B x S x V//TP tensor
+    """Get log probs out of a B x S x V//TP tensor
         NOTE: this function shifts the target, which means you must give it the unmodified targets
 
     Returns a B x S-1 tensor
     """
     target = target.roll(shifts=-1, dims=-1)
-    probs = DistributedLogprob.apply(vocab_parallel_logits, target, vocab_start_index, vocab_end_index, group, inference_only).contiguous()
+    probs = DistributedLogprob.apply(
+        vocab_parallel_logits,
+        target,
+        vocab_start_index,
+        vocab_end_index,
+        group,
+        inference_only,
+    ).contiguous()
     return probs[:, :-1]
+
 
 @ray.remote
 class DTensorPolicyWorker:
@@ -253,9 +331,13 @@ class DTensorPolicyWorker:
         tp_size = self.cfg["tensor_parallel_size"]
         assert tp_size > 1, "TP size must be greater than 1 to use DTensor"
         dp_size = world_size // tp_size
-        assert world_size % tp_size == 0, "World size must be divisible by TP size to use DTensor"
+        assert world_size % tp_size == 0, (
+            "World size must be divisible by TP size to use DTensor"
+        )
 
-        mesh_2d = init_device_mesh("cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp"))
+        mesh_2d = init_device_mesh(
+            "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
+        )
         dp_mesh, tp_mesh = mesh_2d["dp"], mesh_2d["tp"]
 
         self.dp_size = dp_size
@@ -266,7 +348,15 @@ class DTensorPolicyWorker:
         print("### BEFORE MOVE TO CUDA")
         self.model = self.move_to_cuda(self.model)
         print("### AFTER MOVE TO CUDA")
-        self.model = parallelize_model(self.model, self.dp_mesh, self.tp_mesh, param_dtype=self.dtype, sequence_parallel=True, cpu_offload=False, activation_checkpointing=False)
+        self.model = parallelize_model(
+            self.model,
+            self.dp_mesh,
+            self.tp_mesh,
+            param_dtype=self.dtype,
+            sequence_parallel=True,
+            cpu_offload=False,
+            activation_checkpointing=False,
+        )
         self.model = self.move_to_cpu(self.model)
 
         if init_reference_model:
@@ -321,7 +411,7 @@ class DTensorPolicyWorker:
             print(
                 "No weights path provided. Starting from scratch (default policy init)"
             )
-    
+
     def is_alive(self):
         return True
 
@@ -435,7 +525,6 @@ class DTensorPolicyWorker:
                     # For right-padded sequence, set 1s at the beginning of the sequence
                     attention_mask[i, :length] = 1
 
-
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
                     # input_ids = torch.load("/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/0_ratios_error.pt", map_location="cuda")["input_ids"]
                     batch_size, seq_len = input_ids.shape
@@ -443,7 +532,9 @@ class DTensorPolicyWorker:
                     attention_mask_input = torch.ones(
                         (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                     )
-                    position_ids = torch.arange(seq_len, device=input_ids.device).repeat(batch_size, 1)
+                    position_ids = torch.arange(
+                        seq_len, device=input_ids.device
+                    ).repeat(batch_size, 1)
 
                     outputs = self.model(
                         input_ids=input_ids,
@@ -457,7 +548,7 @@ class DTensorPolicyWorker:
                     logits = self.model.lm_head(outputs.last_hidden_state)
                 else:
                     logits = outputs.logits
-                
+
                 loss, loss_metrics = loss_fn(logits, mb)
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                 # Backward pass
@@ -476,7 +567,6 @@ class DTensorPolicyWorker:
                 # Update parameters
                 self.optimizer.step()
                 self.scheduler.step()
-            
 
             losses.append(torch.tensor(mb_losses).sum().item())
 
@@ -539,7 +629,9 @@ class DTensorPolicyWorker:
                     attention_mask[i, :length] = 1
 
                 # Process with the model directly using right-padded inputs
-                position_ids = torch.arange(seq_len, device=input_ids.device).repeat(batch_size, 1)
+                position_ids = torch.arange(seq_len, device=input_ids.device).repeat(
+                    batch_size, 1
+                )
 
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
                     attention_mask_input = torch.ones(
@@ -556,9 +648,18 @@ class DTensorPolicyWorker:
 
                 token_ids = input_ids
                 tp_rank: int = self.tp_mesh.get_local_rank()
-                vocab_interval_per_rank = outputs.logits.shape[-1] // self.tp_mesh.size()
+                vocab_interval_per_rank = (
+                    outputs.logits.shape[-1] // self.tp_mesh.size()
+                )
 
-                token_logprobs = from_parallel_logits_to_logprobs(outputs.logits.to_local(), token_ids, vocab_interval_per_rank* tp_rank, (tp_rank + 1)* vocab_interval_per_rank, self.tp_mesh.get_group(), inference_only=False)
+                token_logprobs = from_parallel_logits_to_logprobs(
+                    outputs.logits.to_local(),
+                    token_ids,
+                    vocab_interval_per_rank * tp_rank,
+                    (tp_rank + 1) * vocab_interval_per_rank,
+                    self.tp_mesh.get_group(),
+                    inference_only=False,
+                )
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
@@ -635,7 +736,9 @@ class DTensorPolicyWorker:
                 param = param.full_tensor()
 
             # Convert parameters to the configured dtype
-            dtype_params[name] = param.to(device="cuda", dtype=self.dtype, non_blocking=True)
+            dtype_params[name] = param.to(
+                device="cuda", dtype=self.dtype, non_blocking=True
+            )
 
         # Replace the original params with the converted ones
         params = dtype_params
@@ -708,16 +811,18 @@ class DTensorPolicyWorker:
         print(
             f"GPU Memory after refit complete: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
-    
+
     def move_to_device(self, model, device):
         for v in self.model.state_dict().values():
             if not isinstance(v, (torch.Tensor, DTensor)):
                 continue
             if isinstance(v, DTensor):
-                v._local_tensor.data = v._local_tensor.data.to(device, non_blocking=True)
+                v._local_tensor.data = v._local_tensor.data.to(
+                    device, non_blocking=True
+                )
             else:
                 v.data = v.data.to(device, non_blocking=True)
-        
+
         torch.cuda.synchronize()
         return model
 
@@ -738,14 +843,14 @@ class DTensorPolicyWorker:
             f"GPU Memory after moving to cuda: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
         return model
-    
+
     def move_to_cpu(self, model):
         allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
         reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
         print(
             f"GPU Memory before moving to cpu: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
-        model =  self.move_to_device(model, "cpu")
+        model = self.move_to_device(model, "cpu")
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -763,7 +868,9 @@ class DTensorPolicyWorker:
         optimizer_path: Optional[str] = None,
         offload_to_cpu: bool = True,
     ):
-        model_state_dict, optimizer_state_dict = get_state_dict(self.model, self.optimizer)
+        model_state_dict, optimizer_state_dict = get_state_dict(
+            self.model, self.optimizer
+        )
         scheduler_state_dict = self.scheduler.state_dict()
 
         optim_and_scheduler_state_dict = {
@@ -775,29 +882,39 @@ class DTensorPolicyWorker:
             # check if weights_path dir exists
             weights_dir = os.path.dirname(weights_path)
             if not os.path.exists(weights_dir):
-                print(
-                    f"Creating weights directory {weights_dir} DOESN'T EXIST SOMEHOW"
-                )
+                print(f"Creating weights directory {weights_dir} DOESN'T EXIST SOMEHOW")
                 os.makedirs(weights_dir)
-        
+
         torch.distributed.barrier()
         torch.distributed.checkpoint.save(model_state_dict, checkpoint_id=weights_path)
 
         if optimizer_path is not None:
-            torch.distributed.checkpoint.save(optim_and_scheduler_state_dict, checkpoint_id=optimizer_path)
+            torch.distributed.checkpoint.save(
+                optim_and_scheduler_state_dict, checkpoint_id=optimizer_path
+            )
 
     def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
         print(f"Loading Policy from {weights_path} and optimizer from {optimizer_path}")
         optimizer_state_dict = None
 
-        model_state_dict, optimizer_state_dict = get_state_dict(self.model, self.optimizer)
+        model_state_dict, optimizer_state_dict = get_state_dict(
+            self.model, self.optimizer
+        )
         scheduler_state_dict = self.scheduler.state_dict()
 
         torch.distributed.checkpoint.load(model_state_dict, checkpoint_id=weights_path)
 
         if optimizer_path is not None:
-            torch.distributed.checkpoint.load({"optimizer": optimizer_state_dict, "scheduler": scheduler_state_dict}, checkpoint_id=optimizer_path)
-            set_state_dict(self.model, self.optimizer, model_state_dict=model_state_dict, optim_state_dict=optimizer_state_dict)
+            torch.distributed.checkpoint.load(
+                {"optimizer": optimizer_state_dict, "scheduler": scheduler_state_dict},
+                checkpoint_id=optimizer_path,
+            )
+            set_state_dict(
+                self.model,
+                self.optimizer,
+                model_state_dict=model_state_dict,
+                optim_state_dict=optimizer_state_dict,
+            )
 
             if scheduler_state_dict is not None:
                 self.scheduler.load_state_dict(scheduler_state_dict)
