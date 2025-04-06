@@ -548,6 +548,7 @@ def grpo_train(
                 flat_messages, input_lengths = batched_message_log_to_flat_message(
                     repeated_batch["message_log"],
                     pad_value_dict={"token_ids": tokenizer.eos_token_id},
+                    make_disible_by=master_config["policy"]["make_divisible_by"],
                 )
 
                 # Create training data from flattened messages

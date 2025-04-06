@@ -15,7 +15,7 @@ from typing import Dict, List
 
 import torch
 from datasets import Dataset
-
+from typing import Optional
 from nemo_reinforcer.data.interfaces import (
     LLMMessageLogType,
     FlatMessagesType,
@@ -185,6 +185,7 @@ def _validate_tensor_consistency(tensors: List[torch.Tensor]) -> None:
 def batched_message_log_to_flat_message(
     message_log_batch: List[LLMMessageLogType],
     pad_value_dict: Dict[str, int] = None,
+    make_disible_by: int = 1,
 ) -> tuple[BatchedDataDict[FlatMessagesType], torch.Tensor]:
     """Process and pad a batch of message logs for model input.
 
@@ -256,9 +257,9 @@ def batched_message_log_to_flat_message(
             if isinstance(value, torch.Tensor):
                 tensor_keys.append(key)
                 max_len = max(max_len, value.size(0))
-
-    if max_len % 256 != 0:
-        max_len = ((max_len // 256) + 1) * 256
+    
+    if max_len % make_disible_by != 0:
+        max_len = ((max_len // make_disible_by) + 1) * make_disible_by
 
     # Handle non-tensor case
     if not tensor_keys:
