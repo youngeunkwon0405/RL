@@ -19,6 +19,8 @@ from torch.distributed.fsdp import (
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
+
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
@@ -264,13 +266,12 @@ class DTensorPolicyWorker:
         print("### BEFORE MOVE TO CUDA")
         self.model = self.move_to_cuda(self.model)
         print("### AFTER MOVE TO CUDA")
-        self.model = parallelize_model(self.model, self.dp_mesh, self.tp_mesh, param_dtype=self.dtype ,sequence_parallel=True, cpu_offload=False, activation_checkpointing=False)
+        self.model = parallelize_model(self.model, self.dp_mesh, self.tp_mesh, param_dtype=self.dtype, sequence_parallel=True, cpu_offload=False, activation_checkpointing=False)
         self.model = self.move_to_cpu(self.model)
 
         if init_reference_model:
-            # TODO: change this from deepcopy to a better method
-            # self._held_reference_model_params = deepcopy(self.model.state_dict())
-            self._held_reference_model_params = self.model.state_dict()
+            # self._held_reference_model_params = self.model.state_dict()
+            self._held_reference_model_params = None
 
         # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
@@ -320,7 +321,7 @@ class DTensorPolicyWorker:
             print(
                 "No weights path provided. Starting from scratch (default policy init)"
             )
-
+    
     def is_alive(self):
         return True
 
@@ -461,7 +462,7 @@ class DTensorPolicyWorker:
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                 # Backward pass
 
-                # Loss is accumulated across microbatches,/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/run.sub so we need to scale by the number of microbatches
+                # Loss is accumulated across microbatches so we need to scale by the number of microbatches
                 loss = loss / num_microbatches
                 if not eval_mode:
                     loss.backward()
@@ -523,8 +524,7 @@ class DTensorPolicyWorker:
             data.to("cuda")
             for lp_batch in data.make_microbatch_iterator(logprob_batch_size):
                 input_ids = lp_batch.get("input_ids")
-                # input_ids = torch.load("/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/0_ratios_error.pt", map_location="cuda")["input_ids"]
-                print("### INPUT IDS LOG PROB", input_ids.sum(), input_ids.shape)
+
                 batch_size, seq_len = input_ids.shape
 
                 # Create attention mask
@@ -581,19 +581,12 @@ class DTensorPolicyWorker:
         On exit: Restores original references and re-flips cuda/cpu
 
         """
+        # TODO
         try:
-            current_state_dict = self.model.state_dict()
-            self.model.load_state_dict(self._held_reference_model_params)
-
-            gc.collect()
-            torch.cuda.empty_cache()
             yield
 
         finally:
-            # Restore original references and device placement
-            self.model.load_state_dict(current_state_dict)
-            gc.collect()
-            torch.cuda.empty_cache()
+            ...
 
     def get_reference_policy_logprobs(self, data: BatchedDataDict) -> BatchedDataDict:
         """Get the logprobs from the reference policy for a batch of data.
@@ -612,10 +605,7 @@ class DTensorPolicyWorker:
 
     def zero_out_weights(self):
         """Zero out the weights of the model."""
-        # TODO @sahilj: do this without a summon
         for v in self.model.parameters():
-            if isinstance(v, DTensor):
-                v = v.full_tensor()
             v.zero_()
 
     def report_device_id(self) -> str:
@@ -649,7 +639,6 @@ class DTensorPolicyWorker:
 
         # Replace the original params with the converted ones
         params = dtype_params
-        # self._held_reference_model_params = params
         data = {}
         device_uuid = self.report_device_id()
         for name, p in params.items():
@@ -722,7 +711,7 @@ class DTensorPolicyWorker:
     
     def move_to_device(self, model, device):
         for v in self.model.state_dict().values():
-            if not isinstance(v, torch.Tensor):
+            if not isinstance(v, (torch.Tensor, DTensor)):
                 continue
             if isinstance(v, DTensor):
                 v._local_tensor.data = v._local_tensor.data.to(device, non_blocking=True)
@@ -774,76 +763,48 @@ class DTensorPolicyWorker:
         optimizer_path: Optional[str] = None,
         offload_to_cpu: bool = True,
     ):
-        # Config to save full state dict on rank 0, offloaded to CPU
-        state_dict_config = FullStateDictConfig(
-            offload_to_cpu=offload_to_cpu, rank0_only=True
-        )
+        model_state_dict, optimizer_state_dict = get_state_dict(self.model, self.optimizer)
+        scheduler_state_dict = self.scheduler.state_dict()
 
-        with FullyShardedDataParallel.state_dict_type(
-            self.model,
-            state_dict_type=StateDictType.FULL_STATE_DICT,
-            state_dict_config=state_dict_config,
-        ):
-            # Save model state dict
-            model_state_dict = self.model.state_dict()
-            optim_state_dict = FullyShardedDataParallel.optim_state_dict(
-                self.model, self.optimizer
-            )
-            scheduler_state_dict = self.scheduler.state_dict()
+        optim_and_scheduler_state_dict = {
+            "optimizer": optimizer_state_dict,
+            "scheduler": scheduler_state_dict,
+        }
 
-            optim_and_scheduler_state_dict = {
-                "optimizer": optim_state_dict,
-                "scheduler": scheduler_state_dict,
-            }
+        if torch.distributed.get_rank() == 0:
+            # check if weights_path dir exists
+            weights_dir = os.path.dirname(weights_path)
+            if not os.path.exists(weights_dir):
+                print(
+                    f"Creating weights directory {weights_dir} DOESN'T EXIST SOMEHOW"
+                )
+                os.makedirs(weights_dir)
+        
+        torch.distributed.barrier()
+        torch.distributed.checkpoint.save(model_state_dict, checkpoint_id=weights_path)
 
-            if torch.distributed.get_rank() == 0:
-                # check if weights_path dir exists
-                weights_dir = os.path.dirname(weights_path)
-                if not os.path.exists(weights_dir):
-                    print(
-                        f"Creating weights directory {weights_dir} DOESN'T EXIST SOMEHOW"
-                    )
-                    os.makedirs(weights_dir)
-                torch.save(model_state_dict, weights_path)
-                if optimizer_path is not None:
-                    torch.save(optim_and_scheduler_state_dict, optimizer_path)
+        if optimizer_path is not None:
+            torch.distributed.checkpoint.save(optim_and_scheduler_state_dict, checkpoint_id=optimizer_path)
 
     def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
         print(f"Loading Policy from {weights_path} and optimizer from {optimizer_path}")
-        state_dict_config = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        optimizer_state_dict = None
 
-        state_dict = torch.load(weights_path)
+        model_state_dict, optimizer_state_dict = get_state_dict(self.model, self.optimizer)
+        scheduler_state_dict = self.scheduler.state_dict()
+
+        torch.distributed.checkpoint.load(model_state_dict, checkpoint_id=weights_path)
+
         if optimizer_path is not None:
-            optim_data = torch.load(optimizer_path)
-            optimizer_state_dict = optim_data["optimizer"]
-            scheduler_state_dict = optim_data.get("scheduler")
-        else:
-            optimizer_state_dict = None
-            scheduler_state_dict = None
-        with FullyShardedDataParallel.state_dict_type(
-            self.model,
-            state_dict_type=StateDictType.FULL_STATE_DICT,
-            state_dict_config=state_dict_config,
-        ):
-            # Load model weights
-            self.model.load_state_dict(state_dict if state_dict else None)
-
-            # Load optimizer state
-            if optimizer_state_dict is not None:
-                optim_state_dict = FullyShardedDataParallel.shard_full_optim_state_dict(
-                    optimizer_state_dict, self.model
-                )
-                if self.optimizer is not None:
-                    self.optimizer.load_state_dict(optim_state_dict)
-                else:
-                    print("WARNING: initializing without optimizer")
-            else:
-                print("WARNING: No optimizer checkpoint provided")
+            torch.distributed.checkpoint.load({"optimizer": optimizer_state_dict, "scheduler": scheduler_state_dict}, checkpoint_id=optimizer_path)
+            set_state_dict(self.model, self.optimizer, model_state_dict=model_state_dict, optim_state_dict=optimizer_state_dict)
 
             if scheduler_state_dict is not None:
                 self.scheduler.load_state_dict(scheduler_state_dict)
-            else:
-                print("WARNING: No scheduler checkpoint provided")
+        else:
+            # technically because the state dict is mutated we don't need this line,
+            # but we're paranoid
+            self.model.load_state_dict(model_state_dict)
 
     def shutdown(self):
         """Shutdown the policy."""

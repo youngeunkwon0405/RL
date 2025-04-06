@@ -89,33 +89,20 @@ class ClippedPGLossFn(LossFunction):
         prev_logprobs = data["prev_logprobs"][:, 1:]
         generation_logprobs = data["generation_logprobs"][:, 1:]
         reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
-        mask = token_mask * sample_mask.unsqueeze(-1)
 
-        # saved_batch = torch.load("/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/0_ratios_error.pt", map_location="cuda")
-        # data["input_ids"] = saved_batch["input_ids"]
-        # mask = saved_batch["mask"]
-        # advantages = saved_batch["advantages"]
-        # generation_logprobs = saved_batch["generation_logprobs"]
-        # reference_policy_logprobs = saved_batch["reference_policy_logprobs"]
-        # sample_mask = saved_batch["sample_mask"]
-        # token_mask = saved_batch["token_mask"]
+        mask = token_mask * sample_mask.unsqueeze(-1)
 
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
-
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             tp_mesh = next_token_logits.device_mesh
             tp_rank: int = tp_mesh.get_local_rank()
             vocab_interval_per_rank = next_token_logits.shape[-1] // tp_mesh.size()
 
-            print("### INPUT IDS TRAINING LOG PROB", data["input_ids"].sum(), data["input_ids"].shape)
-
-            # print("#### SHAPER", next_token_logits.to_local().shape)
             curr_logprobs = from_parallel_logits_to_logprobs(next_token_logits.to_local(), data["input_ids"], vocab_interval_per_rank* tp_rank, (tp_rank + 1)* vocab_interval_per_rank, tp_mesh.get_group(), inference_only=False)
-            print("#### LOG PROBS and input ids", curr_logprobs.sum(), data["input_ids"].sum(), data["input_ids"].shape)
         else:
-            next_token_logits = next_token_logits.full_tensor()[:, :-1]  # Remove last position's logits
+            next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
             next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
             next_tokens = data["input_ids"][:, 1:]  # Skip first tokebatch_size, 1)
             curr_logprobs = next_token_logprobs.gather(
@@ -123,24 +110,25 @@ class ClippedPGLossFn(LossFunction):
             ).squeeze(-1)
 
         # Calculate KL regularization.
-# if self.reference_policy_kl_penalty != 0:
-# kl = self.reference_policy_kl_penalty * calculate_kl_penalty_joschu2020(
-# logprobs_policy=curr_logprobs,
-# logprobs_reference=reference_policy_logprobs,
-# )
-# kl = masked_mean(kl, mask)
-# else:
-        kl = 0
+        if self.reference_policy_kl_penalty != 0:
+            kl = self.reference_policy_kl_penalty * calculate_kl_penalty_joschu2020(
+                logprobs_policy=curr_logprobs,
+                logprobs_reference=reference_policy_logprobs,
+            )
+            kl = masked_mean(kl, mask)
+        else:
+            kl = 0
 
         # Calculate clipped loss function if ppo ratio is enabled.
-# if not self.disable_ppo_ratio:
-        ratios = (curr_logprobs - prev_logprobs).exp()
-        ratios_clamped = ratios.clamp(
-            1.0 - self.ratio_eps_min, 1.0 + self.ratio_eps_max
-        )
-# else:
-        # ratios = curr_logprobs
-        # ratios_clamped = curr_logprobs
+        if not self.disable_ppo_ratio:
+            ratios = (curr_logprobs - prev_logprobs).exp()
+            ratios_clamped = ratios.clamp(
+                1.0 - self.ratio_eps_min, 1.0 + self.ratio_eps_max
+            )
+        else:
+            ratios = curr_logprobs
+            ratios_clamped = curr_logprobs
+
         loss1 = -advantages * ratios
         loss2 = -advantages * ratios_clamped
 
