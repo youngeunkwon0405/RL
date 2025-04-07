@@ -1,7 +1,6 @@
 import gc
 
 import os
-from copy import deepcopy
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Union
@@ -12,7 +11,6 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     FSDPModule,
 )
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from nemo_reinforcer.models.dtensor.parallelize import _parallelize_model
 
@@ -26,20 +24,7 @@ from nemo_reinforcer.distributed.virtual_cluster import (
     PY_EXECUTABLES,
 )
 
-from torch.distributed.fsdp import fully_shard, CPUOffloadPolicy, MixedPrecisionPolicy
 from torch.distributed.tensor import DTensor
-from torch.distributed.tensor.placement_types import Shard, Replicate
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-)
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    RowwiseParallel,
-    parallelize_module,
-    SequenceParallel,
-)
-import random
-import numpy as np
 
 @contextmanager
 def unshard_fsdp2_model(model):
@@ -52,121 +37,6 @@ def unshard_fsdp2_model(model):
         for module in model.modules():
             if isinstance(module, FSDPModule):
                 module.reshard()
-
-class RotaryEmbedParallel(SequenceParallel):
-    @staticmethod
-    def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
-        """NOTE: this function will hang if the sequence length is not properly divisible by TP size"""
-        new_inputs = list(inputs)
-
-        if not isinstance(inputs[0], DTensor):
-            new_inputs[0] = DTensor.from_local(
-                local_tensor=inputs[0],
-                device_mesh=device_mesh,
-                placements=sequence_sharding,
-                run_check=False,
-            )
-
-        if not isinstance(inputs[1], DTensor):
-            new_inputs[1] = DTensor.from_local(
-                local_tensor=inputs[1],
-                device_mesh=device_mesh,
-                placements=(Replicate(),),
-                run_check=False,
-            )
-
-        return type(inputs)(new_inputs)
-
-
-true_model_tp_plan = {
-    "lm_head": ColwiseParallel(
-        input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
-    )
-}
-
-model_tp_plan = {
-    # TODO: i think we can also just sequence parallel it post embedding
-    # this also dicatates if we want to use SP on the input layer norm, currently not but maybe a todo?
-    "embed_tokens": RowwiseParallel(
-        input_layouts=Replicate(),
-        output_layouts=Shard(1),
-    ),
-    "rotary_emb": RotaryEmbedParallel(),
-    "norm": SequenceParallel(),
-}
-
-layer_tp_plan = {
-    # TODO: a lot of gathers??
-    "input_layernorm": SequenceParallel(),
-    "self_attn.q_proj": ColwiseParallel(use_local_output=False),
-    "self_attn.k_proj": ColwiseParallel(use_local_output=False),
-    "self_attn.v_proj": ColwiseParallel(use_local_output=False),
-    "self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
-    "post_attention_layernorm": SequenceParallel(),
-    "mlp.up_proj": ColwiseParallel(),
-    "mlp.gate_proj": ColwiseParallel(),
-    "mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
-}
-
-
-def parallelize_qwen(
-    model,
-    dp_mesh,
-    tp_mesh,
-    mp_policy,
-    offload_policy,
-    sequence_parallel=False,
-    activation_checkpointing=False,
-):
-    parallelize_module(model, tp_mesh, true_model_tp_plan)
-    parallelize_module(model.model, tp_mesh, model_tp_plan)
-
-    for layer in model.model.layers:
-        parallelize_module(layer, tp_mesh, layer_tp_plan)
-
-    if activation_checkpointing:
-        for i in range(len(model.model.layers)):
-            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
-
-    for layer in model.model.layers:
-        fully_shard(
-            layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
-        )
-
-    fully_shard(model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
-
-    return model
-
-
-def parallelize_model(
-    model,
-    dp_mesh,
-    tp_mesh,
-    param_dtype,
-    sequence_parallel=False,
-    activation_checkpointing=False,
-    cpu_offload=False,
-):
-    mp_policy = MixedPrecisionPolicy(
-        param_dtype=param_dtype,
-        reduce_dtype=torch.float32,
-        output_dtype=torch.float32,
-    )
-    offload_policy = (
-        CPUOffloadPolicy(pin_memory=False)
-        if cpu_offload
-        else torch.distributed.fsdp.OffloadPolicy
-    )
-    return parallelize_qwen(
-        model,
-        dp_mesh,
-        tp_mesh,
-        mp_policy,
-        offload_policy,
-        sequence_parallel,
-        activation_checkpointing,
-    )
-
 
 @torch.no_grad()
 def _compute_distributed_log_softmax(vocab_parallel_logits, group):
