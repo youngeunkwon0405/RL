@@ -257,7 +257,7 @@ def batched_message_log_to_flat_message(
             if isinstance(value, torch.Tensor):
                 tensor_keys.append(key)
                 max_len = max(max_len, value.size(0))
-    
+
     if max_len % make_disible_by != 0:
         max_len = ((max_len // make_disible_by) + 1) * make_disible_by
 

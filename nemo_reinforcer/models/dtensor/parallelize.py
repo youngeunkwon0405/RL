@@ -2,7 +2,10 @@ import torch
 
 from torch.distributed.tensor import DTensor
 import torch
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+)
+
 # Load model directly
 from torch.distributed.fsdp import fully_shard, CPUOffloadPolicy, MixedPrecisionPolicy
 from torch.distributed.tensor.parallel import (
@@ -16,6 +19,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard, Replicate
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
+
 
 def _parallelize_model(
     model,
@@ -36,7 +40,7 @@ def _parallelize_model(
         if cpu_offload
         else torch.distributed.fsdp.OffloadPolicy
     )
-    
+
     model_cls = type(model)
     if model_cls not in PARALLIZE_FUNCTIONS:
         raise ValueError(f"Model {model_cls} not supported as part of dtensor")
@@ -52,6 +56,7 @@ def _parallelize_model(
         sequence_parallel,
         activation_checkpointing,
     )
+
 
 def _parallelize_llama(
     model,
@@ -75,19 +80,23 @@ def _parallelize_llama(
     }
 
     base_model_sp_plan = {
-        "model.embed_tokens": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
+        "model.embed_tokens": RowwiseParallel(
+            input_layouts=Replicate(), output_layouts=Shard(1)
+        ),
         "model.norm": SequenceParallel(),
         "model.layers.*.input_layernorm": SequenceParallel(),
         "model.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
         "model.layers.*.post_attention_layernorm": SequenceParallel(),
         "model.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
-        "lm_head": ColwiseParallel(input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False),
+        "lm_head": ColwiseParallel(
+            input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
+        ),
     }
 
     if sequence_parallel:
         # Enable sequence parallelism only if TP size > 1
         base_model_tp_plan.update(base_model_sp_plan)
-    
+
     parallelize_module(model, tp_mesh, base_model_tp_plan)
 
     if activation_checkpointing:
@@ -99,7 +108,10 @@ def _parallelize_llama(
             layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
         )
 
-    return fully_shard(model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
+    return fully_shard(
+        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+    )
+
 
 def _parallelize_qwen(
     model,
@@ -113,16 +125,25 @@ def _parallelize_qwen(
     class Qwen2RotaryEmbedParallel(SequenceParallel):
         @staticmethod
         def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
-            """NOTE: this function will hang if the sequence length is not properly divisible by TP size
-            """
+            """NOTE: this function will hang if the sequence length is not properly divisible by TP size"""
             new_inputs = list(inputs)
 
             if not isinstance(inputs[0], DTensor):
-                new_inputs[0] = DTensor.from_local(local_tensor=inputs[0], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
+                new_inputs[0] = DTensor.from_local(
+                    local_tensor=inputs[0],
+                    device_mesh=device_mesh,
+                    placements=sequence_sharding,
+                    run_check=False,
+                )
 
             if not isinstance(inputs[1], DTensor):
                 # new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
-                new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=(Replicate(),), run_check=False)
+                new_inputs[1] = DTensor.from_local(
+                    local_tensor=inputs[1],
+                    device_mesh=device_mesh,
+                    placements=(Replicate(),),
+                    run_check=False,
+                )
 
             return type(inputs)(new_inputs)
 
@@ -176,7 +197,10 @@ def _parallelize_qwen(
             layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
         )
 
-    return fully_shard(model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy)
+    return fully_shard(
+        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+    )
+
 
 PARALLIZE_FUNCTIONS = {
     Qwen2ForCausalLM: _parallelize_qwen,

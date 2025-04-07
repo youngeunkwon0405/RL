@@ -26,6 +26,7 @@ from nemo_reinforcer.distributed.virtual_cluster import (
 
 from torch.distributed.tensor import DTensor
 
+
 @contextmanager
 def unshard_fsdp2_model(model):
     try:
@@ -37,6 +38,7 @@ def unshard_fsdp2_model(model):
         for module in model.modules():
             if isinstance(module, FSDPModule):
                 module.reshard()
+
 
 @torch.no_grad()
 def _compute_distributed_log_softmax(vocab_parallel_logits, group):
@@ -433,8 +435,12 @@ class DTensorPolicyWorker:
 
             if not eval_mode:
                 # Clip gradients
-                if not self.cpu_offload: # cpu offload doesn't support grad norm clipping
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                if (
+                    not self.cpu_offload
+                ):  # cpu offload doesn't support grad norm clipping
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), max_norm=1.0
+                    )
 
                 # Update parameters
                 self.optimizer.step()
