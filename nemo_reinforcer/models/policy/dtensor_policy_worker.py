@@ -10,28 +10,16 @@ import ray
 import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
-    FullyShardedDataParallel,
-    FullStateDictConfig,
-    MixedPrecision,
-    StateDictType,
     FSDPModule,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from nemo_reinforcer.models.dtensor.parallelize import _parallelize_model
 
 from torch.distributed.checkpoint.state_dict import get_state_dict, set_state_dict
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
-from nemo_reinforcer.models.generation.interfaces import (
-    GenerationInterface,
-    GenerationDatumSpec,
-    GenerationOutputSpec,
-    verify_right_padding,
-)
-from nemo_reinforcer.models.interfaces import PolicyInterface
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
@@ -53,6 +41,17 @@ from torch.distributed.tensor.parallel import (
 import random
 import numpy as np
 
+@contextmanager
+def unshard_fsdp2_model(model):
+    try:
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.unshard()
+        yield
+    finally:
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.reshard()
 
 class RotaryEmbedParallel(SequenceParallel):
     @staticmethod
@@ -305,6 +304,8 @@ class DTensorPolicyWorker:
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
+        self.cpu_offload = self.cfg["cpu_offload"]
+
         if self.cfg["precision"] == "float32":
             self.dtype = torch.float32
         elif self.cfg["precision"] == "bfloat16":
@@ -348,14 +349,14 @@ class DTensorPolicyWorker:
         print("### BEFORE MOVE TO CUDA")
         self.model = self.move_to_cuda(self.model)
         print("### AFTER MOVE TO CUDA")
-        self.model = parallelize_model(
+        self.model = _parallelize_model(
             self.model,
             self.dp_mesh,
             self.tp_mesh,
             param_dtype=self.dtype,
-            sequence_parallel=True,
-            cpu_offload=False,
-            activation_checkpointing=False,
+            sequence_parallel=self.cfg["sequence_parallel"],
+            cpu_offload=self.cpu_offload,
+            activation_checkpointing=self.cfg["activation_checkpointing"],
         )
         self.model = self.move_to_cpu(self.model)
 
@@ -560,9 +561,10 @@ class DTensorPolicyWorker:
                 mb_losses.append(loss.item())
                 all_mb_metrics.append(loss_metrics)
 
-            # Clip gradients
             if not eval_mode:
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                # Clip gradients
+                if not self.cpu_offload: # cpu offload doesn't support grad norm clipping
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
                 # Update parameters
                 self.optimizer.step()
@@ -609,8 +611,9 @@ class DTensorPolicyWorker:
         all_log_probs = []
         self.model.eval()
 
+        context_mgr = unshard_fsdp2_model(self.model)
         # Process in batches
-        with torch.no_grad():
+        with context_mgr, torch.no_grad():
             data.to("cuda")
             for lp_batch in data.make_microbatch_iterator(logprob_batch_size):
                 input_ids = lp_batch.get("input_ids")

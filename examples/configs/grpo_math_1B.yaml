@@ -16,7 +16,7 @@ loss_fn:
   ratio_eps_max: 0.2
 
 checkpointing:
-  enabled: false
+  enabled: true
   checkpoint_dir: "results/grpo"
   metric_name: "val_reward"
   higher_is_better: true
@@ -26,13 +26,18 @@ checkpointing:
 policy:
   model_name: "Qwen/Qwen2-1.5B"
   train_global_batch_size: 512
-  train_micro_batch_size: 1
-  generation_batch_size: 1
-  logprob_batch_size: 1 
+  train_micro_batch_size: 4
+  generation_batch_size: 4
+  logprob_batch_size: 4
   max_total_sequence_length: 2048
   precision: "bfloat16"
   offload_policy: False
   tensor_parallel_size: 2
+  make_divisible_by: ${policy.tensor_parallel_size}
+
+  cpu_offload: False
+  sequence_parallel: False
+  activation_checkpointing: False
 
   optimizer:
     name: "torch.optim.AdamW"
@@ -62,7 +67,7 @@ policy:
     top_k: null
     vllm_cfg:
       tensor_parallel_size: 2
-      gpu_memory_utilization: 0.2
+      gpu_memory_utilization: 0.4
       max_model_len: ${policy.max_total_sequence_length}
 
 data:
