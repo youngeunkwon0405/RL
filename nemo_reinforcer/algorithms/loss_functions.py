@@ -25,6 +25,9 @@ from nemo_reinforcer.models.policy.dtensor_policy_worker import (
     from_parallel_logits_to_logprobs,
 )
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
+from nemo_reinforcer.models.dtensor.parallelize import (
+    get_logprobs_from_vocab_parallel_logits,
+)
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -98,17 +101,8 @@ class ClippedPGLossFn(LossFunction):
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
-            tp_mesh = next_token_logits.device_mesh
-            tp_rank: int = tp_mesh.get_local_rank()
-            vocab_interval_per_rank = next_token_logits.shape[-1] // tp_mesh.size()
-
-            curr_logprobs = from_parallel_logits_to_logprobs(
-                next_token_logits.to_local(),
-                data["input_ids"],
-                vocab_interval_per_rank * tp_rank,
-                (tp_rank + 1) * vocab_interval_per_rank,
-                tp_mesh.get_group(),
-                inference_only=False,
+            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
+                next_token_logits, data["input_ids"]
             )
         else:
             next_token_logits = next_token_logits[
