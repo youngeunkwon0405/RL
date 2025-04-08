@@ -334,7 +334,7 @@ class DTensorPolicyWorker:
                     not self.cpu_offload
                 ):  # cpu offload doesn't support grad norm clipping
                     torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=1.0
+                        self.model.parameters(), max_norm=1.0, foreach=False
                     )
 
                 # Update parameters
