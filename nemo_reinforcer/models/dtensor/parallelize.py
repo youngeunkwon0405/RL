@@ -75,7 +75,9 @@ def _parallelize_llama(
             "model.layers.*.mlp.up_proj": ColwiseParallel(),
             "model.layers.*.mlp.gate_proj": ColwiseParallel(),
             "model.layers.*.mlp.down_proj": RowwiseParallel(),
-            "lm_head": ColwiseParallel(output_layouts=Shard(-1), use_local_output=False),
+            "lm_head": ColwiseParallel(
+                output_layouts=Shard(-1), use_local_output=False
+            ),
         }
 
         base_model_sp_plan = {
@@ -145,13 +147,14 @@ def _parallelize_qwen(
                 )
 
             return type(inputs)(new_inputs)
-    
-    if tp_mesh.size() > 1:
 
+    if tp_mesh.size() > 1:
         if sequence_parallel:
             base_model_tp_plan = {
                 "lm_head": ColwiseParallel(
-                    input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
+                    input_layouts=Shard(1),
+                    output_layouts=Shard(-1),
+                    use_local_output=False,
                 ),
                 "model.embed_tokens": RowwiseParallel(
                     input_layouts=Replicate(),
@@ -160,14 +163,24 @@ def _parallelize_qwen(
                 "model.rotary_emb": Qwen2RotaryEmbedParallel(),
                 "model.norm": SequenceParallel(),
                 "model.layers.*.input_layernorm": SequenceParallel(),
-                "model.layers.*.self_attn.q_proj": ColwiseParallel(use_local_output=False),
-                "model.layers.*.self_attn.k_proj": ColwiseParallel(use_local_output=False),
-                "model.layers.*.self_attn.v_proj": ColwiseParallel(use_local_output=False),
-                "model.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
+                "model.layers.*.self_attn.q_proj": ColwiseParallel(
+                    use_local_output=False
+                ),
+                "model.layers.*.self_attn.k_proj": ColwiseParallel(
+                    use_local_output=False
+                ),
+                "model.layers.*.self_attn.v_proj": ColwiseParallel(
+                    use_local_output=False
+                ),
+                "model.layers.*.self_attn.o_proj": RowwiseParallel(
+                    output_layouts=Shard(1)
+                ),
                 "model.layers.*.post_attention_layernorm": SequenceParallel(),
                 "model.layers.*.mlp.up_proj": ColwiseParallel(),
                 "model.layers.*.mlp.gate_proj": ColwiseParallel(),
-                "model.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
+                "model.layers.*.mlp.down_proj": RowwiseParallel(
+                    output_layouts=Shard(1)
+                ),
             }
 
         else:

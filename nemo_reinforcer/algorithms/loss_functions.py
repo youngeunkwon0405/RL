@@ -151,7 +151,7 @@ class ClippedPGLossFn(LossFunction):
         with torch.no_grad():
             probs_ratio = masked_mean(ratios.detach(), mask).item()
             probs_ratio_clamped = masked_mean(ratios_clamped.detach(), mask).item()
-        
+
         return (
             loss,
             {

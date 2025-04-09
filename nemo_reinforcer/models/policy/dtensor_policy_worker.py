@@ -42,16 +42,17 @@ def unshard_fsdp2_model(model):
             if isinstance(module, FSDPModule):
                 module.reshard()
 
+
 @torch.no_grad()
 def get_cpu_state_dict(state_dict):
-
     new_state_dict = {}
     for k, v in state_dict.items():
         val = v.to_local() if isinstance(v, DTensor) else v
         new_state_dict[k] = val.to(device="cpu", copy=True, non_blocking=True)
-    
+
     torch.cuda.synchronize()
     return new_state_dict
+
 
 @ray.remote
 class DTensorPolicyWorker:
@@ -136,7 +137,9 @@ class DTensorPolicyWorker:
         self._held_model_params = None
 
         if init_reference_model:
-            self.reference_model_state_dict = get_cpu_state_dict(self.model.state_dict())
+            self.reference_model_state_dict = get_cpu_state_dict(
+                self.model.state_dict()
+            )
 
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
@@ -466,7 +469,7 @@ class DTensorPolicyWorker:
                 for k, v in self.model.state_dict().items():
                     val = v.to_local() if isinstance(v, DTensor) else v
                     val.copy_(self.reference_model_state_dict[k])
-                
+
                 yield
 
             finally:
@@ -482,7 +485,6 @@ class DTensorPolicyWorker:
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
-
         with self.use_reference_model():
             reference_logprobs = self.get_logprobs(data)
 
