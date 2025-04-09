@@ -5,13 +5,13 @@ grpo:
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
-  val_period: 1000
+  val_period: 1
   val_at_start: false
-  max_val_samples: 256
-  val_batch_size: 256
+  max_val_samples: 4
+  val_batch_size: 4
 
 loss_fn:
-  reference_policy_kl_penalty: 0.
+  reference_policy_kl_penalty: 1.0
   ratio_eps_min: 0.2
   ratio_eps_max: 0.2
 
@@ -21,7 +21,7 @@ checkpointing:
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
-  save_period: 10
+  save_period: 1
 
 policy:
   model_name: "Qwen/Qwen2-1.5B"
@@ -32,22 +32,27 @@ policy:
   max_total_sequence_length: 2048
   precision: "bfloat16"
   offload_policy: False
-  tensor_parallel_size: 2
+  tensor_parallel_size: 1
+  make_divisible_by: 8
+  use_fsdp2: True
+
+  cpu_offload: False
+  sequence_parallel: True
+  activation_checkpointing: True
 
   optimizer:
     name: "torch.optim.SGD"
     kwargs:
-      lr: 1e-4
+      lr: 100
       # weight_decay: 0.01
       # betas: [0.9, 0.999]
       # eps: 1e-8
 
   scheduler:
-    - name: "torch.optim.lr_scheduler.LinearLR"
+    - name: "torch.optim.lr_scheduler.ConstantLR"
       kwargs:
-        start_factor: 0.1
-        end_factor: 1.0
-        total_iters: 50
+        factor: 1.0
+        total_iters: 10000000000
     - name: "torch.optim.lr_scheduler.ConstantLR"
       kwargs:
         factor: 1.0
@@ -61,7 +66,7 @@ policy:
     top_p: 1.0
     top_k: null
     vllm_cfg:
-      tensor_parallel_size: 2
+      tensor_parallel_size: 1
       gpu_memory_utilization: 0.2
       max_model_len: ${policy.max_total_sequence_length}
 
