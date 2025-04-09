@@ -34,6 +34,7 @@ policy:
   offload_policy: False
   tensor_parallel_size: 2
   make_divisible_by: ${policy.tensor_parallel_size}
+  max_norm: 1.0
 
   cpu_offload: False
   sequence_parallel: False

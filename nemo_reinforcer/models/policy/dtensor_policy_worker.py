@@ -26,9 +26,11 @@ from nemo_reinforcer.distributed.virtual_cluster import (
 
 from torch.distributed.tensor import DTensor
 from nemo_reinforcer.models.dtensor.parallelize import (
-    get_logprobs_from_vocab_parallel_logits,
+    get_logprobs_from_vocab_parallel_logits, 
+    get_grad_norm,
+    clip_grad_by_total_norm_,
+    to_local_if_dtensor,
 )
-
 
 @contextmanager
 def unshard_fsdp2_model(model):
@@ -47,7 +49,7 @@ def unshard_fsdp2_model(model):
 def get_cpu_state_dict(state_dict):
     new_state_dict = {}
     for k, v in state_dict.items():
-        val = v.to_local() if isinstance(v, DTensor) else v
+        val = to_local_if_dtensor(v)
         new_state_dict[k] = val.to(device="cpu", copy=True, non_blocking=True)
 
     torch.cuda.synchronize()
@@ -83,6 +85,7 @@ class DTensorPolicyWorker:
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
         self.cpu_offload = self.cfg["cpu_offload"]
+        self.max_norm = self.cfg["max_norm"]
 
         if self.cfg["precision"] == "float32":
             self.dtype = torch.float32
@@ -123,7 +126,9 @@ class DTensorPolicyWorker:
         self.dp_mesh = dp_mesh
         self.tp_mesh = tp_mesh
 
-        self.model = self.move_to_cuda(self.model)
+        if not self.cpu_offload:
+            self.model = self.move_to_cuda(self.model)
+
         self.model = _parallelize_model(
             self.model,
             self.dp_mesh,
@@ -133,7 +138,10 @@ class DTensorPolicyWorker:
             cpu_offload=self.cpu_offload,
             activation_checkpointing=self.cfg["activation_checkpointing"],
         )
-        self.model = self.move_to_cpu(self.model)
+
+        if not self.cpu_offload:
+            self.model = self.move_to_cpu(self.model)
+
         self._held_model_params = None
 
         if init_reference_model:
@@ -337,14 +345,20 @@ class DTensorPolicyWorker:
                 all_mb_metrics.append(loss_metrics)
 
             if not eval_mode:
-                # Clip gradients
-                if (
-                    not self.cpu_offload
-                ):  # cpu offload doesn't support grad norm clipping
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=1.0
+                with torch.no_grad():
+                    grad_norm = get_grad_norm(
+                        self.model.parameters(),
+                        dp_group=self.dp_mesh.get_group(),
+                        tp_group=self.tp_mesh.get_group(),
                     )
-
+                    if self.max_norm is not None:
+                        clip_grad_by_total_norm_(
+                            self.model.parameters(),
+                            max_norm=self.max_norm,
+                            total_norm=grad_norm,
+                        )
+                    print("### GRAD NORM", grad_norm)
+                    
                 # Update parameters
                 self.optimizer.step()
                 self.scheduler.step()
@@ -367,6 +381,7 @@ class DTensorPolicyWorker:
         metrics = {
             "global_loss": global_loss.cpu(),
             "local_loss": local_loss.cpu(),
+            "grad_norm": grad_norm,
             "rank": torch.distributed.get_rank(),
             "all_mb_metrics": dict(mb_metrics),
         }
@@ -467,14 +482,14 @@ class DTensorPolicyWorker:
                 curr_state_dict = get_cpu_state_dict(self.model.state_dict())
 
                 for k, v in self.model.state_dict().items():
-                    val = v.to_local() if isinstance(v, DTensor) else v
+                    val = to_local_if_dtensor(v)
                     val.copy_(self.reference_model_state_dict[k])
 
                 yield
 
             finally:
                 for k, v in self.model.state_dict().items():
-                    val = v.to_local() if isinstance(v, DTensor) else v
+                    val = to_local_if_dtensor(v)
                     val.copy_(curr_state_dict[k])
 
     def get_reference_policy_logprobs(self, data: BatchedDataDict) -> BatchedDataDict:
@@ -541,20 +556,23 @@ class DTensorPolicyWorker:
         for name, p in params.items():
             data[name] = reduce_tensor(p.detach())
 
-        if offload_model:
+        if offload_model or self.cpu_offload:
             self.model = self.move_to_cpu(self.model)
             gc.collect()
             torch.cuda.empty_cache()
+
         return {device_uuid: data}
 
     def prepare_for_lp_inference(self):
-        self.move_to_cuda(self.model)
+        if not self.cpu_offload:
+            self.move_to_cuda(self.model)
         self.model.eval()
         self.offload_before_refit()
 
     def prepare_for_training(self, *args, **kwargs):
         # onload models and optimizer state to cuda
-        self.move_to_cuda(self.model)
+        if not self.cpu_offload:
+            self.move_to_cuda(self.model)
         self.model.train()
 
         # Move optimizer state to CUDA if it exists

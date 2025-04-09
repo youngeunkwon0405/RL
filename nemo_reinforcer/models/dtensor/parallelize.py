@@ -18,6 +18,9 @@ from torch.distributed.tensor.placement_types import Shard, Replicate
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
+from torch import inf
+from typing import Union, List, Optional
+
 
 def _parallelize_model(
     model,
@@ -346,3 +349,98 @@ def get_logprobs_from_vocab_parallel_logits(
         tp_mesh.get_group(),
         inference_only=not torch.is_grad_enabled(),
     )
+
+def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
+    """Returns the local shard of the given tensor if it is a DTensor."""
+    with torch.no_grad():
+        return tensor.to_local() if isinstance(tensor, DTensor) else tensor
+
+def clip_grad_by_total_norm_(
+    parameters: Union[List[torch.Tensor], torch.Tensor],
+    max_norm: Union[int, float],
+    total_norm: float,
+):
+    """Clips gradient of an iterable of parameters by total norm.
+
+    Note that the gradients are modified in place.
+
+    Args:
+        parameters (Iterable[Tensor] or Tensor): an iterable of Tensors or a
+            single Tensor that will have gradients normalized.
+        max_norm (float or int): max norm of the gradients.
+        total_norm (float): total norm of the gradients.
+    """
+    if isinstance(parameters, (torch.Tensor, DTensor)):
+        parameters = [parameters]
+
+    # Grads.
+    grads = [to_local_if_dtensor(p.grad.detach()) for p in parameters if p.grad is not None]
+
+    # Scale.
+    clip_coeff = max_norm / (total_norm + 1.0e-6)
+
+    if clip_coeff < 1.0:
+        for g in grads:
+            g.mul_(clip_coeff)
+
+def get_grad_norm(
+    grads_for_norm: Union[List[torch.Tensor], torch.Tensor],
+    dp_group: Optional[torch.distributed.ProcessGroup],
+    tp_group: Optional[torch.distributed.ProcessGroup],
+    norm_type: Union[int, float] = 2,
+) -> float:
+    """Calculate the norm of gradients
+
+    This is adapted from torch.nn.utils.clip_grad.clip_grad_norm_ and
+    added functionality to handle model parallel parameters.
+
+    Arguments:
+        grads_for_norm (Iterable[Tensor] or Tensor): an iterable of Tensors or a single
+            Tensor that will be used for calculating the grad norm.
+        norm_type (float or int): type of the used p-norm. Can be ``'inf'`` for
+            infinity norm.
+        grad_stats_parallel_group (group): Process group for reducing the grad norms. This is
+            generally the model-parallel group for non-distributed optimizers, and the entire
+            world for the distributed optimizer.
+
+    Returns:
+        Total norm of the parameters (viewed as a single vector).
+    """
+
+    if isinstance(grads_for_norm, (torch.Tensor, DTensor)):
+        grads_for_norm = [grads_for_norm]
+    
+    grads_for_norm = [to_local_if_dtensor(grad) for grad in grads_for_norm]
+    # Norm parameters.
+    norm_type = float(norm_type)
+    total_norm = 0.0
+
+    # Calculate norm.
+    if norm_type == inf:
+        total_norm = max(grad.abs().max() for grad in grads_for_norm)
+        total_norm_cuda = torch.tensor([float(total_norm)], dtype=torch.float, device='cuda')
+        # Take max across all data-parallel GPUs if using FSDP and then all model-parallel GPUs.
+        torch.distributed.all_reduce(
+            total_norm_cuda, op=torch.distributed.ReduceOp.MAX, group=dp_group
+        )
+        torch.distributed.all_reduce(
+            total_norm_cuda, op=torch.distributed.ReduceOp.MAX, group=tp_group
+        )
+        total_norm = total_norm_cuda[0].item()
+
+    else:
+        for grad in grads_for_norm:
+            grad_norm = torch.norm(grad, norm_type)
+            total_norm += grad_norm**norm_type
+        
+        total_norm = total_norm.cuda()
+        # Sum across all data-parallel GPUs if using FSDP and then all model-parallel GPUs.
+        torch.distributed.all_reduce(
+            total_norm, op=torch.distributed.ReduceOp.SUM, group=dp_group
+        )
+        torch.distributed.all_reduce(
+            total_norm, op=torch.distributed.ReduceOp.SUM, group=tp_group
+        )
+        total_norm = total_norm.item() ** (1.0 / norm_type)
+
+    return total_norm
