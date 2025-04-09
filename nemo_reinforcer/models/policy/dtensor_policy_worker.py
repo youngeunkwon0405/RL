@@ -107,7 +107,6 @@ class DTensorPolicyWorker:
         # ------------------------------------------------
 
         tp_size = self.cfg["tensor_parallel_size"]
-        assert tp_size > 1, "TP size must be greater than 1 to use DTensor"
         dp_size = world_size // tp_size
         assert world_size % tp_size == 0, (
             "World size must be divisible by TP size to use DTensor"
@@ -468,23 +467,12 @@ class DTensorPolicyWorker:
                     val = v.to_local() if isinstance(v, DTensor) else v
                     val.copy_(self.reference_model_state_dict[k])
                 
-                if torch.distributed.get_rank() == 0:
-                    for i, (k,v) in enumerate(self.model.named_parameters()):
-                        print("### BEFORE", i, k, v.to_local().sum())
-                        if i == 2:
-                            break
                 yield
 
             finally:
                 for k, v in self.model.state_dict().items():
                     val = v.to_local() if isinstance(v, DTensor) else v
                     val.copy_(curr_state_dict[k])
-
-                if torch.distributed.get_rank() == 0:
-                    for i, (k,v) in enumerate(self.model.named_parameters()):
-                        print("### AFTER", i, k, v.to_local().sum())
-                        if i == 2:
-                            break
 
     def get_reference_policy_logprobs(self, data: BatchedDataDict) -> BatchedDataDict:
         """Get the logprobs from the reference policy for a batch of data.
