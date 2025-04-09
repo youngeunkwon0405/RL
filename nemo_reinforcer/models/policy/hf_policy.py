@@ -86,7 +86,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
         node_bundle_indices = None
 
-        if config["tensor_parallel_size"] > 1:
+        if config["use_fsdp2"]:
             worker_builder_cls = DTensorPolicyWorker
             node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
         else:

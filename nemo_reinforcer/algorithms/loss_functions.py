@@ -99,7 +99,7 @@ class ClippedPGLossFn(LossFunction):
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"]
+                next_token_logits.to(torch.float32), data["input_ids"]
             )
         else:
             next_token_logits = next_token_logits[
@@ -140,19 +140,6 @@ class ClippedPGLossFn(LossFunction):
             print("### RATIOS diff", (ratios[mask.bool()] - 1).abs().max())
             if (ratios[mask.bool()] - 1).abs().max() > 0.01:
                 print("### RATIOS exceeded", (ratios[mask.bool()] - 1).abs().max())
-                # torch.save(
-                #     {
-                #         "mask": mask,
-                #         "advantages": advantages,
-                #         "input_ids": data["input_ids"],
-                #         "generation_logprobs": generation_logprobs,
-                #         "reference_policy_logprobs": reference_policy_logprobs,
-                #         "sample_mask": sample_mask,
-                #         "token_mask": token_mask,
-                #     },
-                #     "/lustre/fsw/portfolios/llmservice/users/geshen/newer_reinforcer/reinforcer/{}_ratios_error.pt".format(torch.distributed.get_rank()),
-                # )
-                exit()
 
         if mask.sum() > 0:
             actor_loss = masked_mean(torch.max(loss1, loss2), mask)
@@ -164,7 +151,7 @@ class ClippedPGLossFn(LossFunction):
         with torch.no_grad():
             probs_ratio = masked_mean(ratios.detach(), mask).item()
             probs_ratio_clamped = masked_mean(ratios_clamped.detach(), mask).item()
-
+        
         return (
             loss,
             {

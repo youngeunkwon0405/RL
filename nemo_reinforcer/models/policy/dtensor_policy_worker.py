@@ -3,7 +3,7 @@ import gc
 import os
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional
 
 import ray
 import torch
@@ -42,6 +42,16 @@ def unshard_fsdp2_model(model):
             if isinstance(module, FSDPModule):
                 module.reshard()
 
+@torch.no_grad()
+def get_cpu_state_dict(state_dict):
+
+    new_state_dict = {}
+    for k, v in state_dict.items():
+        val = v.to_local() if isinstance(v, DTensor) else v
+        new_state_dict[k] = val.to(device="cpu", copy=True, non_blocking=True)
+    
+    torch.cuda.synchronize()
+    return new_state_dict
 
 @ray.remote
 class DTensorPolicyWorker:
@@ -113,9 +123,7 @@ class DTensorPolicyWorker:
         self.dp_mesh = dp_mesh
         self.tp_mesh = tp_mesh
 
-        print("### BEFORE MOVE TO CUDA")
         self.model = self.move_to_cuda(self.model)
-        print("### AFTER MOVE TO CUDA")
         self.model = _parallelize_model(
             self.model,
             self.dp_mesh,
@@ -129,10 +137,8 @@ class DTensorPolicyWorker:
         self._held_model_params = None
 
         if init_reference_model:
-            # self._held_reference_model_params = self.model.state_dict()
-            self._held_reference_model_params = None
+            self.reference_model_state_dict = get_cpu_state_dict(self.model.state_dict())
 
-        # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
             self.optimizer = optimizer_cls(
@@ -270,7 +276,6 @@ class DTensorPolicyWorker:
         losses = []
         all_mb_metrics = []
         for gb_start in range(0, dataset_size, local_gbs):
-            print("### LOCAL GBS", local_gbs, gb_start, dataset_size)
             self.optimizer.zero_grad()
             mb_losses = []
 
@@ -318,7 +323,7 @@ class DTensorPolicyWorker:
                 else:
                     logits = outputs.logits
 
-                loss, loss_metrics = loss_fn(logits, mb)
+                loss, loss_metrics = loss_fn(logits.to(torch.float32), mb)
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                 # Backward pass
 
@@ -335,7 +340,7 @@ class DTensorPolicyWorker:
                     not self.cpu_offload
                 ):  # cpu offload doesn't support grad norm clipping
                     torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=1.0, foreach=False
+                        self.model.parameters(), max_norm=1.0
                     )
 
                 # Update parameters
@@ -412,7 +417,6 @@ class DTensorPolicyWorker:
                     attention_mask_input = torch.ones(
                         (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                     )
-                    print("### INPUT IDS", input_ids.sum(), input_ids.shape)
 
                     outputs = self.model(
                         input_ids=input_ids,
@@ -421,9 +425,20 @@ class DTensorPolicyWorker:
                         use_cache=False,
                     )
 
-                token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                    outputs.logits, input_ids
-                )
+                if isinstance(outputs.logits, DTensor):
+                    token_logprobs = get_logprobs_from_vocab_parallel_logits(
+                        outputs.logits.to(torch.float32), input_ids
+                    )
+                else:
+                    log_probs = torch.nn.functional.log_softmax(
+                        outputs.logits.to(torch.float32), dim=-1
+                    )
+                    next_tokens = input_ids[:, 1:]
+                    log_probs = log_probs[:, :-1]
+                    token_logprobs = log_probs.gather(
+                        dim=-1, index=next_tokens.unsqueeze(-1)
+                    ).squeeze(-1)
+
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
@@ -444,14 +459,32 @@ class DTensorPolicyWorker:
 
         On entry: Moves model to CPU, moves reference_model to CUDA. Swaps the references
         On exit: Restores original references and re-flips cuda/cpu
-
         """
-        # TODO
-        try:
-            yield
+        with torch.no_grad():
+            try:
+                curr_state_dict = get_cpu_state_dict(self.model.state_dict())
 
-        finally:
-            ...
+                for k, v in self.model.state_dict().items():
+                    val = v.to_local() if isinstance(v, DTensor) else v
+                    val.copy_(self.reference_model_state_dict[k])
+                
+                if torch.distributed.get_rank() == 0:
+                    for i, (k,v) in enumerate(self.model.named_parameters()):
+                        print("### BEFORE", i, k, v.to_local().sum())
+                        if i == 2:
+                            break
+                yield
+
+            finally:
+                for k, v in self.model.state_dict().items():
+                    val = v.to_local() if isinstance(v, DTensor) else v
+                    val.copy_(curr_state_dict[k])
+
+                if torch.distributed.get_rank() == 0:
+                    for i, (k,v) in enumerate(self.model.named_parameters()):
+                        print("### AFTER", i, k, v.to_local().sum())
+                        if i == 2:
+                            break
 
     def get_reference_policy_logprobs(self, data: BatchedDataDict) -> BatchedDataDict:
         """Get the logprobs from the reference policy for a batch of data.
@@ -461,6 +494,7 @@ class DTensorPolicyWorker:
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
+
         with self.use_reference_model():
             reference_logprobs = self.get_logprobs(data)
 
@@ -558,13 +592,6 @@ class DTensorPolicyWorker:
         gc.collect()
         torch.cuda.empty_cache()
 
-        # Print memory stats after offloading
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory after optimizer offload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
-
     @torch.no_grad()
     def offload_after_refit(self):
         # Offload as much as possible on the CPU
@@ -580,48 +607,20 @@ class DTensorPolicyWorker:
         gc.collect()
         torch.cuda.empty_cache()
 
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory after refit complete: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
-
     def move_to_device(self, model, device):
         return model.to(device)
 
     def move_to_cuda(self, model):
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory before moving to cuda: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
         model = self.move_to_device(model, "cuda")
-
         gc.collect()
         torch.cuda.empty_cache()
 
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory after moving to cuda: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
         return model
 
     def move_to_cpu(self, model):
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory before moving to cpu: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
         model = self.move_to_device(model, "cpu")
         gc.collect()
         torch.cuda.empty_cache()
-
-        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
-        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
-        print(
-            f"GPU Memory after moving to cpu: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
-        )
 
         return model
 

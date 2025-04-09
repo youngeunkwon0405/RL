@@ -65,37 +65,38 @@ def _parallelize_llama(
     sequence_parallel=False,
     activation_checkpointing=False,
 ):
-    base_model_tp_plan = {
-        "model.embed_tokens": RowwiseParallel(input_layouts=Replicate()),
-        "model.layers.*.self_attn.q_proj": ColwiseParallel(),
-        "model.layers.*.self_attn.k_proj": ColwiseParallel(),
-        "model.layers.*.self_attn.v_proj": ColwiseParallel(),
-        "model.layers.*.self_attn.o_proj": RowwiseParallel(),
-        "model.layers.*.mlp.up_proj": ColwiseParallel(),
-        "model.layers.*.mlp.gate_proj": ColwiseParallel(),
-        "model.layers.*.mlp.down_proj": RowwiseParallel(),
-        "lm_head": ColwiseParallel(output_layouts=Shard(-1), use_local_output=False),
-    }
+    if tp_mesh.size() > 1:
+        base_model_tp_plan = {
+            "model.embed_tokens": RowwiseParallel(input_layouts=Replicate()),
+            "model.layers.*.self_attn.q_proj": ColwiseParallel(),
+            "model.layers.*.self_attn.k_proj": ColwiseParallel(),
+            "model.layers.*.self_attn.v_proj": ColwiseParallel(),
+            "model.layers.*.self_attn.o_proj": RowwiseParallel(),
+            "model.layers.*.mlp.up_proj": ColwiseParallel(),
+            "model.layers.*.mlp.gate_proj": ColwiseParallel(),
+            "model.layers.*.mlp.down_proj": RowwiseParallel(),
+            "lm_head": ColwiseParallel(output_layouts=Shard(-1), use_local_output=False),
+        }
 
-    base_model_sp_plan = {
-        "model.embed_tokens": RowwiseParallel(
-            input_layouts=Replicate(), output_layouts=Shard(1)
-        ),
-        "model.norm": SequenceParallel(),
-        "model.layers.*.input_layernorm": SequenceParallel(),
-        "model.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
-        "model.layers.*.post_attention_layernorm": SequenceParallel(),
-        "model.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
-        "lm_head": ColwiseParallel(
-            input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
-        ),
-    }
+        base_model_sp_plan = {
+            "model.embed_tokens": RowwiseParallel(
+                input_layouts=Replicate(), output_layouts=Shard(1)
+            ),
+            "model.norm": SequenceParallel(),
+            "model.layers.*.input_layernorm": SequenceParallel(),
+            "model.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
+            "model.layers.*.post_attention_layernorm": SequenceParallel(),
+            "model.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
+            "lm_head": ColwiseParallel(
+                input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
+            ),
+        }
 
-    if sequence_parallel:
-        # Enable sequence parallelism only if TP size > 1
-        base_model_tp_plan.update(base_model_sp_plan)
+        if sequence_parallel:
+            # Enable sequence parallelism only if TP size > 1
+            base_model_tp_plan.update(base_model_sp_plan)
 
-    parallelize_module(model, tp_mesh, base_model_tp_plan)
+        parallelize_module(model, tp_mesh, base_model_tp_plan)
 
     if activation_checkpointing:
         for i in range(len(model.model.layers)):
@@ -144,47 +145,49 @@ def _parallelize_qwen(
                 )
 
             return type(inputs)(new_inputs)
+    
+    if tp_mesh.size() > 1:
 
-    if sequence_parallel:
-        base_model_tp_plan = {
-            "lm_head": ColwiseParallel(
-                input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
-            ),
-            "model.embed_tokens": RowwiseParallel(
-                input_layouts=Replicate(),
-                output_layouts=Shard(1),
-            ),
-            "model.rotary_emb": Qwen2RotaryEmbedParallel(),
-            "model.norm": SequenceParallel(),
-            "model.layers.*.input_layernorm": SequenceParallel(),
-            "model.layers.*.self_attn.q_proj": ColwiseParallel(use_local_output=False),
-            "model.layers.*.self_attn.k_proj": ColwiseParallel(use_local_output=False),
-            "model.layers.*.self_attn.v_proj": ColwiseParallel(use_local_output=False),
-            "model.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
-            "model.layers.*.post_attention_layernorm": SequenceParallel(),
-            "model.layers.*.mlp.up_proj": ColwiseParallel(),
-            "model.layers.*.mlp.gate_proj": ColwiseParallel(),
-            "model.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
-        }
+        if sequence_parallel:
+            base_model_tp_plan = {
+                "lm_head": ColwiseParallel(
+                    input_layouts=Shard(1), output_layouts=Shard(-1), use_local_output=False
+                ),
+                "model.embed_tokens": RowwiseParallel(
+                    input_layouts=Replicate(),
+                    output_layouts=Shard(1),
+                ),
+                "model.rotary_emb": Qwen2RotaryEmbedParallel(),
+                "model.norm": SequenceParallel(),
+                "model.layers.*.input_layernorm": SequenceParallel(),
+                "model.layers.*.self_attn.q_proj": ColwiseParallel(use_local_output=False),
+                "model.layers.*.self_attn.k_proj": ColwiseParallel(use_local_output=False),
+                "model.layers.*.self_attn.v_proj": ColwiseParallel(use_local_output=False),
+                "model.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
+                "model.layers.*.post_attention_layernorm": SequenceParallel(),
+                "model.layers.*.mlp.up_proj": ColwiseParallel(),
+                "model.layers.*.mlp.gate_proj": ColwiseParallel(),
+                "model.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
+            }
 
-    else:
-        base_model_tp_plan = {
-            "lm_head": ColwiseParallel(
-                output_layouts=Shard(-1), use_local_output=False
-            ),
-            "model.embed_tokens": RowwiseParallel(
-                input_layouts=Replicate(),
-            ),
-            "model.layers.*.self_attn.q_proj": ColwiseParallel(),
-            "model.layers.*.self_attn.k_proj": ColwiseParallel(),
-            "model.layers.*.self_attn.v_proj": ColwiseParallel(),
-            "model.layers.*.self_attn.o_proj": RowwiseParallel(),
-            "model.layers.*.mlp.up_proj": ColwiseParallel(),
-            "model.layers.*.mlp.gate_proj": ColwiseParallel(),
-            "model.layers.*.mlp.down_proj": RowwiseParallel(),
-        }
+        else:
+            base_model_tp_plan = {
+                "lm_head": ColwiseParallel(
+                    output_layouts=Shard(-1), use_local_output=False
+                ),
+                "model.embed_tokens": RowwiseParallel(
+                    input_layouts=Replicate(),
+                ),
+                "model.layers.*.self_attn.q_proj": ColwiseParallel(),
+                "model.layers.*.self_attn.k_proj": ColwiseParallel(),
+                "model.layers.*.self_attn.v_proj": ColwiseParallel(),
+                "model.layers.*.self_attn.o_proj": RowwiseParallel(),
+                "model.layers.*.mlp.up_proj": ColwiseParallel(),
+                "model.layers.*.mlp.gate_proj": ColwiseParallel(),
+                "model.layers.*.mlp.down_proj": RowwiseParallel(),
+            }
 
-    parallelize_module(model, tp_mesh, base_model_tp_plan)
+        parallelize_module(model, tp_mesh, base_model_tp_plan)
 
     if activation_checkpointing:
         for i in range(len(model.model.layers)):
