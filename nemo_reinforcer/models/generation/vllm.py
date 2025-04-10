@@ -264,7 +264,11 @@ class VllmGenerationWorker:
             "stop_token_ids": self.cfg["stop_token_ids"],
         }
         if sampling_param_overrides:
+            print(f"sampling_kwargs (before overrides): {sampling_kwargs}")
             sampling_kwargs.update(sampling_param_overrides)
+            print(f"sampling_kwargs (after overrides): {sampling_kwargs}")
+        else:
+            print(f"sampling_kwargs: {sampling_kwargs}")
         sampling_params = self.SamplingParams(**sampling_kwargs)
 
         # Generate outputs

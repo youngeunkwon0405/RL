@@ -368,7 +368,15 @@ class HfPolicyWorker:
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
-        max_logprob_batch_size = self.cfg["max_logprob_batch_size"]
+        # TODO: remove logprob_batch_size since that's for older checkpoints
+        if "max_logprob_batch_size" in self.cfg:
+            max_logprob_batch_size = self.cfg["max_logprob_batch_size"]
+        elif "logprob_batch_size" in self.cfg:
+            max_logprob_batch_size = self.cfg["logprob_batch_size"]
+        else:
+            raise KeyError(
+                "max_logprob_batch_size or logprob_batch_size(old_name) must be set in the config"
+            )
         all_log_probs = []
         self.model.eval()
 
@@ -549,18 +557,22 @@ class HfPolicyWorker:
                     left_padded_attention_mask[i, seq_len - length :] = 1
 
                 sampling_params = {
+                    "do_sample": not greedy,
                     "max_new_tokens": gen_cfg["max_new_tokens"],
                     "temperature": gen_cfg["temperature"],
                     "top_p": gen_cfg["top_p"],
                     "top_k": gen_cfg["top_k"],
                 }
                 if sampling_param_overrides:
+                    print(f"sampling_params (before overrides): {sampling_params}")
                     sampling_params.update(sampling_param_overrides)
+                    print(f"sampling_params (after overrides): {sampling_params}")
+                else:
+                    print(f"sampling_params: {sampling_params}")
 
                 outputs = self.model.module.generate(
                     input_ids=left_padded_input_ids,
                     attention_mask=left_padded_attention_mask,
-                    do_sample=not greedy,
                     **sampling_params,
                     pad_token_id=self.tokenizer.pad_token_id,
                     eos_token_id=self.tokenizer.eos_token_id,

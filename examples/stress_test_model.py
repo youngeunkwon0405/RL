@@ -842,7 +842,7 @@ def main():
                     "greedy": True,
                     "sampling_param_overrides": {
                         "top_p": 1.0,
-                        "top_k": -1,
+                        "top_k": 1,
                         "temperature": 0.0,
                         "max_tokens": None,  # Will be set in the loop
                     },
