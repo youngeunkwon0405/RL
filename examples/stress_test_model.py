@@ -30,6 +30,7 @@ from torch.utils.data import DataLoader
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from transformers import AutoTokenizer
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
+from nemo_reinforcer.algorithms.utils import get_tokenizer
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -268,7 +269,8 @@ def prepare_datasets(data_config, tokenizer):
     if "random" in data_config:
         datasets["random"] = []
         for length in data_config["random"]["prompt_lengths"]:
-            chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~ "
+            # Exclude [] to avoid rich formatting issues
+            chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!\"#$%&'()*+,-./:;<=>?@\\^_`{|}~ "
             prompt = "".join(random.choices(chars, k=length))
             datasets["random"].append(
                 {
@@ -299,6 +301,26 @@ def prepare_datasets(data_config, tokenizer):
                     add_special_tokens=False,
                 )
                 datasets["literal"].append(
+                    {
+                        "prompt": message,
+                        "input_ids": tokenizer(message, return_tensors="pt")[
+                            "input_ids"
+                        ][0],
+                    }
+                )
+    if "message_jsonl_path" in data_config:
+        datasets["message_jsonl_path"] = []
+        with open(data_config["message_jsonl_path"], "r") as f:
+            for line in f:
+                prompt = json.loads(line)
+                assert type(prompt) == list, "prompt must be a list"
+                message = tokenizer.apply_chat_template(
+                    prompt,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    add_special_tokens=False,
+                )
+                datasets["message_jsonl_path"].append(
                     {
                         "prompt": message,
                         "input_ids": tokenizer(message, return_tensors="pt")[
@@ -792,9 +814,7 @@ def main():
     cast(DataConfig, config["data"])
 
     print("\n▶ Setting up tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(config["generation"]["model_name"])
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = get_tokenizer(config["generation"]["model_name"])
 
     assert tokenizer.chat_template
 
@@ -846,7 +866,7 @@ def main():
                     "sampling_param_overrides": {
                         "top_p": 1.0,
                         "top_k": -1,
-                        "temperature": 0.0,
+                        "temperature": 1.0,
                         "max_tokens": None,  # Will be set in the loop
                     },
                 },
