@@ -552,7 +552,9 @@ class HfPolicyWorker:
                     # Set attention mask for the actual tokens (at the end for left padding)
                     left_padded_attention_mask[i, seq_len - length :] = 1
 
-                if isinstance(self.model, torch.distributed.fsdp.FullyShardedDataParallel):
+                if isinstance(
+                    self.model, torch.distributed.fsdp.FullyShardedDataParallel
+                ):
                     generation_module = self.model.module
                 else:
                     generation_module = self.model
@@ -799,7 +801,6 @@ class HfPolicyWorker:
                     for k, v in state.items():
                         if torch.is_tensor(v):
                             state[k] = v.to("cpu")
-
 
         gc.collect()
         torch.cuda.empty_cache()
