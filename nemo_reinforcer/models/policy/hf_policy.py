@@ -109,6 +109,10 @@ class HfPolicyWorker:
         # ------------------------------------------------
 
         def do_fsdp(model):
+            if world_size == 1:
+                print("world_size == 1, skipping FSDP")
+                return model
+
             # Create a device mesh with 'world_size' GPUs in a 1D arrangement.
             mesh = init_device_mesh("cuda", (world_size,))
             mp_policy = MixedPrecision(
@@ -542,7 +546,11 @@ class HfPolicyWorker:
                     # Set attention mask for the actual tokens (at the end for left padding)
                     left_padded_attention_mask[i, seq_len - length :] = 1
 
-                outputs = self.model.module.generate(
+                if isinstance(self.model, torch.distributed.fsdp.FullyShardedDataParallel):
+                    generation_module = self.model.module
+                else:
+                    generation_module = self.model
+                outputs = generation_module.generate(
                     input_ids=left_padded_input_ids,
                     attention_mask=left_padded_attention_mask,
                     max_new_tokens=gen_cfg["max_new_tokens"],
@@ -721,6 +729,11 @@ class HfPolicyWorker:
     def get_weight_ipc_handles(self, offload_model=True):
         from torch.multiprocessing.reductions import reduce_tensor
 
+        # If the model is not FSDP, then we need to manually move it to the GPU
+        # For an FSDP model, model.state_dict() will move the params to the GPU
+        if not isinstance(self.model, torch.distributed.fsdp.FullyShardedDataParallel):
+            self.model = self.manual_load_to_gpu(self.model)
+
         # TODO @sahilj: do this without an allgather (maybe FSDP2)
         params = self.model.state_dict()
 
@@ -775,8 +788,6 @@ class HfPolicyWorker:
                         if torch.is_tensor(v):
                             state[k] = v.to("cpu")
 
-            for buffer in self.model.buffers():
-                buffer.data = buffer.data.to("cpu")
 
         gc.collect()
         torch.cuda.empty_cache()
