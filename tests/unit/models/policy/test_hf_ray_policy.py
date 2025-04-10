@@ -137,8 +137,12 @@ def test_hf_policy_init(policy_setup, num_gpus):
 
     # Check 1: Verify workers have different ranks
     gpu_ranks = [info["rank"] for info in gpu_infos]
-    assert len(set(gpu_ranks)) == num_gpus, f"Expected {num_gpus} different ranks, got {gpu_ranks}"
-    assert set(gpu_ranks) == set(range(num_gpus)), f"Expected ranks {set(range(num_gpus))}, got {gpu_ranks}"
+    assert len(set(gpu_ranks)) == num_gpus, (
+        f"Expected {num_gpus} different ranks, got {gpu_ranks}"
+    )
+    assert set(gpu_ranks) == set(range(num_gpus)), (
+        f"Expected ranks {set(range(num_gpus))}, got {gpu_ranks}"
+    )
 
     # Check 2: Verify workers have different local_ranks
     local_ranks = [info["local_rank"] for info in gpu_infos]
@@ -159,7 +163,7 @@ def test_hf_policy_init(policy_setup, num_gpus):
         )
     else:
         assert len(set(cuda_visible_devices)) == 1, (
-             f"Expected one CUDA_VISIBLE_DEVICES for 1 GPU, got {cuda_visible_devices}"
+            f"Expected one CUDA_VISIBLE_DEVICES for 1 GPU, got {cuda_visible_devices}"
         )
 
     # Check 4: Verify all workers report correct world_size
@@ -209,7 +213,9 @@ def training_setup(num_gpus):
     try:
         # Create resources with unique name
         cluster_name = f"test-train-{num_gpus}gpu"
-        print(f"Creating training virtual cluster '{cluster_name}' for {num_gpus} GPUs...")
+        print(
+            f"Creating training virtual cluster '{cluster_name}' for {num_gpus} GPUs..."
+        )
 
         cluster = RayVirtualCluster(
             name=cluster_name,
@@ -313,8 +319,12 @@ def test_hf_policy_training(training_setup, tracker, num_gpus):
         f"Max GPU Utilization after training: {after_training_mem_allocated:,.1f} MB allocated, "
         f"{after_training_mem_reserved:,.1f} MB reserved"
     )
-    tracker.track(f"after_training_mem_allocated_{num_gpus}gpu", after_training_mem_allocated)
-    tracker.track(f"after_training_mem_reserved_{num_gpus}gpu", after_training_mem_reserved)
+    tracker.track(
+        f"after_training_mem_allocated_{num_gpus}gpu", after_training_mem_allocated
+    )
+    tracker.track(
+        f"after_training_mem_reserved_{num_gpus}gpu", after_training_mem_reserved
+    )
 
     policy.offload_after_refit()
     after_offload_mem_allocated, after_offload_mem_reserved = get_max_gpu_utilization(
@@ -324,8 +334,12 @@ def test_hf_policy_training(training_setup, tracker, num_gpus):
         f"Max GPU Utilization after offload: {after_offload_mem_allocated:,.1f} MB allocated, "
         f"{after_offload_mem_reserved:,.1f} MB reserved"
     )
-    tracker.track(f"after_offload_mem_allocated_{num_gpus}gpu", after_offload_mem_allocated)
-    tracker.track(f"after_offload_mem_reserved_{num_gpus}gpu", after_offload_mem_reserved)
+    tracker.track(
+        f"after_offload_mem_allocated_{num_gpus}gpu", after_offload_mem_allocated
+    )
+    tracker.track(
+        f"after_offload_mem_reserved_{num_gpus}gpu", after_offload_mem_reserved
+    )
 
     # Compare memory after offload to memory after training
     assert after_training_mem_allocated > 10_000, (
