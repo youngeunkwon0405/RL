@@ -47,6 +47,7 @@ from nemo_reinforcer.models.generation.interfaces import GenerationConfig
 from nemo_reinforcer.models.generation.vllm import VllmGeneration
 from nemo_reinforcer.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_reinforcer.algorithms.grpo import refit_policy_generation
+from nemo_reinforcer.models.generation.interfaces import configure_generation_config
 
 
 class DataConfig(TypedDict):
@@ -74,7 +75,6 @@ class MasterConfig(TypedDict):
     cluster: ClusterConfig
     policy: PolicyConfig
     checkpointing: CheckpointingConfig
-    test_refit: bool  # Add this field to control refit testing
 
 
 def parse_args():
@@ -203,13 +203,6 @@ def setup(
     # check backend
     backend = generation_config["backend"]
     assert backend in ("vllm", "hf"), "Only 'vllm' or 'hf' backend is supported"
-
-    # set vllm config
-    generation_config["vllm_cfg"]["load_format"] = "auto"
-    generation_config["vllm_cfg"]["skip_tokenizer_init"] = False
-    # When https://github.com/NVIDIA/reinforcer/issues/57 is fixed, we should update stop_token_ids below.
-    generation_config["stop_token_ids"] = [tokenizer.eos_token_id]
-    generation_config["pad_token"] = tokenizer.pad_token_id
 
     if backend == "hf":
         policy_generation = None
@@ -815,6 +808,9 @@ def main():
 
     print("\n▶ Setting up tokenizer...")
     tokenizer = get_tokenizer(config["generation"]["model_name"])
+    config["generation"] = configure_generation_config(
+        config["generation"], tokenizer, is_eval=not args.test_refit
+    )
 
     assert tokenizer.chat_template
 
@@ -895,22 +891,20 @@ def main():
         # )
     ]
 
-    # Determine if refit testing is enabled
-    refit_configs = (
-        [True, False] if args.test_refit else [False]
-    )  # Test both if enabled
-
     # Count configurations to give a sense of progress
     total_configurations = (
         len(batch_sizes)
         * len(max_new_tokens_options)
         * len(generation_methods)
         * len(datasets)
-        * len(refit_configs)
     )
     i_config = 0
 
-    # Run tests for all combinations
+    ##################################
+    # Run tests for all combinations #
+    ##################################
+
+    refit_label = "with_refit" if args.test_refit else "no_refit"
     for batch_size in batch_sizes:
         for max_new_tokens in max_new_tokens_options:
             for method_name, all_generation_kwargs in generation_methods:
@@ -930,35 +924,31 @@ def main():
                         f"Generation backend {config['generation']['backend']} not supported"
                     )
 
-                # Test with different refit configurations
-                for use_refit in refit_configs:
-                    refit_label = "with_refit" if use_refit else "no_refit"
+                # Test each dataset
+                for dataset_name, dataset_items in datasets.items():
+                    i_config += 1
+                    print(
+                        f"\n(Progress: {i_config}/{total_configurations}) Testing {dataset_name=} {batch_size=} {max_new_tokens=} {method_name=} {refit_label=}"
+                    )
 
-                    # Test each dataset
-                    for dataset_name, dataset_items in datasets.items():
-                        i_config += 1
-                        print(
-                            f"\n(Progress: {i_config}/{total_configurations}) Testing {dataset_name=} {batch_size=} {max_new_tokens=} {method_name=} {refit_label=}"
-                        )
-
-                        results = run_test_batch(
-                            generation,
-                            policy,
-                            tokenizer,
-                            dataset_items,
+                    results = run_test_batch(
+                        generation,
+                        policy,
+                        tokenizer,
+                        dataset_items,
+                        batch_size,
+                        generation_kwargs,
+                        test_refit=args.test_refit,
+                    )
+                    all_outputs[
+                        (
+                            dataset_name,
+                            max_new_tokens,
+                            method_name,
                             batch_size,
-                            generation_kwargs,
-                            test_refit=use_refit,
+                            refit_label,
                         )
-                        all_outputs[
-                            (
-                                dataset_name,
-                                max_new_tokens,
-                                method_name,
-                                batch_size,
-                                refit_label,
-                            )
-                        ] = results
+                    ] = results
 
     # Process and display results
     print_results(console, all_outputs, config, tokenizer)
