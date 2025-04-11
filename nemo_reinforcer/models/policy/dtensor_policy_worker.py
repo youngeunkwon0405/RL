@@ -126,8 +126,8 @@ class DTensorPolicyWorker:
         self.dp_mesh = dp_mesh
         self.tp_mesh = tp_mesh
 
-        if not self.cpu_offload:
-            self.model = self.move_to_cuda(self.model)
+# if not self.cpu_offload:
+# self.model = self.move_to_cuda(self.model)
 
         self.model = _parallelize_model(
             self.model,

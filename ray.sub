@@ -17,6 +17,7 @@ set -eoux pipefail
 CONTAINER=$CONTAINER
 MOUNTS=$MOUNTS
 COMMAND=${COMMAND:-}  # This is a script relative to the SLURM_SUBMIT_DIR. If left empty, it will leave the cluster idle after it's brought up.
+NAME=$NAME
 ########################################################
 
 # Defaults to placing uv cache inside the SLURM_SUBMIT_DIR
@@ -25,7 +26,7 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-$SLURM_SUBMIT_DIR/uv_cache}"
 mkdir -p $UV_CACHE_DIR
 
 # Create logs directory
-LOG_DIR="$SLURM_SUBMIT_DIR/$SLURM_JOB_ID-logs"
+LOG_DIR="$SLURM_SUBMIT_DIR/$SLURM_JOB_ID-$NAME-logs"
 mkdir -p $LOG_DIR
 
 COMMON_SRUN_ARGS=""

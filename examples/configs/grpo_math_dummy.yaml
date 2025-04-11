@@ -35,8 +35,9 @@ policy:
   tensor_parallel_size: 1
   make_divisible_by: 8
   use_fsdp2: True
+  max_norm: 1.0
 
-  cpu_offload: False
+  cpu_offload: True
   sequence_parallel: True
   activation_checkpointing: True
 
