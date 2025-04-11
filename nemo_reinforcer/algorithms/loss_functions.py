@@ -11,9 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Tuple, TypedDict
+from typing import Any, Tuple, TypedDict, Optional
 
 import torch
+from torch.autograd import Function
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import (
@@ -40,6 +41,62 @@ class ClippedPGLossDataDict(TypedDict):
     token_mask: torch.Tensor
     sample_mask: torch.Tensor
     __extra__: Any
+
+
+# --- Custom Autograd Function for Differentiable AllGather ---
+class AllGatherIntoTensor(Function):
+    """Differentiable AllGather using torch.distributed.all_gather_into_tensor.
+
+    Forward uses torch.distributed.all_gather_into_tensor.
+    Backward uses torch.distributed.all_reduce to sum gradients.
+    """
+
+    @staticmethod
+    def forward(ctx, input_tensor, group=None):
+        # Store group for backward pass
+        ctx.group = group
+        ctx.world_size = torch.distributed.get_world_size(group=group)
+
+        # Pre-allocate output tensor for the stack form
+        world_size = ctx.world_size
+        B, S, V_part = input_tensor.shape
+        output_tensor = torch.empty(
+            (world_size, B, S, V_part),
+            dtype=input_tensor.dtype,
+            device=input_tensor.device,
+        )
+
+        # Perform the non-differentiable gather
+        torch.distributed.all_gather_into_tensor(
+            output_tensor,  # The tensor to gather into
+            input_tensor,  # The tensor to gather from current rank
+            group=group,
+        )
+        return output_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        # grad_output corresponds to the gathered tensor [world_size, B, S, V_part]
+        # We need to reduce the gradients across all ranks
+
+        # Ensure the gradient tensor is contiguous before all_reduce
+        grad_output = grad_output.contiguous()
+
+        # Sum the gradients across all processes
+        # Since all_gather gathers data, backward requires summing gradients
+        torch.distributed.all_reduce(
+            grad_output, op=torch.distributed.ReduceOp.SUM, group=ctx.group
+        )
+
+        # Each process should receive the gradient corresponding to its input slice
+        # The gradient for the input tensor on this rank is the slice of the
+        # all-reduced gradient tensor corresponding to this rank.
+        rank = torch.distributed.get_rank(group=ctx.group)
+        # Return gradient for input_tensor, None for group argument
+        return grad_output[rank], None
+
+
+# -------------------------------------------------------------
 
 
 class ClippedPGLossFn(LossFunction):
@@ -79,6 +136,7 @@ class ClippedPGLossFn(LossFunction):
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict[ClippedPGLossDataDict],
+        logit_gather_group: Optional[Any] = None,
     ) -> Tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
         token_mask = data["token_mask"][:, 1:]
@@ -90,8 +148,23 @@ class ClippedPGLossFn(LossFunction):
 
         mask = token_mask * sample_mask.unsqueeze(-1)
 
-        lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
+        # print(f"prev_logprobs: {prev_logprobs}") # Keep user prints if desired
+        # print(f"generation_logprobs: {generation_logprobs}")
+        lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
+
+        if logit_gather_group is not None:
+            # Use the custom autograd function
+            gathered_logits_out = AllGatherIntoTensor.apply(
+                next_token_logits, logit_gather_group
+            )
+            # gathered_logits_out shape: [world_size, B, S, V_part]
+
+            # Reshape to: [B, S, world_size * V_part]
+            B, S, _ = next_token_logits.shape  # Get B and S from original logits
+            next_token_logits = gathered_logits_out.permute(1, 2, 0, 3).reshape(
+                B, S, -1
+            )
 
         next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
         next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
@@ -100,6 +173,9 @@ class ClippedPGLossFn(LossFunction):
         curr_logprobs = next_token_logprobs.gather(
             dim=-1, index=next_tokens.unsqueeze(-1)
         ).squeeze(-1)
+
+        # print(f"next_token_logprobs: {curr_logprobs}") # Keep user prints if desired
+        # print(f"generation_logprobs: {generation_logprobs}")
 
         # Calculate KL regularization.
         if self.reference_policy_kl_penalty != 0:

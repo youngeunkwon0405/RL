@@ -138,40 +138,41 @@ class HfPolicyWorker:
             self.optimizer = optimizer_cls(
                 self.model.parameters(), **self.cfg["optimizer"]["kwargs"]
             )
+            if "scheduler" in self.cfg:
+                if isinstance(self.cfg["scheduler"], dict):
+                    scheduler_cls = import_class_from_path(
+                        self.cfg["scheduler"]["name"]
+                    )
+                    self.scheduler = scheduler_cls(
+                        self.optimizer, **self.cfg["scheduler"]["kwargs"]
+                    )
+                else:
+                    schedulers = []
+                    for scheduler_cfg in self.cfg["scheduler"]:
+                        if "name" in scheduler_cfg:
+                            schedulers.append(
+                                import_class_from_path(scheduler_cfg["name"])(
+                                    self.optimizer, **scheduler_cfg["kwargs"]
+                                )
+                            )
+                        else:
+                            assert "milestones" in scheduler_cfg, (
+                                "unknown scheduler config: ",
+                                scheduler_cfg,
+                            )
+                            milestones = scheduler_cfg["milestones"]
+
+                    self.scheduler = torch.optim.lr_scheduler.SequentialLR(
+                        self.optimizer, schedulers, milestones
+                    )
+
+            else:
+                ## default to a passthrough LR schedule
+                self.scheduler = torch.optim.lr_scheduler.LambdaLR(
+                    self.optimizer, lr_lambda=lambda epoch: 1
+                )
         else:
             self.optimizer = None
-
-        if "scheduler" in self.cfg:
-            if isinstance(self.cfg["scheduler"], dict):
-                scheduler_cls = import_class_from_path(self.cfg["scheduler"]["name"])
-                self.scheduler = scheduler_cls(
-                    self.optimizer, **self.cfg["scheduler"]["kwargs"]
-                )
-            else:
-                schedulers = []
-                for scheduler_cfg in self.cfg["scheduler"]:
-                    if "name" in scheduler_cfg:
-                        schedulers.append(
-                            import_class_from_path(scheduler_cfg["name"])(
-                                self.optimizer, **scheduler_cfg["kwargs"]
-                            )
-                        )
-                    else:
-                        assert "milestones" in scheduler_cfg, (
-                            "unknown scheduler config: ",
-                            scheduler_cfg,
-                        )
-                        milestones = scheduler_cfg["milestones"]
-
-                self.scheduler = torch.optim.lr_scheduler.SequentialLR(
-                    self.optimizer, schedulers, milestones
-                )
-
-        else:
-            ## default to a passthrough LR schedule
-            self.scheduler = torch.optim.lr_scheduler.LambdaLR(
-                self.optimizer, lr_lambda=lambda epoch: 1
-            )
 
         # restore
         if weights_path:

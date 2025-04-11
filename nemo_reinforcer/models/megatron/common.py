@@ -13,6 +13,7 @@
 # limitations under the License.
 from functools import partial
 from typing import Iterable
+import torch
 
 from megatron.core.models.gpt import GPTModel
 
@@ -21,6 +22,8 @@ from nemo.tron.losses import masked_next_token_loss
 from nemo.tron.state import GlobalState
 
 from nemo_reinforcer.algorithms.loss_functions import LossFunction
+from megatron.training.utils import get_ltor_masks_and_position_ids
+from megatron.core.parallel_state import get_tensor_model_parallel_group
 
 
 def forward_step_arbitrary_loss(
@@ -38,12 +41,18 @@ def forward_step_arbitrary_loss(
 
     timers("batch-generator", log_level=2).start()
     with straggler_timer(bdata=True):
-        tokens, labels, attention_mask, position_ids, loss_data = get_batch(
-            data_iterator, state.cfg
+        data_dict = next(data_iterator).to("cuda")
+        input_ids = data_dict["input_ids"]
+        attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
+            input_ids, 0, False, False, False
         )
+        output_tensor = model(input_ids, position_ids, attention_mask)
+        loss_data = data_dict
     timers("batch-generator").stop()
 
     with straggler_timer:
-        output_tensor = model(tokens, position_ids, attention_mask, labels=labels)
+        output_tensor = model(input_ids, position_ids, attention_mask)
 
-    return output_tensor, partial(loss_fn, data=loss_data)
+    return output_tensor, partial(
+        loss_fn, data=loss_data, logit_gather_group=get_tensor_model_parallel_group()
+    )  # lambda x: (torch.sum(x), {'a': x}) #

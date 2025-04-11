@@ -33,6 +33,7 @@ from nemo_reinforcer.data.interfaces import (
 )
 from nemo_reinforcer.data.datasets import AllTaskProcessedDataset, rl_collate_fn
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
+from nemo_reinforcer.models.policy.megatron_policy import MegatronPolicy
 from nemo_reinforcer.models.generation.vllm import VllmGeneration
 from nemo_reinforcer.algorithms.loss_functions import (
     ClippedPGLossConfig,
@@ -226,9 +227,11 @@ def setup(
     generation_config["pad_token"] = tokenizer.pad_token_id
     generation_config["vllm_cfg"]["load_format"] = "dummy"
 
-    if backend == "hf":
+    if backend in ["hf", "megatron"]:
         policy_generation = None
-        print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
+        print(
+            f"  ✓ Using {backend} backend for generation with {policy_config['model_name']}"
+        )
     elif backend == "vllm":
         policy_generation = VllmGeneration(cluster=cluster, config=generation_config)
         # Worker groups are not initialized until the first call to run something on workergroups.
@@ -238,17 +241,23 @@ def setup(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
 
-    policy = HfPolicy(
-        cluster=cluster,
-        config=policy_config,
-        weights_path=Path(last_checkpoint_path) / "policy.pt"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy_optimizer.pt"
-        if last_checkpoint_path
-        else None,
-        init_optimizer=True,
-    )
+    if policy_config["training_backend"] == "hf":
+        policy = HfPolicy(
+            cluster=cluster,
+            config=policy_config,
+            weights_path=Path(last_checkpoint_path) / "policy.pt"
+            if last_checkpoint_path
+            else None,
+            optimizer_path=Path(last_checkpoint_path) / "policy_optimizer.pt"
+            if last_checkpoint_path
+            else None,
+            init_optimizer=True,
+        )
+    else:
+        policy = MegatronPolicy(
+            cluster=cluster,
+            config=policy_config,
+        )
 
     loss_fn = ClippedPGLossFn(loss_config)
 
