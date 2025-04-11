@@ -368,23 +368,37 @@ class HfPolicyWorker:
         all_log_probs = []
         self.model.eval()
 
+        # 提前按照 length 对 data 进行排序
+        input_lengths = data.get("input_lengths")
+        sorted_indices = torch.argsort(input_lengths, descending=True)
+        sorted_data = data.select(sorted_indices)
+
         # Process in batches
         with torch.no_grad():
-            data.to("cuda")
-            for lp_batch in data.make_microbatch_iterator(logprob_batch_size):
+            sorted_data.to("cuda")
+            for lp_batch in sorted_data.make_microbatch_iterator(logprob_batch_size):
                 input_ids = lp_batch.get("input_ids")
-                batch_size, seq_len = input_ids.shape
+                batch_size, global_batch_seq_len = input_ids.shape
 
                 # Create attention mask
                 input_lengths = lp_batch.get("input_lengths")
+                max_len_in_microbatch = input_lengths.max().item()
+
+                # Cut input_ids to the max length in the current microbatch
+                if max_len_in_microbatch < global_batch_seq_len:
+                    input_ids = input_ids[:, :max_len_in_microbatch]
 
                 # Create attention mask for right-padded data
                 attention_mask = torch.zeros(
-                    (batch_size, seq_len), dtype=torch.long, device=input_ids.device
+                    (batch_size, max_len_in_microbatch),
+                    dtype=torch.long,
+                    device=input_ids.device,
                 )
                 for i, length in enumerate(input_lengths):
                     # For right-padded sequence, set 1s at the beginning of the sequence
                     attention_mask[i, :length] = 1
+
+                # print("@alex@", input_ids.shape)
 
                 # Process with the model directly using right-padded inputs
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
@@ -418,11 +432,32 @@ class HfPolicyWorker:
 
                 # Apply mask to zero out padding tokens logprobs
                 token_logprobs = token_logprobs * attention_mask
+
+                # Restore to the original sequence length (pad with zeros)
+                if max_len_in_microbatch < global_batch_seq_len:
+                    padded_logprobs = torch.zeros(
+                        (batch_size, global_batch_seq_len),
+                        dtype=token_logprobs.dtype,
+                        device=token_logprobs.device,
+                    )
+                    padded_logprobs[:, :max_len_in_microbatch] = token_logprobs
+                    token_logprobs = padded_logprobs
+
                 all_log_probs.append(token_logprobs)
+
+        # 按原始顺序恢复
+        all_log_probs = torch.cat(all_log_probs, dim=0)
+        # 创建逆索引来恢复原始顺序
+        inverse_indices = torch.empty_like(sorted_indices)
+        inverse_indices[sorted_indices] = torch.arange(
+            sorted_indices.size(0), device=sorted_indices.device
+        )
+        # 使用逆索引恢复原始顺序
+        all_log_probs = all_log_probs[inverse_indices]
 
         # Concatenate all batches
         return_data = BatchedDataDict()
-        return_data["logprobs"] = torch.cat(all_log_probs, dim=0).cpu()
+        return_data["logprobs"] = all_log_probs.cpu()
 
         return return_data
 

@@ -286,6 +286,16 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         """Get the underlying data dictionary."""
         return self.data
 
+    def select(self, indices: torch.Tensor) -> "SlicedDataDict":
+        """Return a new SlicedDataDict with only the selected indices."""
+        selected_batch = SlicedDataDict()
+        for k in self.data:
+            if torch.is_tensor(self.data[k]):
+                selected_batch[k] = self.data[k][indices].clone()
+            else:
+                selected_batch[k] = [self.data[k][i] for i in indices]
+        return selected_batch
+
 
 class SlicedDataDict(BatchedDataDict):
     """A specialized subclass of BatchedDataDict that represents a slice or shard of a larger batch.
