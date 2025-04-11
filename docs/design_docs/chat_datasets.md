@@ -4,7 +4,7 @@ This guide outlines the required data format for Hugging Face chat datasets and 
 
 ## Hugging Face Chat Datasets
 
-Hugging Face chat datasets are expected to have the following structure: Each example in the dataset should be a dictionary with a `messages` key. The `messages` should be a list of dictionaries, each with a `role` and `content` key. The `role` is typically has one of the following values: `system`, `user`, and `assistant`. For example:
+Hugging Face chat datasets are expected to have the following structure: Each example in the dataset should be a dictionary with a `messages` key. The `messages` should be a list of dictionaries, each with a `role` and `content` key. The `role` typically has one of the following values: `system`, `user`, and `assistant`. For example:
 
 ```json
 {
