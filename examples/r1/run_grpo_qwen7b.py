@@ -66,8 +66,6 @@ def mathcl_data_processor(
     idx: int,
 ) -> DatumSpec:
     """Process a datum dictionary (directly loaded from data/hf_datasets/mathcl.py) into a DatumSpec for the Math Environment."""
-    if random.random() < 0.01:
-        print(f"@SHUANGY@, datum_dict: {datum_dict}")
     problem = datum_dict["problem"]
     solution = str(datum_dict["answer"])
     extra_env_info = {"ground_truth": solution}
@@ -98,6 +96,8 @@ def mathcl_data_processor(
         "idx": idx,
         "task_name": datum_dict["task_name"],
     }
+    if random.random() < 0.01:
+        print(f"@SHUANGY@, output: {output}")
     return output
 
 
