@@ -20,7 +20,11 @@ from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
 )
+
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
+from nemo_reinforcer.models.dtensor.parallelize import (
+    get_logprobs_from_vocab_parallel_logits,
+)
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -93,13 +97,21 @@ class ClippedPGLossFn(LossFunction):
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
 
-        next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
-        next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
-
-        next_tokens = data["input_ids"][:, 1:]  # Skip first token
-        curr_logprobs = next_token_logprobs.gather(
-            dim=-1, index=next_tokens.unsqueeze(-1)
-        ).squeeze(-1)
+        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
+                next_token_logits.to(torch.float32), data["input_ids"]
+            )
+        else:
+            next_token_logits = next_token_logits[
+                :, :-1
+            ]  # Remove last position's logits
+            next_token_logprobs = torch.nn.functional.log_softmax(
+                next_token_logits, dim=-1
+            )
+            next_tokens = data["input_ids"][:, 1:]  # Skip first tokebatch_size, 1)
+            curr_logprobs = next_token_logprobs.gather(
+                dim=-1, index=next_tokens.unsqueeze(-1)
+            ).squeeze(-1)
 
         # Calculate KL regularization.
         if self.reference_policy_kl_penalty != 0:

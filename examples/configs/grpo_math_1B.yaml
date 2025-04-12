@@ -33,6 +33,16 @@ policy:
   max_total_sequence_length: 512
   precision: "bfloat16"
 
+  fsdp2_cfg:
+    enabled: false
+    cpu_offload: False
+    sequence_parallel: false
+    activation_checkpointing: false
+    tensor_parallel_size: 1
+
+  make_sequence_length_divisible_by: ${policy.fsdp2_cfg.tensor_parallel_size}
+  max_norm: 1.0
+
   optimizer:
     name: "torch.optim.AdamW"
     kwargs:
@@ -40,6 +50,8 @@ policy:
       weight_decay: 0.01
       betas: [0.9, 0.999]
       eps: 1e-8
+      foreach: False # DTensor does not support foreach
+      fused: False
 
   scheduler:
     - name: "torch.optim.lr_scheduler.LinearLR"

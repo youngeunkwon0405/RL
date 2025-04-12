@@ -370,6 +370,7 @@ class RayWorkerGroup:
         data: List[SlicedDataDict],
         common_kwargs: Optional[Dict[str, Any]] = None,
         respect_tied_workers: bool = True,
+        run_on_tp_workers: bool = False,
     ):
         """Run a method on all workers in parallel with different data.
 
@@ -380,6 +381,8 @@ class RayWorkerGroup:
             respect_tied_workers: If True, only the leader (first worker) of each tied worker group
                                 receives a data slice. If False, each worker gets its own data slice
                                 regardless of tied worker groups.
+            run_on_tp_workers: If True, run the method on all workers in the tied worker group.
+                                this is needed for SPMD training style backends.
 
         Returns:
             MultiWorkerFuture: Object containing futures and their associated worker information
@@ -402,6 +405,7 @@ class RayWorkerGroup:
         # Handle tied worker groups if requested
         if respect_tied_workers:
             # If there are fewer data slices than tied worker groups, use only the first N tied worker groups
+
             active_tied_worker_count = min(len(data), len(self.tied_workers_groups))
             if active_tied_worker_count < len(self.tied_workers_groups):
                 print(
@@ -413,13 +417,24 @@ class RayWorkerGroup:
                 tied_worker_group = self.tied_workers_groups[tied_worker_idx]
                 tied_worker_data = data[tied_worker_idx]
 
-                # Running only on the leader of the tied worker group for vllm case
-                futures.append(
-                    getattr(self._workers[tied_worker_group[0]], method_name).remote(
-                        tied_worker_data, **common_kwargs
+                if run_on_tp_workers:
+                    # Running on all workers in the non-vllm case
+                    for worker_idx in tied_worker_group:
+                        futures.append(
+                            getattr(self._workers[worker_idx], method_name).remote(
+                                tied_worker_data, **common_kwargs
+                            )
+                        )
+
+                        used_workers.append(worker_idx)
+                else:
+                    # Running only on the leader of the tied worker group for vllm case
+                    futures.append(
+                        getattr(
+                            self._workers[tied_worker_group[0]], method_name
+                        ).remote(tied_worker_data, **common_kwargs)
                     )
-                )
-                used_workers.append(tied_worker_group[0])
+                    used_workers.append(tied_worker_group[0])
                 # for worker_idx in tied_worker_group:
                 #     worker = self._workers[worker_idx]
                 #     method = getattr(worker, method_name)
@@ -442,7 +457,12 @@ class RayWorkerGroup:
         )
 
     def run_all_workers_single_data(
-        self, method_name: str, *args, respect_tied_workers: bool = True, **kwargs
+        self,
+        method_name: str,
+        *args,
+        respect_tied_workers: bool = True,
+        run_on_tp_workers: bool = False,
+        **kwargs,
     ):
         """Run a method on all workers in parallel with the same data.
 
@@ -450,6 +470,8 @@ class RayWorkerGroup:
             method_name: Name of the method to call on each worker
             respect_tied_workers: If True, only the leader (first worker) of each tied worker group
                                 receives the call. If False, all workers receive the call.
+            run_on_tp_workers: If True, run the method on all workers in the tied worker group.
+                                this is needed for SPMD training style backends.
             *args, **kwargs: Arguments to pass to the method
 
         Returns:
@@ -458,11 +480,20 @@ class RayWorkerGroup:
         futures = []
         if respect_tied_workers:
             for tied_worker_group in self.tied_workers_groups:
-                futures.append(
-                    getattr(self._workers[tied_worker_group[0]], method_name).remote(
-                        *args, **kwargs
+                if run_on_tp_workers:
+                    # Running on all workers in the non-vllm case
+                    for worker_idx in tied_worker_group:
+                        futures.append(
+                            getattr(self._workers[worker_idx], method_name).remote(
+                                *args, **kwargs
+                            )
+                        )
+                else:
+                    futures.append(
+                        getattr(
+                            self._workers[tied_worker_group[0]], method_name
+                        ).remote(*args, **kwargs)
                     )
-                )
         else:
             for worker in self.workers:
                 method = getattr(worker, method_name)
