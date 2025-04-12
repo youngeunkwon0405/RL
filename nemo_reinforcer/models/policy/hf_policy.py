@@ -111,7 +111,9 @@ class HfPolicyWorker:
 
         def do_fsdp(model):
             if world_size == 1:
-                print("[INFO] Using a single GPU - skipping FSDP wrapper to avoid GPU memory offloading issues")
+                print(
+                    "[INFO] Using a single GPU - skipping FSDP wrapper to avoid GPU memory offloading issues"
+                )
                 return model
 
             # Create a device mesh with 'world_size' GPUs in a 1D arrangement.
