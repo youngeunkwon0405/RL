@@ -27,3 +27,4 @@ class PolicyConfig(TypedDict):
     generation: GenerationConfig
     precision: str
     fsdp_offload_enabled: bool
+    activation_checkpointing_enabled: bool
