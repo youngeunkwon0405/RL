@@ -219,7 +219,9 @@ def setup(
 
     # vllm model loading prefers clean environment, initialize policy_generation before policy (#52 will fix this)
     backend = generation_config["backend"]
-    generation_config["model_name"] = policy_config["model_name"]  # Needed for vLLM
+    if "model_name" not in generation_config:
+        # Needed for vLLM
+        generation_config["model_name"] = policy_config["model_name"]
 
     if backend == "hf":
         policy_generation = None
