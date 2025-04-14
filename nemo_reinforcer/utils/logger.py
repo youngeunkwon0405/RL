@@ -125,6 +125,7 @@ class WandbLogger(LoggerInterface):
 
     def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None):
         self.run = wandb.init(**cfg, dir=log_dir)
+        self.run.log_code("./nemo_reinforcer")
         print(
             f"Initialized WandbLogger for project {cfg.get('project')}, run {cfg.get('name')} at {log_dir}"
         )
