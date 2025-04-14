@@ -1,12 +1,12 @@
-# Padding in NeMo Reinforcer
+# Padding in NeMo RL
 
 ## Overview
 
-This document explains padding in NeMo Reinforcer and why consistent padding is critical for the framework.
+This document explains padding in NeMo RL and why consistent padding is critical for the framework.
 
 ## Padding Approach
 
-NeMo Reinforcer uses **right padding** for all tensor operations, where padding tokens are added to the right/end of sequences:
+NeMo RL uses **right padding** for all tensor operations, where padding tokens are added to the right/end of sequences:
 
 ```
 [101, 2054, 2003,    0,    0]  # Length 3
@@ -15,9 +15,9 @@ NeMo Reinforcer uses **right padding** for all tensor operations, where padding 
 ```
 
 This approach:
-1. **Naturally aligns with LLM processing**: Tokens are processed from left to right
-2. **Keeps meaningful tokens contiguous**: All valid tokens appear at the beginning of tensors
-3. **Simplifies indexing and operations**: Valid token boundaries are easily defined with a single length value
+1. **Naturally aligns with LLM processing**: Tokens are processed from left to right.
+2. **Keeps meaningful tokens contiguous**: All valid tokens appear at the beginning of tensors.
+3. **Simplifies indexing and operations**: Valid token boundaries are easily defined with a single length value.
 
 ## Right-Padded Generation Example
 
@@ -37,7 +37,7 @@ Corresponding logprobs:
 
 ## Verifying Right Padding
 
-NeMo Reinforcer provides utilities to verify correct padding:
+NeMo RL provides utilities to verify correct padding. For example:
 
 ```{testcode}
 import torch
@@ -79,20 +79,20 @@ if not is_right_padded:
 ```
 
 The {py:class}`verify_right_padding() <nemo_reinforcer.models.generation.interfaces.verify_right_padding>` function checks that:
-1. All padding (zeros or padding token provided by the user) appears after valid tokens
-2. The padding starts at the position specified by the length tensor
+1. All padding (zeros or padding token provided by the user) appears after valid tokens.
+2. The padding starts at the position specified by the length tensor.
 
 The function automatically detects whether you're passing input or output data:
-- For input data: Requires `input_ids` and `input_lengths` fields
-- For output data: Requires `output_ids` and either `generation_lengths` or `unpadded_sequence_lengths`
+- For input data: Requires `input_ids` and `input_lengths` fields.
+- For output data: Requires `output_ids` and either `generation_lengths` or `unpadded_sequence_lengths`.
 
 
 ## Best Practices
 
-1. **Always Use Right Padding**: All components expect this format
+1. **Always Use Right Padding**: All components expect this format.
 
-2. **Track Length Tensors**: Include appropriate length tensors with your data
+2. **Track Length Tensors**: Include appropriate length tensors with your data.
 
-3. **Verify Padding**: Use {py:class}`verify_right_padding() <nemo_reinforcer.models.generation.interfaces.verify_right_padding>` when in doubt
+3. **Verify Padding**: Use {py:class}`verify_right_padding() <nemo_reinforcer.models.generation.interfaces.verify_right_padding>` when in doubt.
 
-4. **Mask Padding in Operations**: Use lengths to exclude padding tokens from loss calculations
+4. **Mask Padding in Operations**: Use lengths to exclude padding tokens from loss calculations.
