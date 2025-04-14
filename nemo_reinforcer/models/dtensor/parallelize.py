@@ -129,7 +129,6 @@ def _parallelize_qwen(
                 )
 
             if not isinstance(inputs[1], DTensor):
-                # new_inputs[1] = DTensor.from_local(local_tensor=inputs[1], device_mesh=device_mesh, placements=sequence_sharding, run_check=False)
                 new_inputs[1] = DTensor.from_local(
                     local_tensor=inputs[1],
                     device_mesh=device_mesh,
