@@ -456,8 +456,8 @@ class RayWorkerGroup:
     def run_all_workers_single_data(
         self,
         method_name: str,
-        only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
         *args,
+        only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
         **kwargs,
     ):
         """Run a method on all workers in parallel with the same data.
