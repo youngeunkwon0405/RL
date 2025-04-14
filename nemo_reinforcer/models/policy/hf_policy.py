@@ -51,9 +51,9 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         node_bundle_indices = None
         self.tensor_parallel_size = 1
 
-        if config["fsdp2_cfg"]["enabled"]:
+        if config["dtensor_cfg"]["enabled"]:
             worker_builder_cls = DTensorPolicyWorker
-            self.tensor_parallel_size = config["fsdp2_cfg"]["tensor_parallel_size"]
+            self.tensor_parallel_size = config["dtensor_cfg"]["tensor_parallel_size"]
             node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
         else:
             worker_builder_cls = FSDP1PolicyWorker

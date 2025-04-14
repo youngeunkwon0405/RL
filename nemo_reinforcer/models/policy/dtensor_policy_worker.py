@@ -125,7 +125,7 @@ class DTensorPolicyWorker:
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
         tokenizer_name = self.cfg["tokenizer_name"]
-        self.cpu_offload = self.cfg["fsdp2_cfg"]["cpu_offload"]
+        self.cpu_offload = self.cfg["dtensor_cfg"]["cpu_offload"]
         self.max_norm = self.cfg["max_norm"]
 
         if self.cfg["precision"] == "float32":
@@ -151,7 +151,7 @@ class DTensorPolicyWorker:
         #    (Initialize device mesh, shard submodules, then shard entire model)
         # ------------------------------------------------
 
-        tp_size = self.cfg["fsdp2_cfg"]["tensor_parallel_size"]
+        tp_size = self.cfg["dtensor_cfg"]["tensor_parallel_size"]
         dp_size = world_size // tp_size
         assert world_size % tp_size == 0, (
             "World size must be divisible by TP size to use DTensor"
@@ -169,9 +169,11 @@ class DTensorPolicyWorker:
             self.dp_mesh,
             self.tp_mesh,
             param_dtype=self.dtype,
-            sequence_parallel=self.cfg["fsdp2_cfg"]["sequence_parallel"],
+            sequence_parallel=self.cfg["dtensor_cfg"]["sequence_parallel"],
             cpu_offload=self.cpu_offload,
-            activation_checkpointing=self.cfg["fsdp2_cfg"]["activation_checkpointing"],
+            activation_checkpointing=self.cfg["dtensor_cfg"][
+                "activation_checkpointing"
+            ],
         )
 
         if not self.cpu_offload:
