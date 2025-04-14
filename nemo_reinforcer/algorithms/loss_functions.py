@@ -97,9 +97,15 @@ class ClippedPGLossFn(LossFunction):
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
 
+        assert next_token_logits.dtype == torch.float32, (
+            "next_token_logits must be float32 in the loss function but got {}".format(
+                next_token_logits.dtype
+            )
+        )
+
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits.to(torch.float32), data["input_ids"]
+                next_token_logits, data["input_ids"]
             )
         else:
             next_token_logits = next_token_logits[

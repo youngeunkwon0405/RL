@@ -49,7 +49,9 @@ def _parallelize_llama(
 ):
     """Parallelizes a LlamaForCausalLM model across data and tensor parallel dimensions."""
     if tp_mesh.size() > 1:
-        assert not model.config.tie_word_embeddings, "Tie word embeddings not supported when TP is enabled"
+        assert not model.config.tie_word_embeddings, (
+            "Tie word embeddings not supported when TP is enabled"
+        )
 
         base_model_tp_plan = {
             "model.embed_tokens": RowwiseParallel(input_layouts=Replicate()),
@@ -138,7 +140,9 @@ def _parallelize_qwen(
             return type(inputs)(new_inputs)
 
     if tp_mesh.size() > 1:
-        assert not model.config.tie_word_embeddings, "Tie word embeddings not supported when TP is enabled"
+        assert not model.config.tie_word_embeddings, (
+            "Tie word embeddings not supported when TP is enabled"
+        )
         if sequence_parallel:
             base_model_tp_plan = {
                 "lm_head": ColwiseParallel(
