@@ -445,9 +445,7 @@ class DTensorPolicyWorker:
         all_log_probs = []
         self.model.eval()
 
-        context_mgr = unshard_fsdp2_model(self.model)
-        # Process in batches
-        with context_mgr, torch.no_grad():
+        with unshard_fsdp2_model(self.model), torch.no_grad():
             data.to("cuda")
             for lp_batch in data.make_microbatch_iterator(logprob_batch_size):
                 input_ids = lp_batch.get("input_ids")
