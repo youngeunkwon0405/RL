@@ -32,7 +32,6 @@ from torch.distributed.tensor.placement_types import Shard, Replicate
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from torch import inf
 from typing import Union, List
 from nemo_reinforcer.distributed.model_utils import from_parallel_logits_to_logprobs
 from torch.distributed.device_mesh import DeviceMesh
@@ -344,7 +343,7 @@ def get_grad_norm(
     total_norm = 0.0
 
     # Calculate norm.
-    if norm_type == inf:
+    if norm_type == torch.inf:
         total_norm = max(grad.abs().max() for grad in grads_for_norm)
         total_norm_cuda = torch.tensor(
             [float(total_norm)], dtype=torch.float, device="cuda"
