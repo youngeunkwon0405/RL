@@ -228,16 +228,14 @@ class HfPolicy(PolicyInterface, GenerationInterface):
     def prepare_for_training(self, *args, **kwargs):
         # onload everything to the GPU
         futures = self.worker_group.run_all_workers_single_data(
-            "prepare_for_training", respect_tied_workers=True, run_on_tp_workers=True
+            "prepare_for_training", only_on="all_tied_workers"
         )
         ray.get(futures)
         pass
 
     def prepare_for_lp_inference(self, *args, **kwargs):
         futures = self.worker_group.run_all_workers_single_data(
-            "prepare_for_lp_inference",
-            respect_tied_workers=True,
-            run_on_tp_workers=True,
+            "prepare_for_lp_inference", only_on="all_tied_workers"
         )
         ray.get(futures)
 
@@ -273,14 +271,14 @@ class HfPolicy(PolicyInterface, GenerationInterface):
     def offload_before_refit(self):
         """Offload the optimizer and buffers to the CPU."""
         futures = self.worker_group.run_all_workers_single_data(
-            "offload_before_refit", respect_tied_workers=True, run_on_tp_workers=True
+            "offload_before_refit", only_on="all_tied_workers"
         )
         ray.get(futures)
 
     def offload_after_refit(self):
         """Offload the optimizer and buffers to the CPU."""
         futures = self.worker_group.run_all_workers_single_data(
-            "offload_after_refit", respect_tied_workers=True, run_on_tp_workers=True
+            "offload_after_refit", only_on="all_tied_workers"
         )
         ray.get(futures)
 
@@ -298,8 +296,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             optimizer_path,
             save_torch_dist,
             save_hf,
-            respect_tied_workers=True,
-            run_on_tp_workers=True,
+            only_on="all_tied_workers",
         )
         ray.get(futures)
 
