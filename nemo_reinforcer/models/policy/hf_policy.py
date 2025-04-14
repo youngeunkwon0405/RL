@@ -117,7 +117,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         """
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "get_logprobs", sharded_data, run_on_tp_workers=True
+            "get_logprobs", sharded_data, only_on="all_tied_workers"
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -133,7 +133,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         """
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "get_reference_policy_logprobs", sharded_data, run_on_tp_workers=True
+            "get_reference_policy_logprobs", sharded_data, only_on="all_tied_workers"
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -165,7 +165,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
                 "gbs": gbs,
                 "mbs": mbs,
             },
-            run_on_tp_workers=True,
+            only_on="all_tied_workers",
         )
         results = self.worker_group.get_all_worker_results(futures)
 
@@ -199,7 +199,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             "generate",
             sharded_data,
             common_kwargs={"greedy": greedy},
-            run_on_tp_workers=True,
+            only_on="all_tied_workers",
         )
         result = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures),
