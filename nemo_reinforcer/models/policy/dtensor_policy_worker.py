@@ -513,16 +513,11 @@ class DTensorPolicyWorker:
         return_data["reference_logprobs"] = reference_logprobs["logprobs"].cpu()
         return return_data
 
-    def zero_out_weights(self):
-        """Zero out the weights of the model."""
-        for v in self.model.parameters():
-            v.zero_()
-
     def _add_noise_to_weights(self):
         """Add small Gaussian noise to the weights of the model. Note that this is used for testing purposes only."""
         noise_std = 0.01  # Standard deviation for the noise
-        for v in self.model.parameters():
-            if v.requires_grad:
+        for p in self.model.parameters():
+            if p.requires_grad:
                 noise = torch.randn_like(p.data) * noise_std
                 p.data.add_(noise)  # Add noise in-place
         torch.cuda.synchronize()
