@@ -316,7 +316,7 @@ class DTensorPolicyWorker:
                 else:
                     logits = outputs.logits
 
-                loss, loss_metrics = loss_fn(logits.float(), mb)
+                loss, loss_metrics = loss_fn(logits, mb)
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                 # Backward pass
 

@@ -71,6 +71,8 @@ class ClippedPGLossFn(LossFunction):
 
     For REINFORCE/RLOO (when disable_ppo_ratio=True), the formula simplifies to:
     L(θ) = E_t [ π_θ(a_t|s_t) * A_t ] - β * KL(π_θ || π_ref)
+
+    Due to potential instability, we cast the logits to float32 before computing the loss.
     """
 
     def __init__(self, cfg: ClippedPGLossConfig):
@@ -97,11 +99,7 @@ class ClippedPGLossFn(LossFunction):
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
         mult_prob_error = ((torch.exp(lp_error) * mask).sum() / mask.sum()).item()
 
-        assert next_token_logits.dtype == torch.float32, (
-            "next_token_logits must be float32 in the loss function but got {}".format(
-                next_token_logits.dtype
-            )
-        )
+        next_token_logits = next_token_logits.to(torch.float32)
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
