@@ -499,6 +499,7 @@ def test_dtensor_worker_logprob(logprob_setup):
 
     # Generate logprobs
     print("\nGenerating logprobs...")
+    policy.prepare_for_lp_inference()
     policy_logprobs = policy.get_logprobs(data)["logprobs"]
 
     print("## MAX DIFF ###", torch.max(torch.abs(policy_logprobs - logprobs)))
