@@ -1,37 +1,37 @@
-# An in-depth walkthrough of GRPO in Reinforcer
+# Use GRPO
+
+This document explains how to use General Reinforcement Policy Optimization (GRPO) within the NeMo RL framework. It includes a quickstart section for launching a GRPO run and detailed instructions on handling data, model training, fast generation, and overall resource flow.
 
 ## Quickstart: Launch a GRPO Run
 
-If you want to get running quickly, the script [examples/run_grpo_math.py](../../examples/run_grpo_math.py) has an example implementation of using GRPO to train a model on math problems. This script can either be launched locally or via Slurm. For details on how to set up Ray and launch a job using Slurm, refer to the [cluster documentation](../cluster.md).
+To get started quickly, use the script [examples/run_grpo_math.py](../../examples/run_grpo_math.py), which demonstrates how to train a model on math problems using GRPO. You can launch this script locally or via Slurm. For detailed instructions on setting up Ray and launching a job with Slurm, refer to the [cluster documentation](../cluster.md).
 
 We recommend launching the job using `uv`:
+
 ```bash
 uv run examples/run_grpo_math.py --config <PATH TO YAML CONFIG> {overrides}
 ```
-If not specified, `config` will default to [examples/configs/grpo.yaml](../../examples/configs/grpo.yaml)
 
-**Reminder**: Don't forget to set your HF_HOME and WANDB_API_KEY (if needed). You'll need to do a `huggingface-cli login` as well for Llama models.
+If not specified, `config` will default to [examples/configs/grpo.yaml](../../examples/configs/grpo.yaml).
 
-## Now, for the details:
+**Reminder**: Don't forget to set your HF_HOME and WANDB_API_KEY (if needed). Additionally, perform a `huggingface-cli login` for Llama models.
 
-In this guide, we'll walk through we handle
-* Data
-* Model training
-* Fast generation
-* Overall Resource Flow
+## Prepare the Data
 
-### Data
-We support training with multiple RL "Environments" at the same time.
+We support training with multiple RL "Environments" simultaneously.
 
-An [Environment](../../nemo_reinforcer/environments/interfaces.py) is an object that accepts a state/action history and returns an update state and rewards for the step. They run as Ray Remote Actors. Example [MathEnvironment](../../nemo_reinforcer/environments/math_environment.py).
+An [Environment](../../nemo_reinforcer/environments/interfaces.py) is an object that processes a state/action history and returns an updated state and rewards for each step. These environments run as Ray Remote Actors, such as the [MathEnvironment](../../nemo_reinforcer/environments/math_environment.py).
 
-To support this, we need to know:
-* What environments you have
-* Which data should go to which environments
-* How to prepare the data from your dataset into a form we can use
+To enable multi-environment training, the system requires the following:
 
-#### Common Data Format
+* The available reinforcement learning environments.
+* The routing of data to the appropriate environments.
+* Information on how to format your dataset for processing.
+
+### Common Data Format
+
 We define a [DatumSpec](../../nemo_reinforcer/data/interfaces.py) that holds all relevant information for each training example:
+
 ```python
 class DatumSpec(TypedDict):
     message_log: LLMMessageLogType
@@ -43,9 +43,11 @@ class DatumSpec(TypedDict):
     __extra__: Any  # This allows additional fields of any type
 ```
 
-#### Data Processors
-We name all distinct "environments your model wants to optimize against" "tasks". So you might define a "math" task or a "code" task. 
-For each task, you should provide a data processor that reads from your dataset and returns a [DatumSpec](../../nemo_reinforcer/data/interfaces.py)
+### Data Processors
+
+We refer to each distinct environment your model aims to optimize against as a "task." For example, you might define tasks like "math" or "code."
+
+For each task, you should provide a data processor that reads from your dataset and returns a [DatumSpec](../../nemo_reinforcer/data/interfaces.py).
 
 ```python
 def my_data_processor(
@@ -56,14 +58,19 @@ def my_data_processor(
     idx: int,
 ) -> DatumSpec:
 ```
-We have an example of this as `math_data_processor` in [run_grpo_math.py](../../examples/run_grpo_math.py)
 
-#### Putting it all together:
+We have an example of this as `math_data_processor` in [run_grpo_math.py](../../examples/run_grpo_math.py).
+
+## Put It All Together
+
 GRPO expects datasets to have the following form:
+
 ```json
 {"task_name": "math", <actual data>}
 ```
-Then, you can set data up as such:
+
+Then, you can set the data up as follows:
+
 ```python
 base_dataset = load_dataset("json", data_files=data_config["dataset_name"])["train"]
 tokenizer = AutoTokenizer.from_pretrained(policy_config["model_name"])
@@ -81,15 +88,17 @@ dataset = AllTaskProcessedDataset(
     max_seq_length=data_config["max_input_seq_length"],
 )
 ```
-Notice that you provide a mapping of tasks to their processors so the dataset knows what to use when processing samples.
 
+Ensure you provide a mapping of tasks to their processors so the dataset knows which processor to use when handling samples.
 
-### Policy Model
+## Policy Model
+
 We define a [PolicyInterface]() that contains everything you need to train a Policy model.
 
 This Policy object holds a [RayWorkerGroup](../../nemo_reinforcer/distributed/worker_groups.py) of SPMD (1 proc/gpu) processes that run HF/MCore, all coordinated by this object so it appears to you like 1 GPU!
 
-### Fast Generation
+## Fast Generation
+
 We support vLLM through the [VllmGeneration](../../nemo_reinforcer/models/generation/vllm.py) class right now.
 
 The function [grpo_train](../../nemo_reinforcer/algorithms/grpo.py) contains the core GRPO training loop.
