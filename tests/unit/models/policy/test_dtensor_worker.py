@@ -15,7 +15,6 @@ import ray
 import pytest
 import pprint
 import torch
-from copy import deepcopy
 
 # Define a custom marker for model configuration tests
 pytestmark = pytest.mark.modelconfig
@@ -29,6 +28,7 @@ from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from tests.unit.test_utils import simple_loss
 from functools import partial
+from transformers import AutoModelForCausalLM
 
 
 def create_test_config(
@@ -354,7 +354,7 @@ def training_setup(request):
     ],
     indirect=True,
 )
-def test_hf_policy_training(training_setup):
+def test_dtensor_worker_training(training_setup):
     def verify_loss_tensor(loss_tensor):
         assert not torch.isnan(loss_tensor).any(), "Loss should not be NaN"
         assert not torch.isinf(loss_tensor).any(), "Loss should not be Inf"
@@ -388,3 +388,120 @@ def test_hf_policy_training(training_setup):
 
     # Verify loss changed between iterations (model parameters were updated)
     assert losses[0] > losses[-1], "Loss should decrease over training iterations"
+
+
+@pytest.fixture
+def logprob_setup(request):
+    """Setup and teardown specifically for training tests."""
+    model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = (
+        request.param
+    )
+    policy = None
+    cluster = None
+    data = None
+
+    try:
+        # Create resources with unique name
+        cluster_name = f"test-logprob-tp{tp}-cpu{int(cpu_offload)}-sp{int(sequence_parallel)}-ac{int(activation_checkpointing)}"
+        print(f"Creating logprob virtual cluster '{cluster_name}'...")
+
+        cluster = RayVirtualCluster(
+            name=cluster_name,
+            bundle_ct_per_node_list=[2],  # Single node, 2 gpus
+            use_gpus=True,
+            num_gpus_per_node=2,  # Using both GPUs
+            max_colocated_worker_groups=1,  # Only one worker group
+        )
+
+        config = create_test_config(
+            model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
+        )
+        print(
+            f"Creating logprob HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
+        )
+        policy = HfPolicy(cluster=cluster, config=config, init_reference_model=False)
+
+        # Create a test batch
+        print("Creating test batch...")
+        # set random seed
+        torch.manual_seed(66)
+
+        # Create test input_ids and attention_mask
+        input_ids = torch.randint(
+            0, 32000, (8, 128)
+        ).cuda()  # 8 sequences, each of length 128
+        attention_mask = torch.ones(8, 128).cuda()
+
+        # Calculate input_lengths (all sequences are full length in this test)
+        input_lengths = attention_mask.sum(dim=1).to(torch.int32).cuda()
+
+        data = BatchedDataDict(
+            {
+                "input_ids": input_ids,
+                "input_lengths": input_lengths,
+                "attention_mask": attention_mask,  # Keep for compatibility with loss functions
+            }
+        )
+
+        with torch.no_grad():
+            # run the log prob of regular hf model here
+            hf_model = AutoModelForCausalLM.from_pretrained(
+                model_name, device_map="cuda", torch_dtype=torch.float32
+            )
+            hf_model.eval()
+            outputs = hf_model(**data)
+
+        log_probs = torch.nn.functional.log_softmax(
+            outputs.logits.to(torch.float32), dim=-1
+        )
+        next_tokens = input_ids[:, 1:]
+        log_probs = log_probs[:, :-1]
+        token_logprobs = log_probs.gather(
+            dim=-1, index=next_tokens.unsqueeze(-1)
+        ).squeeze(-1)
+        token_logprobs = torch.cat(
+            [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
+        ).cpu()
+
+        data = data.to("cpu")
+
+        # Provide the resources to the test
+        yield policy, cluster, data, token_logprobs
+
+    except Exception as e:
+        print(f"Error during training setup: {e}")
+        pytest.skip(f"Training setup failed: {e}")
+    finally:
+        # Clean up after the test
+        print("Cleaning up resources for test")
+        cluster.shutdown()
+        policy.worker_group.shutdown()
+
+
+@pytest.mark.timeout(360)
+@pytest.mark.parametrize(
+    "logprob_setup",
+    [
+        ("Qwen/Qwen2.5-7B", 2, False, True, False),
+        ("Qwen/Qwen2.5-7B", 2, False, False, False),
+        ("meta-llama/Llama-3.1-8B", 2, False, False, False),
+        ("meta-llama/Llama-3.1-8B", 2, False, True, False),
+        ("meta-llama/Llama-3.1-8B", 2, False, True, True),
+    ],
+    indirect=True,
+)
+def test_dtensor_worker_logprob(logprob_setup):
+    policy, cluster, data, logprobs = logprob_setup
+
+    # Verify resources were created properly assert policy is not None, "Policy was not created properly"
+    assert cluster is not None, "Cluster was not created properly"
+    assert data is not None, "Test data was not created properly"
+
+    # Generate logprobs
+    print("\nGenerating logprobs...")
+    policy_logprobs = policy.get_logprobs(data)["logprobs"]
+
+    print("## MAX DIFF ###", torch.max(torch.abs(policy_logprobs - logprobs)))
+    assert torch.allclose(policy_logprobs, logprobs), (
+        f"max diff {torch.max(torch.abs(policy_logprobs - logprobs))}"
+    )
