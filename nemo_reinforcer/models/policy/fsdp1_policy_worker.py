@@ -188,7 +188,64 @@ class FSDP1PolicyWorker:
 
     def get_gpu_info(self):
         """Return information about the GPU being used by this worker."""
-        return get_gpu_info(self.model)
+        import torch
+
+        # Get distributed training info
+        rank = torch.distributed.get_rank()
+        world_size = torch.distributed.get_world_size()
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
+
+        # Get device info from CUDA
+        device = torch.cuda.current_device()
+        device_name = torch.cuda.get_device_name(device)
+        device_count = torch.cuda.device_count()
+        memory_allocated = torch.cuda.memory_allocated(device) / (1024**2)  # in MB
+        memory_reserved = torch.cuda.memory_reserved(device) / (1024**2)  # in MB
+
+        # Try to get the real global device ID (not the local one)
+        # In distributed training, each process only sees its assigned GPU as device 0
+        local_device_id = device
+        global_device_id = local_device_id
+
+        if "CUDA_VISIBLE_DEVICES" in os.environ:
+            cuda_visible_devices = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
+            if local_rank < len(cuda_visible_devices):
+                global_device_id = int(cuda_visible_devices[local_rank])
+
+        # Get a parameter from the model to verify CUDA device placement
+        # This confirms tensors are actually on the appropriate device
+        param_info = {}
+        for module_name, module in self.model.named_modules():
+            for param_name, param in module.named_parameters(recurse=False):
+                if param is not None and param.requires_grad:
+                    full_name = f"{module_name}.{param_name}"
+                    param_info[full_name] = {
+                        "device": str(param.device),
+                        "shape": list(param.shape),
+                        "dtype": str(param.dtype),
+                    }
+                    # Just grab one parameter for verification
+                    break
+            if param_info:
+                break
+
+        return {
+            "rank": rank,
+            "world_size": world_size,
+            "local_rank": local_rank,
+            "local_device_id": local_device_id,
+            "global_device_id": global_device_id,
+            "device_count": device_count,
+            "device_name": device_name,
+            "memory_allocated_mb": memory_allocated,
+            "memory_reserved_mb": memory_reserved,
+            "parameter_sample": param_info,
+            "env_vars": {
+                k: v
+                for k, v in os.environ.items()
+                if k.startswith("CUDA") or k in ["LOCAL_RANK", "RANK", "WORLD_SIZE"]
+            },
+        }
 
     def train(
         self,
@@ -485,8 +542,10 @@ class FSDP1PolicyWorker:
                     temperature=gen_cfg["temperature"],
                     top_p=gen_cfg["top_p"],
                     top_k=gen_cfg["top_k"],
-                    pad_token_id=self.tokenizer.pad_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id,
+                    pad_token_id=gen_cfg["pad_token_id"],
+                    eos_token_id=gen_cfg["stop_token_ids"],
+                    stop_strings=gen_cfg["stop_strings"],
+                    tokenizer=self.tokenizer,  # needs for stop_strings
                     return_dict_in_generate=True,
                     output_scores=True,
                     synced_gpus=True,
