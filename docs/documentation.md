@@ -25,7 +25,7 @@ uv run --group docs sphinx-build . _build/html
 
 When writing documentation, it can be helpful to serve the documentation and have it update live while you edit.
 
-To do so run:
+To do so, run:
 
 ```sh
 cd docs/
