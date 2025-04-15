@@ -763,6 +763,8 @@ class HfPolicyWorker:
 
         # Replace the original params with the converted ones
         params = dtype_params
+        # For FSDP1, params may get GC'ed before sending to vllm,
+        # so we need to hold a reference to them
         self._held_reference_model_params = params
         data = {}
         device_uuid = self.report_device_id()
