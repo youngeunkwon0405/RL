@@ -259,7 +259,9 @@ def batched_message_log_to_flat_message(
                 max_len = max(max_len, value.size(0))
 
     if max_len % make_sequence_length_divisible_by != 0:
-        max_len = ((max_len // make_sequence_length_divisible_by) + 1) * make_sequence_length_divisible_by
+        max_len = (
+            (max_len // make_sequence_length_divisible_by) + 1
+        ) * make_sequence_length_divisible_by
 
     # Handle non-tensor case
     if not tensor_keys:

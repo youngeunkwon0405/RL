@@ -30,7 +30,14 @@ from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from tests.unit.test_utils import simple_loss
 from functools import partial
 
-def create_test_config(model_name:str = "meta-llama/Llama-3.2-1B", tp:int =1, sequence_parallel:bool =False, cpu_offload:bool =False, activation_checkpointing:bool =False) -> PolicyConfig:
+
+def create_test_config(
+    model_name: str = "meta-llama/Llama-3.2-1B",
+    tp: int = 1,
+    sequence_parallel: bool = False,
+    cpu_offload: bool = False,
+    activation_checkpointing: bool = False,
+) -> PolicyConfig:
     return {
         "model_name": model_name,
         "tokenizer_name": model_name,
@@ -76,7 +83,9 @@ def create_test_config(model_name:str = "meta-llama/Llama-3.2-1B", tp:int =1, se
         "max_grad_norm": 1.0,
     }
 
+
 basic_test_config = create_test_config()
+
 
 @pytest.fixture(scope="function")
 def gc_collect():
@@ -257,7 +266,9 @@ def test_hf_policy_init(policy_setup):
 @pytest.fixture
 def training_setup(request):
     """Setup and teardown specifically for training tests."""
-    model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = request.param
+    model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = (
+        request.param
+    )
     policy = None
     cluster = None
     data = None
@@ -276,8 +287,12 @@ def training_setup(request):
             max_colocated_worker_groups=1,  # Only one worker group
         )
 
-        config = create_test_config(model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing)
-        print(f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}...")
+        config = create_test_config(
+            model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
+        )
+        print(
+            f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
+        )
         policy = HfPolicy(cluster=cluster, config=config, init_reference_model=False)
 
         # Create a test batch
@@ -319,7 +334,7 @@ def training_setup(request):
 
 @pytest.mark.timeout(360)
 @pytest.mark.parametrize(
-    "training_setup", 
+    "training_setup",
     [
         # ("meta-llama/Llama-3.2-1B",1, False, False, False),
         # ("meta-llama/Llama-3.2-1B",1, True, False, False),
@@ -328,7 +343,7 @@ def training_setup(request):
         # ("meta-llama/Llama-3.2-1B",1, True, True, False),
         # ("meta-llama/Llama-3.2-1B",1, True, False, True),
         # ("meta-llama/Llama-3.2-1B",1, False, True, True),
-        ("meta-llama/Llama-3.2-1B",1, True, True, True),
+        ("meta-llama/Llama-3.2-1B", 1, True, True, True),
         # ("Qwen/Qwen2.5-1.5B", 1, True, True, True),
         # ("Qwen/Qwen2.5-7B", 2, False, False, False),
         # ("Qwen/Qwen2.5-7B", 2, False, False, True),
@@ -337,7 +352,7 @@ def training_setup(request):
         ("Qwen/Qwen2.5-7B", 2, False, True, True),
         ("meta-llama/Llama-3.1-8B", 2, False, True, True),
     ],
-    indirect=True
+    indirect=True,
 )
 def test_hf_policy_training(training_setup):
     def verify_loss_tensor(loss_tensor):
