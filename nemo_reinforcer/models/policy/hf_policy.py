@@ -43,25 +43,6 @@ from nemo_reinforcer.utils.native_checkpoint import (
 class HfPolicyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
 
-    @staticmethod
-    def log_global_gpu_usage():
-        print("Global GPU usage:", torch.cuda.device_count(), "gpus")
-        for i in range(torch.cuda.device_count()):
-            ret = torch.cuda.mem_get_info(i)
-            allocated = (ret[1] - ret[0]) / 1024 / 1024 / 1024
-            total = ret[1] / 1024 / 1024 / 1024
-            print(f"GPU {i} (global): total={total:.2f}GB, allocated={allocated:.2f}GB")
-
-    @staticmethod
-    def log_local_gpu_usage():
-        for i in range(torch.cuda.device_count()):
-            # print(torch.cuda.memory_summary(device=i, abbreviated=True))
-            max_allocated = torch.cuda.max_memory_allocated(i) / 1024 / 1024 / 1024
-            allocated = torch.cuda.memory_allocated(i) / 1024 / 1024 / 1024
-            print(
-                f"GPU {i} (local): max_allocated={max_allocated:.2f}GB, allocated={allocated:.2f}GB"
-            )
-
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
 
@@ -758,9 +739,6 @@ class HfPolicyWorker:
         self, remote_workers, update_weight_method_name, offload_model=True
     ):
         self._held_reference_model_params = None
-        print("Streaming weight update")
-        HfPolicyWorker.log_global_gpu_usage()
-        HfPolicyWorker.log_local_gpu_usage()
 
         class TensorDict(dict):
             def __init__(self, tensor_processor, device_uuid):
@@ -774,9 +752,6 @@ class HfPolicyWorker:
                 )
                 has_processed_tensor = processed_tensor is not None
                 if has_processed_tensor:
-                    print("Before update")
-                    HfPolicyWorker.log_global_gpu_usage()
-                    HfPolicyWorker.log_local_gpu_usage()
                     futures = [
                         getattr(worker, update_weight_method_name).remote(
                             {self.device_uuid: {processed_key: processed_tensor}}
@@ -788,11 +763,7 @@ class HfPolicyWorker:
 
                 del processed_tensor, value
 
-                if has_processed_tensor:
-                    print("After update")
-                    HfPolicyWorker.log_global_gpu_usage()
-                    HfPolicyWorker.log_local_gpu_usage()
-
+                # Hacky way to set minimal tensor.
                 return super().__setitem__(key, torch.zeros(1, device="cpu"))
 
         from torch.multiprocessing.reductions import reduce_tensor
@@ -803,12 +774,11 @@ class HfPolicyWorker:
             assert isinstance(value, torch.Tensor)
             if not value.is_cuda:
                 return None, None
-            else:
-                print(f"{key} is on GPU {torch.cuda.current_device()}")
 
             assert key not in known_keys
             known_keys.add(key)
 
+            # Process the key to remove the FSDP wrapper.
             key = key.replace("_fsdp_wrapped_module.", "")
 
             tensor = value.to(self.dtype, non_blocking=True)
@@ -818,14 +788,7 @@ class HfPolicyWorker:
         target = TensorDict(tensor_processor, device_uuid)
 
         self.model.state_dict(destination=target)
-        print("Finished")
-        HfPolicyWorker.log_global_gpu_usage()
-        HfPolicyWorker.log_local_gpu_usage()
 
-        # if offload_model:
-        #     self.model = self.move_to_cpu(self.model)
-        #     gc.collect()
-        #     torch.cuda.empty_cache()
         return True
 
     def prepare_for_lp_inference(self):
