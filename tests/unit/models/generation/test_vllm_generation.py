@@ -45,28 +45,39 @@ basic_vllm_test_config: VllmConfig = {
     },
 }
 
-# Create HF-specific config with required parameters
-basic_hf_test_config: PolicyConfig = {
-    "model_name": basic_vllm_test_config["model_name"],
-    "tokenizer_name": basic_vllm_test_config["tokenizer_name"],
-    # Required training parameters
-    "train_global_batch_size": 1,
-    "train_micro_batch_size": 1,
-    "learning_rate": 5e-6,
-    "logprob_batch_size": 1,
-    "max_new_tokens": 16,
-    "do_sample": False,
-    "precision": "float32",
-    "optimizer": {
-        "name": "torch.optim.AdamW",
-        "kwargs": {
-            "lr": 5e-6,
-            "weight_decay": 0.01,
-            "betas": [0.9, 0.999],
-            "eps": 1e-8,
+
+def get_basic_hf_test_config(enable_dtensor: bool = False) -> PolicyConfig:
+    # Create HF-specific config with required parameters
+    return {
+        "model_name": basic_vllm_test_config["model_name"],
+        "tokenizer_name": basic_vllm_test_config["tokenizer_name"],
+        # Required training parameters
+        "train_global_batch_size": 1,
+        "train_micro_batch_size": 1,
+        "learning_rate": 5e-6,
+        "logprob_batch_size": 1,
+        "max_new_tokens": 16,
+        "do_sample": False,
+        "precision": "float32",
+        "optimizer": {
+            "name": "torch.optim.AdamW",
+            "kwargs": {
+                "lr": 5e-6,
+                "weight_decay": 0.01,
+                "betas": [0.9, 0.999],
+                "eps": 1e-8,
+            },
         },
-    },
-}
+        "dtensor_cfg": {
+            "enabled": enable_dtensor,
+            "cpu_offload": False,
+            "sequence_parallel": False,
+            "activation_checkpointing": False,
+            "tensor_parallel_size": 1,
+        },
+        "max_grad_norm": 1.0,
+        "make_sequence_length_divisible_by": 1,
+    }
 
 
 @pytest.fixture(scope="module")
@@ -206,7 +217,8 @@ def test_vllm_policy_generation(policy, test_input_data, tokenizer):
 
 
 @pytest.mark.timeout(140)
-def test_vllm_generation_with_hf_training(cluster, tokenizer):
+@pytest.mark.parametrize("enable_dtensor", [True, False])
+def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
     """1. Use vLLM for generation
     2. Use HF policy for training and logprob computation
 
@@ -219,7 +231,7 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer):
     vllm_config = basic_vllm_test_config.copy()
     vllm_config = configure_generation_config(vllm_config, tokenizer)
 
-    hf_config = basic_hf_test_config.copy()
+    hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
     hf_config["train_global_batch_size"] = 4
 
     vllm_policy = None
@@ -491,8 +503,9 @@ def test_vllm_generate_text(cluster, tokenizer):
 
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize("tensor_parallel_size", [1, 2])
+@pytest.mark.parametrize("enable_dtensor", [True, False])
 def test_vllm_weight_update_and_prefix_cache_reset(
-    cluster, tokenizer, tensor_parallel_size
+    cluster, tokenizer, tensor_parallel_size, enable_dtensor
 ):
     """Test that the vLLM prefix cache is correctly reset when weights change."""
     from nemo_reinforcer.models.policy.hf_policy import HfPolicy
@@ -504,7 +517,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
     if tensor_parallel_size > 1:
         vllm_config["vllm_kwargs"] = {"distributed_executor_backend": "ray"}
 
-    hf_config = basic_hf_test_config.copy()
+    hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
 
     # Create policies
     vllm_policy = None
@@ -590,7 +603,10 @@ def test_vllm_weight_update_and_prefix_cache_reset(
 
 
 @pytest.mark.parametrize("is_eval", [True, False])
-def test_vllm_generation_with_stop(cluster, test_input_data, tokenizer, is_eval):
+@pytest.mark.parametrize("enable_dtensor", [True, False])
+def test_vllm_generation_with_stop(
+    cluster, test_input_data, tokenizer, is_eval, enable_dtensor
+):
     """Test vLLM generation with stop."""
     from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 
@@ -618,7 +634,7 @@ def test_vllm_generation_with_stop(cluster, test_input_data, tokenizer, is_eval)
         vllm_generation.finish_generation()
 
         print("Creating HF policy...")
-        hf_config = basic_hf_test_config.copy()
+        hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
         hf_policy = HfPolicy(cluster, hf_config)
 
         print(f"refitting vllm policy...")
