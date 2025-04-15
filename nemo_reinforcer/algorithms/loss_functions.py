@@ -72,7 +72,7 @@ class ClippedPGLossFn(LossFunction):
     For REINFORCE/RLOO (when disable_ppo_ratio=True), the formula simplifies to:
     L(θ) = E_t [ π_θ(a_t|s_t) * A_t ] - β * KL(π_θ || π_ref)
 
-    Due to potential instability, we cast the logits to float32 before computing the loss.
+    Due to potential numerical instability, we cast the logits to float32 before computing the loss.
     """
 
     def __init__(self, cfg: ClippedPGLossConfig):
