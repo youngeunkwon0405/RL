@@ -130,7 +130,7 @@ def _parallelize_qwen(
                 except ValueError as e:
                     raise ValueError(
                         f"Failed to shard tensor for sequence parallelism. Local Shape is ({inputs[0].shape}) "
-                        f"at rank {torch.distributed.get_rank()}. This must be divisible by tensor parallel size. "
+                        f"at rank {torch.distributed.get_rank()}. Different TP ranks must have the same shape. "
                         f"Original error: {str(e)}"
                     ) from e
 
