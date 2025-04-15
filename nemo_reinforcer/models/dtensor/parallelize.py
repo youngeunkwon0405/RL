@@ -116,16 +116,23 @@ def _parallelize_qwen(
 
         @staticmethod
         def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
-            """NOTE: this function will hang if the sequence length is not properly divisible by TP size."""
             new_inputs = list(inputs)
 
             if not isinstance(inputs[0], DTensor):
-                new_inputs[0] = DTensor.from_local(
-                    local_tensor=inputs[0],
-                    device_mesh=device_mesh,
-                    placements=sequence_sharding,
-                    run_check=False,
-                )
+                """Guard the metadata for Sequence Parallel here"""
+                try:
+                    new_inputs[0] = DTensor.from_local(
+                        local_tensor=inputs[0],
+                        device_mesh=device_mesh,
+                        placements=sequence_sharding,
+                        run_check=True,
+                    )
+                except ValueError as e:
+                    raise ValueError(
+                        f"Failed to shard tensor for sequence parallelism. Local Shape is ({inputs[0].shape}) "
+                        f"at rank {torch.distributed.get_rank()}. This must be divisible by tensor parallel size. "
+                        f"Original error: {str(e)}"
+                    ) from e
 
             if not isinstance(inputs[1], DTensor):
                 new_inputs[1] = DTensor.from_local(
