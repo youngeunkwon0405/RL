@@ -177,9 +177,7 @@ class DTensorPolicyWorker:
             ],
         )
 
-        if not self.cpu_offload:
-            self.model = self.move_to_cpu(self.model)
-        else:
+        if self.cpu_offload:
             self.model = self.move_buffer_to_device(self.model, "cpu")
 
         self._held_model_params = None
