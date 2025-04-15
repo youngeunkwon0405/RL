@@ -321,7 +321,7 @@ class FSDP1PolicyWorker:
             # Clip gradients
             if not eval_mode:
                 torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), max_norm=self.cfg["max_norm"]
+                    self.model.parameters(), max_grad_norm=self.cfg["max_grad_norm"]
                 )
 
                 # Update parameters

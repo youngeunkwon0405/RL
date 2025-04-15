@@ -73,7 +73,7 @@ def create_test_config(model_name:str = "meta-llama/Llama-3.2-1B", tp:int =1, se
                 "T_max": 100,
             },
         },
-        "max_norm": 1.0,
+        "max_grad_norm": 1.0,
     }
 
 basic_test_config = create_test_config()

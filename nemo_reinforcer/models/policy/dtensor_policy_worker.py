@@ -127,7 +127,7 @@ class DTensorPolicyWorker:
         model_name = self.cfg["model_name"]
         tokenizer_name = self.cfg["tokenizer_name"]
         self.cpu_offload = self.cfg["dtensor_cfg"]["cpu_offload"]
-        self.max_norm = self.cfg["max_norm"]
+        self.max_grad_norm = self.cfg["max_grad_norm"]
 
         if self.cfg["precision"] == "float32":
             self.dtype = torch.float32
@@ -334,10 +334,10 @@ class DTensorPolicyWorker:
                         dp_group=self.dp_mesh.get_group(),
                         tp_group=self.tp_mesh.get_group(),
                     )
-                    if self.max_norm is not None:
+                    if self.max_grad_norm is not None:
                         clip_grad_by_total_norm_(
                             self.model.parameters(),
-                            max_norm=self.max_norm,
+                            max_grad_norm=self.max_grad_norm,
                             total_norm=grad_norm,
                         )
 

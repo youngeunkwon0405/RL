@@ -67,7 +67,7 @@ basic_llama_test_config: PolicyConfig = {
             "T_max": 100,
         },
     },
-    "max_norm": 1.0,
+    "max_grad_norm": 1.0,
 }
 
 

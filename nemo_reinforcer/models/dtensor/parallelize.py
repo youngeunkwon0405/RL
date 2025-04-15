@@ -279,7 +279,7 @@ def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:
 
 def clip_grad_by_total_norm_(
     parameters: Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
-    max_norm: Union[int, float],
+    max_grad_norm: Union[int, float],
     total_norm: float,
 ):
     """Clips gradient of an iterable of parameters by total norm.
@@ -292,7 +292,7 @@ def clip_grad_by_total_norm_(
         parameters (Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]]):
             An iterable of Tensors or DTensors, or a single Tensor or DTensor
             that will have gradients normalized.
-        max_norm (Union[float, int]): Maximum norm of the gradients.
+        max_grad_norm (Union[float, int]): Maximum norm of the gradients.
         total_norm (float): The pre-computed total norm of the gradients to use for scaling.
     """
     if isinstance(parameters, (torch.Tensor, DTensor)):
@@ -304,7 +304,7 @@ def clip_grad_by_total_norm_(
     ]
 
     # Scale.
-    clip_coeff = max_norm / (total_norm + 1.0e-6)
+    clip_coeff = max_grad_norm / (total_norm + 1.0e-6)
 
     if clip_coeff < 1.0:
         for g in grads:
