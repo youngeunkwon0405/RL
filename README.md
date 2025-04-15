@@ -1,24 +1,29 @@
-# NVIDIA NeMo RL: Scalable and Efficient Post-Training on NVIDIA GPUs
+# NeMo RL: Scalable and Efficient Post-Training on NVIDIA GPUs
 
 **NeMo RL** is a scalable and efficient post-training library designed for models ranging from 1 GPU to thousands, and from tiny to over 100 billion parameters.
 
+What you can expect:
+
+- **Seamless integration with Hugging Face** for ease of use, allowing users to leverage a wide range of pre-trained models and tools.
+- **High-performance implementation with Megatron Core**, supporting various parallelism techniques for large models (>100B) and large context lengths.
+- **Efficient resource management using Ray**, enabling scalable and flexible deployment across different hardware configurations.
+- **Flexibility** with a modular design that allows easy integration and customization.
+- **Comprehensive documentation** that is both detailed and user-friendly, with practical examples.
+
 ## Table of Contents
 
-- [NVIDIA NeMo RL: Scalable and Efficient Post-Training on NVIDIA GPUs](#nvidia-nemo-rl-scalable-and-efficient-post-training-on-nvidia-gpus)
-  - [Table of Contents](#table-of-contents)
-  - [Key Features](#key-features)
-  - [Install NeMo RL](#install-nemo-rl)
-  - [Quick Start](#quick-start)
-  - [Supervised Fine-Tuning (SFT)](#supervised-fine-tuning-sft)
-      - [Run Single Node SFT](#run-single-node-sft)
-      - [Run Multi-node SFT](#run-multi-node-sft)
-    - [Group Relative Policy Optimization (GRPO)](#group-relative-policy-optimization-grpo)
-      - [Run Single Node GRPO](#run-single-node-grpo)
-      - [Run Multi-node GRPO](#run-multi-node-grpo)
-  - [Set Up Clusters](#set-up-clusters)
-  - [Contributing](#contributing)
-  - [Licenses](#licenses)
-
+- [Key Features](#key-features)
+- [Install NeMo RL](#install-nemo-rl)
+- [Quickstart](#quickstart)
+- [Supervised Fine-Tuning (SFT)](#supervised-fine-tuning-sft)
+    - [Run Single Node SFT](#run-single-node-sft)
+    - [Run Multi-node SFT](#run-multi-node-sft)
+  - [Group Relative Policy Optimization (GRPO)](#group-relative-policy-optimization-grpo)
+    - [Run Single Node GRPO](#run-single-node-grpo)
+    - [Run Multi-node GRPO](#run-multi-node-grpo)
+- [Set Up Clusters](#set-up-clusters)
+- [Contributing](#contributing)
+- [Licenses](#licenses)
 
 ## Key Features
 
@@ -38,10 +43,10 @@ _✅ Available Now | 🔜 Coming Soon (v0.2)_
 
 ## Install NeMo RL
 
-For a streamlined setup, we recommend using `uv`. Ensure you have Python 3.12 or a compatible version installed.
+Use of the `uv` Python package manager is required for setup. Python 3.12 or a compatible version is also required.
 
 ```sh
-# Install uv for faster package management
+# Install uv
 pip install uv
 
 # Create a virtual environment with Python 3.12
@@ -66,7 +71,7 @@ uv pip install -e .[vllm]
 - It is generally recommended **not to explicitly activate the virtual environment** when using `uv`. Instead, use `uv run <command>` to execute scripts within the managed environment. This helps maintain consistency across different shells and sessions.
 - Ensure you have the necessary CUDA drivers and PyTorch installed compatible with your hardware.
 
-## Quick Start
+## Quickstart
 
 Before running any experiments, remember to set your `HF_HOME` environment variable and your `WANDB_API_KEY` if you intend to use Weights & Biases for logging. For accessing Llama models, you might also need to log in using `huggingface-cli login`.
 
@@ -82,9 +87,9 @@ The default SFT configuration is set to run on a single GPU. To start the experi
 uv run python examples/run_sft.py
 ```
 
-This command will fine-tune the `Llama3.2-1B` model on the SQuAD dataset using a single GPU.
+This fine-tunes the `Llama3.2-1B` model on the SQuAD dataset using a 1 GPU.
 
-To utilize more GPUs on a single node, you can modify the cluster configuration and potentially adjust the model and batch size:
+To use multiple GPUs on a single node, you can modify the cluster configuration. This adjustment will also let you potentially increase the model and batch size:
 
 ```sh
 uv run python examples/run_sft.py \
