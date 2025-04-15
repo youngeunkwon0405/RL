@@ -279,7 +279,8 @@ def refit_policy_generation(
     policy.offload_before_refit()
     policy_generation.prepare_for_generation()
     policy.stream_weight_update(
-        policy_generation.worker_group.workers, "update_weights_from_ipc_handles"
+        policy_generation.worker_group.get_tiled_workers(),
+        "update_weights_from_ipc_handles",
     )
 
     policy.offload_after_refit()

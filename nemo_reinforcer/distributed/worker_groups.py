@@ -453,6 +453,12 @@ class RayWorkerGroup:
             respect_tied_workers=respect_tied_workers,
         )
 
+    def get_tiled_workers(self):
+        return [
+            self._workers[tied_worker_group[0]]
+            for tied_worker_group in self.tied_workers_groups
+        ]
+
     def run_all_workers_single_data(
         self,
         method_name: str,
