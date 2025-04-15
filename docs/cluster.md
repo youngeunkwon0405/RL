@@ -1,8 +1,8 @@
 # Set Up Clusters
 
-This guide explains how to initialize NeMo RL clusters using various methods.
+This guide explains how to initialize NeMo RL clusters.
 
-## Slurm
+## Slurm (Batched and Interactive)
 
  The following code provides instructions on how to use Slurm to run batched job submissions and run jobs interactively.
 
@@ -55,10 +55,10 @@ sbatch ... \
 ### Interactive Launching
 
 :::{tip}
-A key advantage of running interactively on the head node is the ability to execute multiple multi-node jobs without needing to requeue in the Slurm job queue. This means that during debugging sessions, you can avoid submitting a new `sbatch` command each time. Instead, you can debug and re-submit your NeMo RL job directly from the interactive session.
+A key advantage of running interactively on the head node is the ability to execute multiple multi-node jobs without needing to requeue in the Slurm job queue. This means that during debugging sessions, you can avoid submitting a new `sbatch` command each time. Instead, you can debug and re-submit your job directly from the interactive session.
 :::
 
-To run interactively, launch the same command as the [Batched Job Submission](#batched-job-submission), except omit the `COMMAND` line:
+To run interactively, launch the same command as [Batched Job Submission](#batched-job-submission), but omit the `COMMAND` line:
 ```sh
 # Run from the root of NeMo-Reinforcer repo
 NUM_ACTOR_NODES=1  # Total nodes requested (head is colocated on ray-worker-0)
