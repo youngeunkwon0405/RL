@@ -1,16 +1,20 @@
-# Supervised Fine-tuning in Reinforcer
+# Supervised Fine-Tuning in NeMo RL
+
+This document explains how to perform SFT within NeMo RL. It outlines key operations, including initiating SFT runs, managing experiment configurations using YAML, and integrating custom datasets that conform to the required structure and attributes.
 
 ## Launch an SFT Run
 
-The script [examples/run_sft.py](../../examples/run_sft.py) can be used to launch an experiment. This script can either be launched locally or via Slurm. For details on how to set up Ray and launch a job using Slurm, refer to the [cluster documentation](../cluster.md).
+The script, [examples/run_sft.py](../../examples/run_sft.py), can be used to launch an experiment. This script can be launched either locally or via Slurm. For details on how to set up Ray and launch a job using Slurm, refer to the [cluster documentation](../cluster.md).
 
 Be sure to launch the job using `uv`. The command to launch an SFT job is as follows:
+
 ```bash
 uv run examples/run_sft.py --config <PATH TO YAML CONFIG> <OVERRIDES>
 ```
+
 If not specified, `config` will default to [examples/configs/sft.yaml](../../examples/configs/sft.yaml).
 
-## Configuration
+## Configure Experiments
 
 Reinforcer allows users to configure experiments using `yaml` config files. An example SFT configuration file can be found [here](../../examples/configs/sft.yaml).
 
@@ -21,15 +25,16 @@ uv run examples/run_sft.py \
     cluster.gpus_per_node=1 \
     logger.wandb.name="sft-dev-1-gpu"
 ```
-**Reminder**: Don't forget to set your HF_HOME and WANDB_API_KEY (if needed). You'll need to do a `huggingface-cli login` as well for Llama models.
+
+**Reminder**: Don't forget to set your HF_HOME and WANDB_API_KEY (if needed). Additionally, perform a `huggingface-cli login` for Llama models.
 
 ## Datasets
 
-SFT datasets in Reinforcer are encapsulated using classes. Each SFT data class is expected to have the following attributes:
+SFT datasets in NeMo RL are encapsulated using classes. Each SFT data class is expected to have the following attributes:
   1. `formatted_ds`: The dictionary of formatted datasets. This dictionary should contain `train` and `validation` splits, and each split should conform to the format described below.
   2. `task_spec`: The `TaskDataSpec` for this dataset. This should specify the name you choose for this dataset as well as the `custom_template` for this dataset. More on custom templates below.
 
-SFT datasets are expected to follow the HuggingFace chat format. Refer to the [chat dataset document](../design_docs/chat_datasets.md) for details. If your data is not in the correct format, simply write a preprocessing script to convert the data into this format. [data/hf_datasets/squad.py](../../nemo_reinforcer/data/hf_datasets/squad.py) has an example:
+SFT datasets are expected to follow the Hugging Face chat format. Refer to the [chat dataset document](../design_docs/chat_datasets.md) for details. If your data is not in the correct format, simply write a preprocessing script to convert the data into this format. [data/hf_datasets/squad.py](../../nemo_reinforcer/data/hf_datasets/squad.py) has an example:
 
 ```python
 def format_squad(data):
@@ -51,7 +56,7 @@ def format_squad(data):
     }
 ```
 
-Reinforcer SFT uses HuggingFace chat templates to format the individual examples. If you would like to use a custom template, create a string template in [jinja format](https://huggingface.co/docs/transformers/v4.34.0/en/chat_templating#how-do-i-create-a-chat-template) and pass it to the dataset's `TaskDataSpec`. For example,
+To run SFT with NeMo RL, you must use Hugging Face chat templates to format the individual examples. If you would like to use a custom template, create a string template in [jinja format](https://huggingface.co/docs/transformers/v4.34.0/en/chat_templating#how-do-i-create-a-chat-template) and pass it to the dataset's `TaskDataSpec`. For example:
 
 ```python
 custom_template = (
@@ -63,7 +68,7 @@ task_spec = TaskDataSpec(
 )
 ```
 
-By default, NeMo-Reinforcer has support for `Squad` and `OpenAssistant` datasets. Both of these datasets are downloaded from HuggingFace and preprocessed on-the-fly, so there's no need to provide a path to any datasets on disk.
+By default, NeMo RL has support for `Squad` and `OpenAssistant` datasets. Both of these datasets are downloaded from Hugging Face and preprocessed on-the-fly, so there's no need to provide a path to any datasets on disk.
 
 Adding a new dataset is a straightforward process.
 As long as your custom dataset has the `formatted_ds` and `task_spec` attributes described above, it can serve as a drop-in replacement for Squad and OpenAssistant.
