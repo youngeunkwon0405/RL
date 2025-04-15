@@ -296,7 +296,7 @@ class DTensorPolicyWorker:
                 with torch.autocast(device_type="cuda", dtype=self.dtype):
                     batch_size, seq_len = input_ids.shape
 
-                    attention_mask_input = torch.ones(
+                    attention_mask_input_all_ones = torch.ones(
                         (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                     )
                     position_ids = torch.arange(
@@ -305,7 +305,7 @@ class DTensorPolicyWorker:
 
                     outputs = self.model(
                         input_ids=input_ids,
-                        attention_mask=attention_mask_input,
+                        attention_mask=attention_mask_input_all_ones,
                         position_ids=position_ids,
                         use_cache=False,
                     )
@@ -416,13 +416,13 @@ class DTensorPolicyWorker:
                     # yet our attention mask above is not always all 1s
                     # this is fine because we mask with the actual attention mask
                     # later, but for input it has to be all 1s
-                    attention_mask_input = torch.ones(
+                    attention_mask_input_all_ones = torch.ones(
                         (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                     )
 
                     outputs = self.model(
                         input_ids=input_ids,
-                        attention_mask=attention_mask_input,
+                        attention_mask=attention_mask_input_all_ones,
                         position_ids=position_ids,
                         use_cache=False,
                     )
