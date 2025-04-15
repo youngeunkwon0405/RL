@@ -41,6 +41,9 @@ class VllmInternalWorkerExtension:
         try:
             # Get handles for this device
             device_uuid = self.report_device_id()
+            if device_uuid not in ipc_handles:
+                # Skip if no handles for this device
+                return True
             handles = ipc_handles[device_uuid]
             device_id = self.device.index
             weights = []
