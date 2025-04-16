@@ -61,6 +61,8 @@ basic_hf_test_config: PolicyConfig = {
     "max_new_tokens": 16,
     "do_sample": False,
     "precision": "float32",
+    "fsdp_offload_enabled": False,
+    "activation_checkpointing_enabled": False,
     "optimizer": {
         "name": "torch.optim.AdamW",
         "kwargs": {

@@ -154,7 +154,10 @@ def save_checkpoint(
         save_hf: Whether to save in HuggingFace format
     """
     if save_hf:
-        model_state_dict = model._fsdp_wrapped_module.state_dict()
+        if hasattr(model, "_fsdp_wrapped_module"):
+            model_state_dict = model._fsdp_wrapped_module.state_dict()
+        else:
+            model_state_dict = model.state_dict()
 
         if torch.distributed.get_rank() == 0:
             # Create a new path by appending "-hf" to the weights path

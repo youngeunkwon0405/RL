@@ -135,7 +135,8 @@ class RayWorkerBuilder:
             if env_vars:
                 if "runtime_env" not in options:
                     options["runtime_env"] = {}
-                options["runtime_env"]["env_vars"] = env_vars
+                for k, v in env_vars.items():
+                    options["runtime_env"]["env_vars"][k] = v
 
             # Apply initialization parameters
             if init_kwargs:
@@ -207,7 +208,6 @@ class RayWorkerGroup:
         self.cluster = cluster
         self.name_prefix = name_prefix
         self.tied_workers_groups = []
-
         # Maps worker indices to their corresponding tied group index
         # For example, if worker with index 3 belongs to tied worker group 1,
         # then worker_to_tied_group_index[3] = 1

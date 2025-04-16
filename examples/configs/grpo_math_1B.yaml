@@ -33,6 +33,8 @@ policy:
   logprob_batch_size: 4
   max_total_sequence_length: 512
   precision: "bfloat16"
+  fsdp_offload_enabled: false
+  activation_checkpointing_enabled: false
 
   optimizer:
     name: "torch.optim.AdamW"
