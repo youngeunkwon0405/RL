@@ -319,20 +319,20 @@ def clip_grad_by_total_norm_(
 
 
 def get_grad_norm(
-    grads_for_norm: Union[
-        List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]
-    ],
+    parameters: Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
     dp_group: torch.distributed.ProcessGroup,
     tp_group: torch.distributed.ProcessGroup,
     norm_type: Union[int, float] = 2,
+    precision: torch.dtype = torch.float32,
 ) -> float:
     """Calculate the norm of gradients.
 
     Taken and modified from: https://github.com/NVIDIA/Megatron-LM/blob/a695b2bd2a0ca9ca63385a48c41a1c5a033cdd1e/megatron/core/optimizer/clip_grads.py#L51
 
     Args:
-        grads_for_norm (Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]]): An iterable of Tensors or DTensors, or a single
-            Tensor or DTensor that will be used for calculating the gradient norm.
+        parameters (Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]]):
+            An iterable of Tensors or DTensors, or a single Tensor or DTensor
+            that will have gradient norm calculated.
         dp_group (torch.distributed.ProcessGroup): Process group for data parallel communication.
         tp_group (torch.distributed.ProcessGroup): Process group for tensor parallel communication.
         norm_type (Union[int, float]): Type of the used p-norm. Can be ``'inf'`` for
@@ -341,10 +341,16 @@ def get_grad_norm(
     Returns:
         float: Total norm of the gradients (viewed as a single vector)
     """
-    if isinstance(grads_for_norm, (torch.Tensor, DTensor)):
-        grads_for_norm = [grads_for_norm]
+    if isinstance(parameters, (torch.Tensor, DTensor)):
+        parameters = [parameters]
 
-    grads_for_norm = [to_local_if_dtensor(grad) for grad in grads_for_norm]
+    # Grads.
+    grads_for_norm = [
+        to_local_if_dtensor(p.grad.detach()).to(precision)
+        for p in parameters
+        if p.grad is not None
+    ]
+
     # Norm parameters.
     norm_type = float(norm_type)
     total_norm = 0.0
