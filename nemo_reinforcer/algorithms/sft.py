@@ -417,6 +417,7 @@ def sft_train(
                             checkpoint_path, "policy", "optimizer"
                         ),
                         save_hf=is_last_checkpoint,
+                        git_info_filename=os.path.join(checkpoint_path, "git_info.txt"),
                     )
                     torch.save(
                         train_dataloader.state_dict(),
