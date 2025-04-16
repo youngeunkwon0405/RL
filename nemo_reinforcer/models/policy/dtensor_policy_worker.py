@@ -155,10 +155,10 @@ class DTensorPolicyWorker:
         tp_size = self.cfg["dtensor_cfg"]["tensor_parallel_size"]
         dp_size = world_size // tp_size
         assert world_size % tp_size == 0, (
-            "World size must be divisible by TP size to use DTensor"
+            f"World size({world_size}) must be divisible by TP size({tp_size}) to use DTensor"
         )
 
-        mesh_2d = init_device_mesh(
+        mesh_2d = torch.distributed.device_mesh.init_device_mesh(
             "cuda", (dp_size, tp_size), mesh_dim_names=("dp", "tp")
         )
         self.dp_mesh, self.tp_mesh = mesh_2d["dp"], mesh_2d["tp"]

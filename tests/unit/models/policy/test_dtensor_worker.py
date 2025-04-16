@@ -15,6 +15,9 @@ import ray
 import pytest
 import pprint
 import torch
+import os
+import unittest.mock
+import torch.distributed as dist
 
 # Define a custom marker for model configuration tests
 pytestmark = pytest.mark.modelconfig
@@ -26,13 +29,15 @@ from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
 from nemo_reinforcer.models.generation.interfaces import configure_generation_config
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
+from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from tests.unit.test_utils import simple_loss
+from tests.unit.conftest import TEST_ASSETS
 from functools import partial
 from transformers import AutoModelForCausalLM
 
 
 def create_test_config(
-    model_name: str = "meta-llama/Llama-3.2-1B",
+    model_name: str = TEST_ASSETS.TINY_LLAMA_MODEL_PATH,
     tp: int = 1,
     sequence_parallel: bool = False,
     cpu_offload: bool = False,
@@ -84,82 +89,10 @@ def create_test_config(
     }
 
 
-basic_test_config = create_test_config()
-
-
-@pytest.fixture(scope="function")
-def gc_collect():
-    """Helper function to force garbage collection after a test"""
-    import gc
-
-    gc.collect()
-
-
-@pytest.fixture(scope="function")
-def tokenizer():
-    """Initialize tokenizer for the test model."""
-    model_name = basic_test_config["model_name"]
-    tokenizer = get_tokenizer(model_name)
-    return tokenizer
-
-
-@pytest.fixture(scope="function")
-def test_input_data(tokenizer):
-    """Create test input data for inference."""
-    prompts = [
-        "Write a story about a magical forest",
-        "Explain how photosynthesis works",
-        "What are the benefits of exercise?",
-        "Describe the water cycle",
-        "What is the capital of France?",
-        "Who is the president of the USA?",
-        "What is the capital of the moon?",
-        "Where is the sun?",
-    ]
-
-    expected_generations = [
-        "Write a story about a magical forest. The forest is magical because it is full of magical creatures. The creatures are",
-        "Explain how photosynthesis works\nExplain how photosynthesis works\nPhotosynthesis is the process by which plants",
-        "What are the benefits of exercise? The benefits of exercise are many and varied. It is a great way to improve",
-        "Describe the water cycle in your own words.\nDescribe the water cycle in your own words.\nDescribe the",
-        "What is the capital of France? A. Paris B. New York C. Washington D. Baton Rouge\nA",
-        "Who is the president of the USA? Who is the president of the USA? Who is the president of the USA?",
-        "What is the capital of the moon? A. Houston B. New York C. Washington D. Denver\nA.",
-        "Where is the sun? Where is the moon? Where is the earth? Where is the sky? Where",
-    ]
-
-    # Tokenize the prompts
-    tokenized = tokenizer(
-        prompts,
-        padding=True,
-        truncation=True,
-        max_length=64,
-        return_tensors="pt",
-        padding_side="right",
-    )
-
-    # Calculate input lengths from attention mask
-    input_lengths = tokenized["attention_mask"].sum(dim=1).to(torch.int32)
-
-    data = BatchedDataDict(
-        {
-            "input_ids": tokenized["input_ids"],
-            "input_lengths": input_lengths,
-        }
-    )
-
-    return data, prompts, expected_generations
-
-
-@pytest.fixture
-def policy_setup(tokenizer):
-    """Setup and teardown for policy tests - creates a virtual cluster and policy."""
-    policy = None
-    cluster = None
-
+@pytest.fixture(scope="module")
+def two_gpu_virtual_cluster():
     cluster_name = "test"
     print(f"Creating virtual cluster '{cluster_name}'...")
-
     cluster = RayVirtualCluster(
         name=cluster_name,
         bundle_ct_per_node_list=[2],  # Use tp bundles, one per GPU
@@ -167,28 +100,46 @@ def policy_setup(tokenizer):
         num_gpus_per_node=2,  # Using tp GPUs
         max_colocated_worker_groups=1,  # Only one worker group
     )
+    yield cluster
+    print("Shutting down virtual cluster...")
+    cluster.shutdown()
 
-    config = basic_test_config
+
+@pytest.fixture(scope="function")
+def gc_collect():
+    """Helper function to force garbage collection after a test"""
+    import gc
+
+    yield
+    gc.collect()
+
+
+@pytest.fixture(scope="function")
+def tokenizer():
+    """Initialize tokenizer for the test model."""
+    model_name = create_test_config()["model_name"]
+    tokenizer = get_tokenizer(model_name)
+    return tokenizer
+
+
+@pytest.fixture
+def policy_setup(tokenizer, two_gpu_virtual_cluster):
+    """Setup and teardown for policy tests - creates a virtual cluster and policy."""
+    config = create_test_config()
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating HfPolicy...")
-    policy = HfPolicy(cluster=cluster, config=config)
+    policy = HfPolicy(cluster=two_gpu_virtual_cluster, config=config)
 
-    yield policy, cluster
+    yield policy
 
-    # Clean up after the test
-    print("Cleaning up resources for test")
-    cluster.shutdown()
-    policy.worker_group.shutdown()
+    print("Shutting down policy...")
+    policy.shutdown()
 
 
 @pytest.mark.timeout(180)
 def test_hf_policy_init(policy_setup):
-    policy, cluster = policy_setup
-
-    # Verify cluster and policy were properly created
-    assert policy is not None, "Policy was not created properly"
-    assert cluster is not None, "Cluster was not created properly"
+    policy = policy_setup
 
     # Verify we have two workers, one per GPU
     assert len(policy.worker_group.workers) == 2, "Should have 2 workers, one per GPU"
@@ -236,9 +187,9 @@ def test_hf_policy_init(policy_setup):
             f"Expected WORLD_SIZE=2, got {info['env_vars']['WORLD_SIZE']}"
         )
 
-    # Check 5: Verify significant GPU memory is allocated (at least 1GB) on both GPUs
+    # Check 5: Verify GPU memory is allocated on both GPUs
     for info in gpu_infos:
-        assert info["memory_allocated_mb"] > 1000, (
+        assert info["memory_allocated_mb"] > 10, (
             f"Not enough memory allocated on GPU for rank {info['rank']}: {info['memory_allocated_mb']:.2f} MB"
         )
 
@@ -264,36 +215,25 @@ def test_hf_policy_init(policy_setup):
 
 
 @pytest.fixture
-def training_setup(request):
+def training_setup(request, two_gpu_virtual_cluster):
     """Setup and teardown specifically for training tests."""
     model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = (
         request.param
     )
     policy = None
-    cluster = None
     data = None
     loss_fn = None
 
     try:
-        # Create resources with unique name
-        cluster_name = f"test-train-tp{tp}-cpu{int(cpu_offload)}-sp{int(sequence_parallel)}-ac{int(activation_checkpointing)}"
-        print(f"Creating training virtual cluster '{cluster_name}'...")
-
-        cluster = RayVirtualCluster(
-            name=cluster_name,
-            bundle_ct_per_node_list=[2],  # Single node, 2 gpus
-            use_gpus=True,
-            num_gpus_per_node=2,  # Using both GPUs
-            max_colocated_worker_groups=1,  # Only one worker group
-        )
-
         config = create_test_config(
             model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
         )
         print(
             f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
         )
-        policy = HfPolicy(cluster=cluster, config=config, init_reference_model=False)
+        policy = HfPolicy(
+            cluster=two_gpu_virtual_cluster, config=config, init_reference_model=False
+        )
 
         # Create a test batch
         print("Creating test batch...")
@@ -320,7 +260,7 @@ def training_setup(request):
         loss_fn: LossFunction = simple_loss
 
         # Provide the resources to the test
-        yield policy, cluster, data, loss_fn
+        yield policy, data, loss_fn
 
     except Exception as e:
         print(f"Error during training setup: {e}")
@@ -328,29 +268,23 @@ def training_setup(request):
     finally:
         # Clean up after the test
         print("Cleaning up resources for test")
-        cluster.shutdown()
-        policy.worker_group.shutdown()
+        policy.shutdown()
 
 
-@pytest.mark.timeout(360)
+@pytest.mark.timeout(60)
 @pytest.mark.parametrize(
     "training_setup",
     [
-        # ("meta-llama/Llama-3.2-1B",1, False, False, False),
-        # ("meta-llama/Llama-3.2-1B",1, True, False, False),
-        # ("meta-llama/Llama-3.2-1B",1, False, True, False),
-        # ("meta-llama/Llama-3.2-1B",1, False, False, True),
-        # ("meta-llama/Llama-3.2-1B",1, True, True, False),
-        # ("meta-llama/Llama-3.2-1B",1, True, False, True),
-        # ("meta-llama/Llama-3.2-1B",1, False, True, True),
-        ("meta-llama/Llama-3.2-1B", 1, True, True, True),
-        # ("Qwen/Qwen2.5-1.5B", 1, True, True, True),
-        # ("Qwen/Qwen2.5-7B", 2, False, False, False),
-        # ("Qwen/Qwen2.5-7B", 2, False, False, True),
-        # ("Qwen/Qwen2.5-7B", 2, False, True, False),
-        # ("Qwen/Qwen2.5-7B", 2, False, True, True),
-        ("Qwen/Qwen2.5-7B", 2, False, True, True),
-        ("meta-llama/Llama-3.1-8B", 2, False, True, True),
+        # model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
+        # Split grid over tp/cpu/sp/act across qwen and llama
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 1, False, False, False),
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 1, True, False, False),
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 1, False, True, False),
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 1, False, False, True),
+        (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, True, True, False),
+        (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, True, False, True),
+        (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, False, True, True),
+        (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, True, True, True),
     ],
     indirect=True,
 )
@@ -360,11 +294,10 @@ def test_dtensor_worker_training(training_setup):
         assert not torch.isinf(loss_tensor).any(), "Loss should not be Inf"
         return loss_tensor
 
-    policy, cluster, data, loss_fn = training_setup
+    policy, data, loss_fn = training_setup
 
     # Verify resources were created properly
     assert policy is not None, "Training policy was not created properly"
-    assert cluster is not None, "Training cluster was not created properly"
     assert data is not None, "Test data was not created properly"
     assert loss_fn is not None, "Loss function was not created properly"
 
@@ -373,7 +306,7 @@ def test_dtensor_worker_training(training_setup):
     policy.prepare_for_training()
 
     losses = []
-    for steps in range(3):
+    for steps in range(2):
         results = policy.train(data, loss_fn)
 
         # Verify results
@@ -391,35 +324,24 @@ def test_dtensor_worker_training(training_setup):
 
 
 @pytest.fixture
-def logprob_setup(request):
+def logprob_setup(request, two_gpu_virtual_cluster):
     """Setup and teardown specifically for training tests."""
     model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = (
         request.param
     )
     policy = None
-    cluster = None
     data = None
 
     try:
-        # Create resources with unique name
-        cluster_name = f"test-logprob-tp{tp}-cpu{int(cpu_offload)}-sp{int(sequence_parallel)}-ac{int(activation_checkpointing)}"
-        print(f"Creating logprob virtual cluster '{cluster_name}'...")
-
-        cluster = RayVirtualCluster(
-            name=cluster_name,
-            bundle_ct_per_node_list=[2],  # Single node, 2 gpus
-            use_gpus=True,
-            num_gpus_per_node=2,  # Using both GPUs
-            max_colocated_worker_groups=1,  # Only one worker group
-        )
-
         config = create_test_config(
             model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
         )
         print(
             f"Creating logprob HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
         )
-        policy = HfPolicy(cluster=cluster, config=config, init_reference_model=False)
+        policy = HfPolicy(
+            cluster=two_gpu_virtual_cluster, config=config, init_reference_model=False
+        )
 
         # Create a test batch
         print("Creating test batch...")
@@ -466,7 +388,7 @@ def logprob_setup(request):
         data = data.to("cpu")
 
         # Provide the resources to the test
-        yield policy, cluster, data, token_logprobs
+        yield policy, data, token_logprobs
 
     except Exception as e:
         print(f"Error during training setup: {e}")
@@ -474,27 +396,25 @@ def logprob_setup(request):
     finally:
         # Clean up after the test
         print("Cleaning up resources for test")
-        cluster.shutdown()
-        policy.worker_group.shutdown()
+        policy.shutdown()
 
 
 @pytest.mark.timeout(360)
 @pytest.mark.parametrize(
     "logprob_setup",
     [
-        ("Qwen/Qwen2.5-7B", 2, False, True, False),
-        ("Qwen/Qwen2.5-7B", 2, False, False, False),
-        ("meta-llama/Llama-3.1-8B", 2, False, False, False),
-        ("meta-llama/Llama-3.1-8B", 2, False, True, False),
-        ("meta-llama/Llama-3.1-8B", 2, False, True, True),
+        (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 2, False, True, False),
+        (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 2, False, False, False),
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 2, False, False, False),
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 2, False, True, False),
+        (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 2, False, True, True),
     ],
     indirect=True,
 )
-def test_dtensor_worker_logprob(logprob_setup):
-    policy, cluster, data, logprobs = logprob_setup
+def test_dtensor_worker_logprob_tp2_matches_no_tp(logprob_setup):
+    policy, data, logprobs = logprob_setup
 
     # Verify resources were created properly assert policy is not None, "Policy was not created properly"
-    assert cluster is not None, "Cluster was not created properly"
     assert data is not None, "Test data was not created properly"
 
     # Generate logprobs
@@ -506,3 +426,20 @@ def test_dtensor_worker_logprob(logprob_setup):
     assert torch.allclose(policy_logprobs, logprobs), (
         f"max diff {torch.max(torch.abs(policy_logprobs - logprobs))}"
     )
+
+
+def test_dtensor_fails_with_tp_and_tied_model(mock_2gpu_distributed_env):
+    """Test that DTensor fails with a tp > 1 and a tied model."""
+    config = create_test_config(
+        model_name=TEST_ASSETS.TINY_LLAMA_TIED_MODEL_PATH,
+        tp=2,
+        cpu_offload=False,
+        sequence_parallel=False,
+        activation_checkpointing=False,
+    )
+    with pytest.raises(
+        AssertionError, match="Tie word embeddings not supported when TP is enabled"
+    ):
+        DTensorPolicyWorker.__ray_actor_class__(
+            config=config, init_optimizer=False, init_reference_model=False
+        )
