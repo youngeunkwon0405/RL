@@ -288,6 +288,7 @@ def clip_grad_by_total_norm_(
     parameters: Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
     max_grad_norm: Union[int, float],
     total_norm: float,
+    dtype: torch.dtype = torch.float32,
 ):
     """Clips gradient of an iterable of parameters by total norm.
 
@@ -307,7 +308,7 @@ def clip_grad_by_total_norm_(
 
     # Grads.
     grads = [
-        to_local_if_dtensor(p.grad.detach()) for p in parameters if p.grad is not None
+        to_local_if_dtensor(p.grad.detach()).to(dtype) for p in parameters if p.grad is not None
     ]
 
     # Scale.
@@ -323,7 +324,7 @@ def get_grad_norm(
     dp_group: torch.distributed.ProcessGroup,
     tp_group: torch.distributed.ProcessGroup,
     norm_type: Union[int, float] = 2,
-    precision: torch.dtype = torch.float32,
+    dtype: torch.dtype = torch.float32,
 ) -> float:
     """Calculate the norm of gradients.
 
@@ -343,10 +344,11 @@ def get_grad_norm(
     """
     if isinstance(parameters, (torch.Tensor, DTensor)):
         parameters = [parameters]
+    
 
     # Grads.
     grads_for_norm = [
-        to_local_if_dtensor(p.grad.detach()).to(precision)
+        to_local_if_dtensor(p.grad.detach()).to(dtype)
         for p in parameters
         if p.grad is not None
     ]
