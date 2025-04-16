@@ -35,7 +35,7 @@ Corresponding logprobs:
 |-- zeros for input --|  |- gen logprobs -|  |pad|
 ```
 
-## Verifying Right Padding
+## Verify Right Padding
 
 NeMo RL provides utilities to verify correct padding. For example:
 

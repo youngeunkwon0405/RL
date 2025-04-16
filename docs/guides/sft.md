@@ -14,7 +14,7 @@ uv run examples/run_sft.py --config <PATH TO YAML CONFIG> <OVERRIDES>
 
 If not specified, `config` will default to [examples/configs/sft.yaml](../../examples/configs/sft.yaml).
 
-## Configure Experiments
+## Example Configuration File
 
 Reinforcer allows users to configure experiments using `yaml` config files. An example SFT configuration file can be found [here](../../examples/configs/sft.yaml).
 

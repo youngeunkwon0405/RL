@@ -68,7 +68,7 @@ uv pip install -e .[vllm]
 
 **Important Notes:**
 
-- It is generally recommended **not to explicitly activate the virtual environment** when using `uv`. Instead, use `uv run <command>` to execute scripts within the managed environment. This helps maintain consistency across different shells and sessions.
+- Use the `uv run <command>` to execute scripts within the managed environment. This helps maintain consistency across different shells and sessions.
 - Ensure you have the necessary CUDA drivers and PyTorch installed compatible with your hardware.
 
 ## Quickstart

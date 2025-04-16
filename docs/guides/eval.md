@@ -28,7 +28,7 @@ score=0.10 (3.0/30)
 ============================================================
 ```
 
-## Configuration File
+## Example Configuration File
 
 You can find an example evaluation configuration file [here](../../examples/configs/eval.yaml).
 
