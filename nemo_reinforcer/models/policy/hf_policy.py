@@ -26,7 +26,7 @@ from torch.distributed.fsdp import (
     MixedPrecision,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import get_tokenizer
@@ -68,6 +68,7 @@ class HfPolicyWorker:
     def __init__(
         self,
         config: PolicyConfig,
+        tokenizer: AutoTokenizer,
         weights_path: Optional[str] = None,
         optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,
@@ -79,7 +80,6 @@ class HfPolicyWorker:
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
-        tokenizer_name = self.cfg["tokenizer_name"]
         if self.cfg["precision"] == "float32":
             self.dtype = torch.float32
         elif self.cfg["precision"] == "bfloat16":
@@ -101,7 +101,8 @@ class HfPolicyWorker:
             )
         else:
             self.reference_model = None
-        self.tokenizer = get_tokenizer(tokenizer_name)
+
+        self.tokenizer = tokenizer
 
         # ------------------------------------------------
         # 3) Move to GPU + Composable FSDP
@@ -825,6 +826,7 @@ class HfPolicyWorker:
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None,
         save_torch_dist: bool = True,
         save_hf: bool = False,
     ):
@@ -856,6 +858,8 @@ class HfPolicyWorker:
             optimizer=self.optimizer if optimizer_path else None,
             scheduler=self.scheduler if optimizer_path else None,
             optimizer_path=optimizer_path,
+            tokenizer=self.tokenizer if tokenizer_path else None,
+            tokenizer_path=tokenizer_path,
             save_torch_dist=save_torch_dist,
             save_hf=save_hf,
         )
@@ -881,6 +885,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self,
         cluster: RayVirtualCluster,
         config: PolicyConfig,
+        tokenizer: AutoTokenizer,
         name_prefix: str = "hf_policy",
         workers_per_node: Optional[Union[int, List[int]]] = None,
         init_optimizer: bool = True,
@@ -896,6 +901,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         worker_builder = RayWorkerBuilder(
             HfPolicyWorker,
             config,
+            tokenizer=tokenizer,
             init_optimizer=init_optimizer,
             weights_path=weights_path,
             optimizer_path=optimizer_path,
@@ -1087,6 +1093,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None,
         save_torch_dist: bool = True,
         save_hf: bool = False,
     ):
@@ -1095,6 +1102,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             "save_checkpoint",
             weights_path,
             optimizer_path,
+            tokenizer_path,
             save_torch_dist,
             save_hf,
             respect_tied_workers=True,
