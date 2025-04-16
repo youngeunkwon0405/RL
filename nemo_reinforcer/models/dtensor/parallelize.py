@@ -308,7 +308,9 @@ def clip_grad_by_total_norm_(
 
     # Grads.
     grads = [
-        to_local_if_dtensor(p.grad.detach()).to(dtype) for p in parameters if p.grad is not None
+        to_local_if_dtensor(p.grad.detach()).to(dtype)
+        for p in parameters
+        if p.grad is not None
     ]
 
     # Scale.
@@ -344,7 +346,6 @@ def get_grad_norm(
     """
     if isinstance(parameters, (torch.Tensor, DTensor)):
         parameters = [parameters]
-    
 
     # Grads.
     grads_for_norm = [
