@@ -333,12 +333,14 @@ class DTensorPolicyWorker:
                         self.model.parameters(),
                         dp_group=self.dp_mesh.get_group(),
                         tp_group=self.tp_mesh.get_group(),
+                        dtype=torch.float32,
                     )
                     if self.max_grad_norm is not None:
                         clip_grad_by_total_norm_(
                             self.model.parameters(),
                             max_grad_norm=self.max_grad_norm,
                             total_norm=grad_norm,
+                            dtype=torch.float32,
                         )
 
                 # Update parameters
