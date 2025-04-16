@@ -12,13 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import abc
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, NamedTuple
 
 from torch import Tensor
 
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 
-EnvironmentReturn = Tuple[List[List[Dict[str, str]]], List[Dict], Tensor, Tensor]
+
+# [batched] observations/responses, metadata, next_stop_strings, rewards, 'episode done' flags
+# Changed to NamedTuple for clarity
+class EnvironmentReturn(NamedTuple):
+    observations: List[Dict[str, str]]
+    metadata: List[Optional[Dict]]  # Metadata might be None if episode terminates
+    next_stop_strings: List[Optional[List[str]]]
+    rewards: Tensor
+    terminated: (
+        Tensor  # Renamed from 'done' for clarity, represents natural episode end
+    )
 
 
 class EnvironmentInterface(abc.ABC):
@@ -53,8 +63,9 @@ class EnvironmentInterface(abc.ABC):
         Returns:
         - List[Dict[str, str]]: An observation/response batch in an OpenAI-API-like message format that is the result of the step.
         - List[Dict]: An updated batch of metadata.
+        - List[List[str]]: A batch of lists of next stop strings for the next turn, if provided by env.
         - Tensor: A tensor of rewards.
-        - Tensor: A tensor of done flags.
+        - Tensor: A tensor of terminated flags
         """
 
     @abc.abstractmethod

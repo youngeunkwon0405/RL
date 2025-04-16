@@ -494,10 +494,12 @@ class HfPolicyWorker:
     def generate(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
-        """Generate a batch of data using huggingface framework generation.
+        """Generate a batch of data using HF generate.
 
         Args:
             data: BatchedDataDict containing input_ids and input_lengths tensors
+                  May also contain 'stop_strings' (Optional[List[str]]) for per-sample stopping.
+            greedy: Whether to use greedy decoding instead of sampling
 
         Returns:
             BatchedDataDict conforming to GenerationOutputSpec:
@@ -538,6 +540,20 @@ class HfPolicyWorker:
                 # Create attention mask from input_lengths if needed for the model
                 input_ids = gen_batch.get("input_ids").cuda()
                 input_lengths = gen_batch.get("input_lengths").cuda()
+
+                # this function requires all generations have the same stop strings, so we collect all here
+                batch_stop_strings = gen_batch.get("stop_strings", [])
+                stop_strings = set()
+                for sample_stop_strings in batch_stop_strings:
+                    if sample_stop_strings:
+                        stop_strings.update(sample_stop_strings)
+
+                # Add default stop strings from config
+                if gen_cfg.get("stop_strings", None):
+                    stop_strings.update(gen_cfg["stop_strings"])
+
+                stop_strings = list(stop_strings)
+
                 batch_size, seq_len = input_ids.shape
 
                 # Convert right padding to left padding
@@ -570,7 +586,7 @@ class HfPolicyWorker:
                     top_k=gen_cfg["top_k"],
                     pad_token_id=gen_cfg["pad_token_id"],
                     eos_token_id=gen_cfg["stop_token_ids"],
-                    stop_strings=gen_cfg["stop_strings"],
+                    stop_strings=stop_strings,
                     tokenizer=self.tokenizer,  # needs for stop_strings
                     return_dict_in_generate=True,
                     output_scores=True,
