@@ -173,6 +173,8 @@ def calculate_rewards(
         env_observations, metadata, next_stop_strings, task_rewards, terminateds = (
             result
         )
+        if next_stop_strings is None:
+            next_stop_strings = [[None]] * len(task_rewards)
 
         # Store results with their original indices
         for i, idx in enumerate(indices):
@@ -324,7 +326,7 @@ def run_multi_turn_rollout(
 
         # Update message log for ALL active samples with env observation
         # This must happen BEFORE filtering based on done flags
-        truncation_mask = torch.zeros_like(env_output.terminateds)
+        truncation_mask = torch.zeros_like(env_output.terminateds, dtype=torch.bool)
         for i, global_idx in enumerate(active_indices.tolist()):
             env_obs_content = env_output.env_observations[i]["content"]
             # Tokenize the raw content from the environment
@@ -356,7 +358,8 @@ def run_multi_turn_rollout(
             sample_turn_counts[global_idx] += 1
 
         # Determine done samples and update active set
-        done = env_output.terminateds | truncation_mask
+        terminateds = env_output.terminateds.bool()
+        done = terminateds | truncation_mask
         active_mask = ~done
 
         # Identify samples that just finished this turn
