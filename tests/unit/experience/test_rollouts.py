@@ -15,21 +15,17 @@
 import pytest
 import ray
 import torch
-from typing import Dict, List, Tuple, Optional, TypedDict
 from copy import deepcopy
 import gc
 
-from transformers import AutoTokenizer, GPT2TokenizerFast
+from transformers import AutoTokenizer
 
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.data.interfaces import DatumSpec, LLMMessageLogType
-from nemo_reinforcer.environments.interfaces import EnvironmentInterface
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from nemo_reinforcer.models.generation.interfaces import configure_generation_config
 from nemo_reinforcer.experience.rollouts import run_multi_turn_rollout
-from nemo_reinforcer.distributed.virtual_cluster import PY_EXECUTABLES
 
 # Import the test environment definitions
 from tests.unit.test_envs import (
