@@ -158,7 +158,9 @@ def save_checkpoint(
             model_state_dict = model._fsdp_wrapped_module.state_dict()
         else:
             model_state_dict = {
-                k: v.full_tensor() if isinstance(v, torch.distributed.tensor.DTensor) else v
+                k: v.full_tensor()
+                if isinstance(v, torch.distributed.tensor.DTensor)
+                else v
                 for k, v in model.state_dict().items()
             }
 

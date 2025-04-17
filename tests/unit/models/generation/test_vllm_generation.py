@@ -53,9 +53,9 @@ def get_basic_hf_test_config(enable_dtensor: bool = False) -> PolicyConfig:
     return {
         "model_name": basic_vllm_test_config["model_name"],
         "tokenizer": {
-        "name": basic_vllm_test_config["tokenizer"]["name"],
+            "name": basic_vllm_test_config["tokenizer"]["name"],
         },
-    # Required training parameters
+        # Required training parameters
         "train_global_batch_size": 1,
         "train_micro_batch_size": 1,
         "learning_rate": 5e-6,
@@ -64,8 +64,8 @@ def get_basic_hf_test_config(enable_dtensor: bool = False) -> PolicyConfig:
         "do_sample": False,
         "precision": "float32",
         "fsdp_offload_enabled": False,
-    "activation_checkpointing_enabled": False,
-    "optimizer": {
+        "activation_checkpointing_enabled": False,
+        "optimizer": {
             "name": "torch.optim.AdamW",
             "kwargs": {
                 "lr": 5e-6,
