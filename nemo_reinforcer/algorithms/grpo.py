@@ -633,23 +633,24 @@ def validate(
             )
 
             # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
-            val_batch, generated_ids, gen_metrics = generate_responses(
+            val_batch, gen_metrics = run_multi_turn_rollout(
                 policy_generation,
                 generation_input_data,
-                val_batch,
                 tokenizer,
-                input_lengths,
-                include_logprobs=False,
+                val_task_to_env,
+                max_seq_len=master_config["policy"]["max_total_sequence_length"],
+                max_turns=master_config["policy"]["max_turns"],
+                greedy=False,
             )
-
-            # Calculate rewards based on the updated LLMMessageLogType
-            with timer.time("reward_calculation"):
-                rewards, to_env = calculate_rewards(val_batch, val_task_to_env)
+            rewards = val_batch["total_reward"]
 
             total_rewards.extend(rewards.tolist())
-            total_lengths.extend([len(ids) for ids in generated_ids])
+            total_lengths.extend(gen_metrics["mean_generation_length"].tolist())
 
             # Collect message logs for later display
+            to_env = get_keys_from_message_log(
+                val_batch["message_log"], ["role", "content"]
+            )
             all_message_logs.extend(to_env)
 
         # Calculate validation metrics
