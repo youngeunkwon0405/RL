@@ -25,13 +25,14 @@ from nemo_reinforcer.models.generation.interfaces import configure_generation_co
 from nemo_reinforcer.models.generation.vllm import VllmGeneration, VllmConfig
 from nemo_reinforcer.models.policy import PolicyConfig
 
+from tests.unit.conftest import TEST_ASSETS
 
 # Define basic vLLM test config
 basic_vllm_test_config: VllmConfig = {
     "backend": "vllm",
-    "model_name": "meta-llama/Llama-3.2-1B",  # Small model for testing
+    "model_name": TEST_ASSETS.TINY_LLAMA_MODEL_PATH,  # Small model for testing
     "tokenizer": {
-        "name": "meta-llama/Llama-3.2-1B",
+        "name": TEST_ASSETS.TINY_LLAMA_MODEL_PATH,
     },
     "dtype": "bfloat16",
     "max_new_tokens": 10,
@@ -43,7 +44,7 @@ basic_vllm_test_config: VllmConfig = {
     "vllm_cfg": {
         "tensor_parallel_size": 1,
         "gpu_memory_utilization": 0.3,
-        "max_model_len": 1024,
+        "max_model_len": 128,
     },
 }
 
@@ -66,12 +67,9 @@ def get_basic_hf_test_config(enable_dtensor: bool = False) -> PolicyConfig:
         "fsdp_offload_enabled": False,
         "activation_checkpointing_enabled": False,
         "optimizer": {
-            "name": "torch.optim.AdamW",
+            "name": "torch.optim.SGD",
             "kwargs": {
                 "lr": 5e-6,
-                "weight_decay": 0.01,
-                "betas": [0.9, 0.999],
-                "eps": 1e-8,
             },
         },
         "dtensor_cfg": {
@@ -101,7 +99,7 @@ def cluster():
     virtual_cluster.shutdown()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def tokenizer():
     """Initialize tokenizer for the test model."""
     tokenizer = get_tokenizer(basic_vllm_test_config["tokenizer"])
@@ -129,12 +127,12 @@ def policy(cluster, tokenizer):
         print(f"Error during policy cleanup: {e}")
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def test_input_data(tokenizer):
     """Create test input data for inference."""
     test_prompts = [
-        "Hello, my name is",
-        "The capital of France is",
+        "s a r",
+        "o u t s",
     ]
 
     # Tokenize prompts
@@ -379,32 +377,24 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
     vllm_config = configure_generation_config(vllm_config, tokenizer)
 
     hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
-    hf_config["train_global_batch_size"] = 4
+    hf_config["train_global_batch_size"] = 2
 
     vllm_policy = None
     hf_policy = None
 
     try:
         prompts = [
-            "Write a story about a magical forest",
-            "Explain how photosynthesis works",
-            "What are the benefits of exercise?",
-            "Describe the water cycle",
-            "What is the capital of France?",
-            "Who is the president of the USA?",
-            "What is the capital of the moon?",
-            "Where is the sun?",
+            "a b",
+            "a e i",
+            "s a r",
+            "o u t s",
         ]
 
         expected_generations = [
-            "Write a story about a magical forest. The forest is magical because it is full of",
-            "Explain how photosynthesis works\nExplain how photosynthesis works\nPhotosynthesis",
-            "What are the benefits of exercise? The benefits of exercise are many and varied. It",
-            "Describe the water cycle in your own words.\nDescribe the water cycle in",
-            "What is the capital of France? A. Paris B. New York C. Washington",
-            "Who is the president of the USA? Who is the president of the USA? Who is",
-            "What is the capital of the moon? A. Houston, Texas B. New York City",
-            "Where is the sun? Where is the moon? Where is the earth?",
+            "a b B B B B B B B B B B",
+            "a e i B B B B B B B B B B",
+            "s a r..........",
+            "o u t s B B B B B B B B B B",
         ]
 
         # Tokenize the prompts the same way as in test_hf_ray_policy
@@ -617,8 +607,8 @@ def test_vllm_generate_text(cluster, tokenizer):
     """Test that vLLM can generate text."""
     # Prepare test data
     test_prompts = [
-        "Hello, my name is",
-        "The capital of France is",
+        "s a r",
+        "o u t s",
     ]
     test_prompts = BatchedDataDict({"prompts": test_prompts})
 
@@ -627,8 +617,8 @@ def test_vllm_generate_text(cluster, tokenizer):
     vllm_config = configure_generation_config(vllm_config, tokenizer, is_eval=True)
 
     # Ensure we can get same output
-    assert vllm_config["model_name"] == "meta-llama/Llama-3.2-1B", (
-        "Model name should be meta-llama/Llama-3.2-1B to get expected output"
+    assert vllm_config["model_name"] == TEST_ASSETS.TINY_LLAMA_MODEL_PATH, (
+        f"Model name should be {TEST_ASSETS.TINY_LLAMA_MODEL_PATH=} to get expected output"
     )
     assert vllm_config["vllm_cfg"]["tensor_parallel_size"] == 1, (
         "Tensor parallel size should be 1 to get expected output"
@@ -639,10 +629,9 @@ def test_vllm_generate_text(cluster, tokenizer):
 
     # Generate and check result
     output = vllm_generation.generate_text(test_prompts, greedy=True)
-    assert output["texts"] == [
-        " Kelsey and I am a 2018 graduate",
-        " Paris. The city is located in the north of",
-    ], "Output should be the same as the expected output"
+    assert output["texts"] == ["..........", " B B B B B B B B B B"], (
+        "Output should be the same as the expected output"
+    )
 
     # Clean up
     vllm_generation.shutdown()
@@ -676,7 +665,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
         vllm_policy = VllmGeneration(cluster, vllm_config)
 
         # Prepare input data (batch size 2)
-        text = """Answer the question based on the context below. Keep the answer short and concise. Respond "Unsure about answer" if not sure about the answer. Context: Teplizumab traces its roots to a New Jersey drug company called Ortho Pharmaceutical. There, scientists generated an early version of the antibody, dubbed OKT3. Originally sourced from mice, the molecule was able to bind to the surface of T cells and limit their cell-killing potential. In 1986, it was approved to help prevent organ rejection after kidney transplants, making it the first therapeutic antibody allowed for human use.Question: What was OKT3 originally sourced from?Answer:"""
+        text = "a s r a b s r e a z p e a i o n a s r a b s r e a z p e a i o n"
         test_prompt = [text, text]  # Use batch size 2
         encodings = tokenizer(
             test_prompt,
@@ -759,13 +748,13 @@ def test_vllm_generation_with_stop(
 
     # Create separate configs for each policy
     vllm_config = basic_vllm_test_config.copy()
-    vllm_config["stop_token_ids"] = [3363]
-    vllm_config["stop_strings"] = ["I am a"]
+    vllm_config["stop_token_ids"] = [tokenizer("B")["input_ids"][0]]
+    vllm_config["stop_strings"] = ["..."]
     vllm_config = configure_generation_config(vllm_config, tokenizer, is_eval=is_eval)
 
     # Ensure we can get same output
-    assert vllm_config["model_name"] == "meta-llama/Llama-3.2-1B", (
-        "Model name should be meta-llama/Llama-3.2-1B to get expected output"
+    assert vllm_config["model_name"] == TEST_ASSETS.TINY_LLAMA_MODEL_PATH, (
+        f"Model name should be {TEST_ASSETS.TINY_LLAMA_MODEL_PATH=} to get expected output"
     )
     assert vllm_config["vllm_cfg"]["tensor_parallel_size"] == 1, (
         "Tensor parallel size should be 1 to get expected output"
@@ -793,22 +782,21 @@ def test_vllm_generation_with_stop(
     outputs = vllm_generation.generate(test_input_data, greedy=True)
     output_ids = outputs["output_ids"]
     generated_texts = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-    assert generated_texts == [
-        "Hello, my name is Kelsey and I am a",
-        "The capital of France is Paris. The city",
-    ], "Output should be the same as the expected output"
+    assert generated_texts == ["s a r...", "o u t s B"], (
+        "Output should be the same as the expected output"
+    )
 
-    # test generate_text
+    # Test generate_text (repeated from test_input_data)
     test_prompts = [
-        "Hello, my name is",
-        "The capital of France is",
+        "s a r",
+        "o u t s",
     ]
+    # test generate_text
     test_prompts = BatchedDataDict({"prompts": test_prompts})
     output = vllm_generation.generate_text(test_prompts, greedy=True)
-    assert output["texts"] == [
-        " Kelsey and I am a",
-        " Paris. The city",
-    ], "Output should be the same as the expected output"
+    assert output["texts"] == ["...", " B"], (
+        "Output should be the same as the expected output"
+    )
 
     # Clean up
     vllm_generation.shutdown()

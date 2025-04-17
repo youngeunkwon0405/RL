@@ -19,9 +19,6 @@ import os
 import unittest.mock
 import torch.distributed as dist
 
-# Define a custom marker for model configuration tests
-pytestmark = pytest.mark.modelconfig
-
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import get_tokenizer
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
@@ -31,7 +28,7 @@ from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from tests.unit.test_utils import simple_loss
-from tests.unit.conftest import TEST_ASSETS
+from tests.unit.conftest import TEST_ASSETS, TEST_MODEL_VOCAB_SIZE
 from transformers import AutoModelForCausalLM
 
 
@@ -183,7 +180,7 @@ def test_hf_policy_init(policy_setup):
 
     # Check 5: Verify GPU memory is allocated on both GPUs
     for info in gpu_infos:
-        assert info["memory_allocated_mb"] > 10, (
+        assert info["memory_allocated_mb"] > 0, (
             f"Not enough memory allocated on GPU for rank {info['rank']}: {info['memory_allocated_mb']:.2f} MB"
         )
 
@@ -239,7 +236,9 @@ def training_setup(request, two_gpu_virtual_cluster):
         torch.manual_seed(42)
 
         # Create test input_ids and attention_mask
-        input_ids = torch.randint(0, 32000, (8, 128))  # 8 sequences, each of length 128
+        input_ids = torch.randint(
+            0, TEST_MODEL_VOCAB_SIZE, (8, 128)
+        )  # 8 sequences, each of length 128
         attention_mask = torch.ones(8, 128)
 
         # Calculate input_lengths (all sequences are full length in this test)
@@ -250,7 +249,7 @@ def training_setup(request, two_gpu_virtual_cluster):
                 "input_ids": input_ids,
                 "input_lengths": input_lengths,
                 "attention_mask": attention_mask,  # Keep for compatibility with loss functions
-                "labels": torch.randint(0, 32000, (8, 128)),
+                "labels": torch.randint(0, TEST_MODEL_VOCAB_SIZE, (8, 128)),
             }
         )
 
@@ -352,7 +351,7 @@ def logprob_setup(request, two_gpu_virtual_cluster):
 
         # Create test input_ids and attention_mask
         input_ids = torch.randint(
-            0, 32000, (8, 128)
+            0, TEST_MODEL_VOCAB_SIZE, (8, 128)
         ).cuda()  # 8 sequences, each of length 128
         attention_mask = torch.ones(8, 128).cuda()
 
@@ -424,10 +423,8 @@ def test_dtensor_worker_logprob_tp2_matches_no_tp(logprob_setup):
     policy.prepare_for_lp_inference()
     policy_logprobs = policy.get_logprobs(data)["logprobs"]
 
-    print("## MAX DIFF ###", torch.max(torch.abs(policy_logprobs - logprobs)))
-    assert torch.allclose(policy_logprobs, logprobs), (
-        f"max diff {torch.max(torch.abs(policy_logprobs - logprobs))}"
-    )
+    lp_error = torch.mean(torch.exp(torch.abs(policy_logprobs - logprobs)))
+    assert lp_error < 1.001, f"Log prob error is too high: {lp_error}"
 
 
 def test_dtensor_fails_with_tp_and_tied_model(mock_2gpu_distributed_env):

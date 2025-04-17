@@ -14,8 +14,6 @@
 from io import StringIO
 import time
 import pytest
-from nemo_reinforcer.utils.logger import GPUMonitoringConfig
-from tests import unit
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
@@ -23,6 +21,8 @@ import os
 import random
 from typing import Callable
 import ray
+import numpy as np
+import shutil
 
 import pytest
 import torch
@@ -48,6 +48,9 @@ UNIT_RESULTS_FILE_DATED = os.path.join(
 
 
 # Mapping between asset and absolute path (each are populated from a session level fixture)
+TEST_MODEL_VOCAB_SIZE = 128
+
+
 class TEST_ASSETS:
     TINY_LLAMA_MODEL_PATH = os.path.join(
         _TEST_ASSETS_DIR, "tiny_llama_with_llama3.2_tokenizer"
@@ -82,6 +85,13 @@ def pytest_sessionstart(session):
             print(f"Deleted existing results file: {UNIT_RESULTS_FILE}")
         except Exception as e:
             print(f"Warning: Failed to delete results file: {e}")
+
+    if os.path.exists(_TEST_ASSETS_DIR):
+        try:
+            shutil.rmtree(_TEST_ASSETS_DIR, ignore_errors=True)
+            print(f"Deleted existing test assets directory: {_TEST_ASSETS_DIR}")
+        except Exception as e:
+            print(f"Warning: Failed to delete test assets directory: {e}")
 
     # Get the git commit hash
     try:
@@ -337,19 +347,27 @@ def _distributed_test_wrapper(
 
 
 @pytest.fixture
-def mock_2gpu_distributed_env():
+def mock_os_environ():
+    """Mock the os.environ dictionary."""
+    # Save original environment
+    old_env = os.environ.copy()
+    yield os.environ
+    os.environ.clear()
+    os.environ.update(old_env)
+
+
+@pytest.fixture
+def mock_2gpu_distributed_env(mock_os_environ):
     """Mock distributed environment variables and initialization.
 
     This fixture should be used when testing the underlying ray actors that need torch distributed initialized.
     """
-    # Save original environment
-    old_env = os.environ.copy()
 
     # Set required environment variables
-    os.environ["RANK"] = "0"
-    os.environ["WORLD_SIZE"] = "2"
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    mock_os_environ["RANK"] = "0"
+    mock_os_environ["WORLD_SIZE"] = "2"
+    mock_os_environ["MASTER_ADDR"] = "localhost"
+    mock_os_environ["MASTER_PORT"] = "12355"
 
     # Create a more sophisticated mock device mesh
     # First, create individual mesh mocks for dp and tp
@@ -380,92 +398,155 @@ def mock_2gpu_distributed_env():
     ):
         yield mock_init
 
-    # Restore original environment
-    os.environ.clear()
-    os.environ.update(old_env)
-
 
 #######################
 # Test Model Fixtures #
 #######################
 
 
+def _save_slimmed_tokenizer(new_vocab_size: int, out_path: str):
+    from tokenizers import (
+        Tokenizer,
+        decoders,
+        models,
+        normalizers,
+        pre_tokenizers,
+        trainers,
+    )
+    from transformers import PreTrainedTokenizerFast
+
+    tokenizer = Tokenizer(models.WordPiece(unk_token="[UNK]"))
+    tokenizer.normalizer = normalizers.NFKC()
+    tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+    tokenizer.decoder = decoders.WordPiece(prefix="##")
+    special_tokens = ["[UNK]", "[PAD]", "[CLS]", "[BOS]", "[EOS]"]
+    trainer = trainers.WordPieceTrainer(
+        vocab_size=new_vocab_size, special_tokens=special_tokens
+    )
+    data = [
+        "Beautiful is better than ugly."
+        "Explicit is better than implicit."
+        "Simple is better than complex."
+        "Complex is better than complicated."
+        "Flat is better than nested."
+        "Sparse is better than dense."
+        "Readability counts."
+    ]
+    tokenizer.train_from_iterator(data, trainer=trainer)
+    fast_tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=tokenizer,
+        unk_token="[UNK]",
+        pad_token="[PAD]",
+        cls_token="[CLS]",
+        bos_token="[BOS]",
+        eos_token="[EOS]",
+    )
+    fast_tokenizer.save_pretrained(out_path)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def tiny_llama_model_path():
     """Fixture that returns a path to a tiny llama model with a dummy tokenizer."""
-    from transformers import LlamaConfig, LlamaForCausalLM, AutoTokenizer
-    import shutil
+    from transformers import LlamaConfig, LlamaForCausalLM
 
     model_path = TEST_ASSETS.TINY_LLAMA_MODEL_PATH
+
     # hidden_size//num_attention_heads = 32 (smallest value to not error due to vllm paged attention)
-    # vocab_size=128256 (so we can re-use llama3.2 1b tokenizer)
     config = LlamaConfig(
         num_hidden_layers=2,
         hidden_size=64,
         intermediate_size=32,
         num_attention_heads=2,
-        vocab_size=128256,
+        vocab_size=TEST_MODEL_VOCAB_SIZE,
         tie_word_embeddings=False,
         num_key_value_heads=None,
     )
     model = LlamaForCausalLM(config=config)
-    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
-    shutil.rmtree(model_path, ignore_errors=True)
+
+    # Set all parameters deterministically
+    for i, (param_name, param) in enumerate(model.state_dict().items()):
+        if param.view(-1)[0] == 1.0:
+            # skip params like model.layers.0.input_layernorm.weight
+            continue
+        # Create an arange with the same shape as the parameter
+        param_shape = param.shape
+        num_elements = param.numel()
+        # Create arange and reshape to parameter shape, then scale down by 1000
+        param_data = (torch.arange(num_elements) % 7).reshape(
+            param_shape
+        ).float() / 100.0
+        # Assign the reshaped arange to the parameter
+        model.state_dict()[param_name].copy_(param_data)
+
+    _save_slimmed_tokenizer(TEST_MODEL_VOCAB_SIZE, model_path)
     model.save_pretrained(model_path)
-    tokenizer.save_pretrained(model_path)
-    del model, tokenizer
+    del model
     yield model_path
 
 
 @pytest.fixture(scope="session", autouse=True)
 def tiny_llama_tied_model_path():
     """Fixture that returns a path to a tiny llama model with a dummy tokenizer."""
-    from transformers import LlamaConfig, LlamaForCausalLM, AutoTokenizer
-    import shutil
+    from transformers import LlamaConfig, LlamaForCausalLM
 
     model_path = TEST_ASSETS.TINY_LLAMA_TIED_MODEL_PATH
     # hidden_size//num_attention_heads = 32 (smallest value to not error due to vllm paged attention)
-    # vocab_size=128256 (so we can re-use llama3.2 1b tokenizer)
     config = LlamaConfig(
         num_hidden_layers=2,
         hidden_size=64,
         intermediate_size=32,
         num_attention_heads=2,
-        vocab_size=128256,
+        vocab_size=TEST_MODEL_VOCAB_SIZE,
         tie_word_embeddings=True,
         num_key_value_heads=None,
     )
     model = LlamaForCausalLM(config=config)
-    tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
-    shutil.rmtree(model_path, ignore_errors=True)
+
+    # Set all parameters deterministically
+    for i, (param_name, param) in enumerate(model.state_dict().items()):
+        # Create an arange with the same shape as the parameter
+        param_shape = param.shape
+        num_elements = param.numel()
+        # Create arange and reshape to parameter shape, then scale down by 1000
+        param_data = torch.arange(num_elements).reshape(param_shape).float() / 100.0
+        # Assign the reshaped arange to the parameter
+        model.state_dict()[param_name].copy_(param_data)
+
     model.save_pretrained(model_path)
-    tokenizer.save_pretrained(model_path)
-    del model, tokenizer
+    _save_slimmed_tokenizer(TEST_MODEL_VOCAB_SIZE, model_path)
+    del model
     yield model_path
 
 
 @pytest.fixture(scope="session", autouse=True)
 def tiny_qwen2_model_path():
     """Fixture that returns a path to a tiny llama model with a dummy tokenizer."""
-    from transformers import Qwen2Config, Qwen2ForCausalLM, AutoTokenizer
-    import shutil
+    from transformers import Qwen2Config, Qwen2ForCausalLM
 
     model_path = TEST_ASSETS.TINY_QWEN2_MODEL_PATH
     # hidden_size//num_attention_heads = 32 (smallest value to not error due to vllm paged attention)
-    # vocab_size=151936 (so we can re-use qwen2 1.5b tokenizer)
     config = Qwen2Config(
         num_hidden_layers=2,
         hidden_size=64,
         intermediate_size=32,
         num_attention_heads=2,
-        vocab_size=151936,
+        vocab_size=TEST_MODEL_VOCAB_SIZE,
         tie_word_embeddings=False,
         num_key_value_heads=None,
     )
     model = Qwen2ForCausalLM(config=config)
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2-1.5B")
-    shutil.rmtree(model_path, ignore_errors=True)
+
+    # Set all parameters deterministically
+    for i, (param_name, param) in enumerate(model.state_dict().items()):
+        # Create an arange with the same shape as the parameter
+        param_shape = param.shape
+        num_elements = param.numel()
+        # Create arange and reshape to parameter shape, then scale down by 1000
+        param_data = torch.arange(num_elements).reshape(param_shape).float() / 100.0
+        # Assign the reshaped arange to the parameter
+        model.state_dict()[param_name].copy_(param_data)
+
     model.save_pretrained(model_path)
-    tokenizer.save_pretrained(model_path)
-    del model, tokenizer
+    _save_slimmed_tokenizer(TEST_MODEL_VOCAB_SIZE, model_path)
+    del model
     yield model_path

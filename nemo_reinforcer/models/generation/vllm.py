@@ -15,6 +15,7 @@
 from typing import Optional, Union, List, TypedDict
 import gc
 import warnings
+import os
 
 import ray
 import torch
@@ -161,7 +162,6 @@ class VllmGenerationWorker:
         # Special handling for tensor parallel case
         if self.tensor_parallel_size > 1:
             # Configure vLLM for tensor parallelism within Ray
-            import os
 
             # Reset CUDA_VISIBLE_DEVICES to allow vLLM to manage GPU assignment
             os.environ.pop("CUDA_VISIBLE_DEVICES", None)

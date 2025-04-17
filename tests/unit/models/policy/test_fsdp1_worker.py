@@ -26,12 +26,14 @@ from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from tests.unit.test_utils import simple_loss, nll_loss
 
+from tests.unit.conftest import TEST_ASSETS, TEST_MODEL_VOCAB_SIZE
+
 
 basic_llama_test_config: PolicyConfig = {
-    "model_name": "meta-llama/Llama-3.2-1B",
-    "tokenizer": {"name": "meta-llama/Llama-3.2-1B"},
+    "model_name": TEST_ASSETS.TINY_LLAMA_MODEL_PATH,
+    "tokenizer": {"name": TEST_ASSETS.TINY_LLAMA_MODEL_PATH},
     "generation_batch_size": 1,  # Small batch size for testing
-    "train_global_batch_size": 4,
+    "train_global_batch_size": 2,
     "train_micro_batch_size": 1,
     "learning_rate": 5e-6,
     "logprob_batch_size": 1,
@@ -57,7 +59,7 @@ basic_llama_test_config: PolicyConfig = {
     "optimizer": {
         "name": "torch.optim.AdamW",
         "kwargs": {
-            "lr": 5e-6,
+            "lr": 5e-2,
             "weight_decay": 0.01,
             "betas": [0.9, 0.999],
             "eps": 1e-8,
@@ -92,25 +94,17 @@ def tokenizer():
 def test_input_data(tokenizer):
     """Create test input data for inference."""
     prompts = [
-        "Write a story about a magical forest",
-        "Explain how photosynthesis works",
-        "What are the benefits of exercise?",
-        "Describe the water cycle",
-        "What is the capital of France?",
-        "Who is the president of the USA?",
-        "What is the capital of the moon?",
-        "Where is the sun?",
+        "a e i",
+        "s a r",
+        "a e i",
+        "s a r",
     ]
 
     expected_generations = [
-        "Write a story about a magical forest. The forest is magical because it is full of magical creatures. The creatures are",
-        "Explain how photosynthesis works\nExplain how photosynthesis works\nPhotosynthesis is the process by which plants",
-        "What are the benefits of exercise? The benefits of exercise are many and varied. It is a great way to improve",
-        "Describe the water cycle in your own words.\nDescribe the water cycle in your own words.\nDescribe the",
-        "What is the capital of France? A. Paris B. New York C. Washington D. Baton Rouge\nA",
-        "Who is the president of the USA? Who is the president of the USA? Who is the president of the USA?",
-        "What is the capital of the moon? A. Houston B. New York C. Washington D. Denver\nA.",
-        "Where is the sun? Where is the moon? Where is the earth? Where is the sky? Where",
+        "a e i B B B B B B B B B B B B B B B B",
+        "s a r................",
+        "a e i B B B B B B B B B B B B B B B B",
+        "s a r................",
     ]
 
     # Tokenize the prompts
@@ -233,9 +227,9 @@ def test_hf_policy_init(policy_setup, num_gpus):
             f"Expected WORLD_SIZE={num_gpus}, got {info['env_vars']['WORLD_SIZE']}"
         )
 
-    # Check 5: Verify significant GPU memory is allocated (at least 1GB) on all GPUs
+    # Check 5: Verify GPU memory is allocated on all GPUs
     for info in gpu_infos:
-        assert info["memory_allocated_mb"] > 1000, (
+        assert info["memory_allocated_mb"] > 0, (
             f"Not enough memory allocated on GPU for rank {info['rank']}: {info['memory_allocated_mb']:.2f} MB"
         )
 
@@ -299,7 +293,9 @@ def training_setup(tokenizer, num_gpus):
         torch.manual_seed(42)
 
         # Create test input_ids and attention_mask
-        input_ids = torch.randint(0, 32000, (8, 128))  # 8 sequences, each of length 128
+        input_ids = torch.randint(
+            0, TEST_MODEL_VOCAB_SIZE, (8, 128)
+        )  # 8 sequences, each of length 128
         attention_mask = torch.ones(8, 128)
 
         # Calculate input_lengths (all sequences are full length in this test)
@@ -310,7 +306,7 @@ def training_setup(tokenizer, num_gpus):
                 "input_ids": input_ids,
                 "input_lengths": input_lengths,
                 "attention_mask": attention_mask,  # Keep for compatibility with loss functions
-                "labels": torch.randint(0, 32000, (8, 128)),
+                "labels": torch.randint(0, TEST_MODEL_VOCAB_SIZE, (8, 128)),
             }
         )
 
@@ -360,6 +356,10 @@ def test_hf_policy_training(training_setup, tracker, num_gpus):
     print("\nPreparing for training...")
     policy.prepare_for_training()
 
+    before_training_mem_allocated, before_training_mem_reserved = (
+        get_max_gpu_utilization(policy)
+    )
+
     losses = []
     for steps in range(4):
         results = policy.train(data, loss_fn)
@@ -405,11 +405,11 @@ def test_hf_policy_training(training_setup, tracker, num_gpus):
     )
 
     # Compare memory after offload to memory after training
-    assert after_training_mem_allocated > 10_000, (
-        "Memory after training should be more than 10GB"
+    assert after_training_mem_allocated > before_training_mem_allocated, (
+        "Memory after training should be more than before training"
     )
-    assert after_offload_mem_allocated < 1_200, (
-        "Memory after offload should be less than 1.2GB"
+    assert after_offload_mem_allocated < after_training_mem_allocated, (
+        "Memory after offload should be less than after training"
     )
 
 
@@ -554,8 +554,9 @@ def test_hf_policy_generation(generation_setup, tokenizer, num_gpus, tracker):
     expected_logprobs = policy.get_logprobs(expected_data)["logprobs"]
     mean_lps = torch.mean(expected_logprobs * expected_tokenized["attention_mask"])
     tracker.track(f"mean_lps_{num_gpus}gpu", float(mean_lps))
-    assert mean_lps > -1.7, "Expected logprobs should be greater than -1.7"
-    assert mean_lps < -1.4, "Expected logprobs should be less than -1.4"
+    # Mean LPS was observed to be -2.6573
+    assert mean_lps > -2.7, "Expected logprobs should be greater than -2.7"
+    assert mean_lps < -2.6, "Expected logprobs should be less than -2.6"
 
     # Call finish_generation if available
     print("Finishing generation...")
@@ -658,12 +659,12 @@ def test_hf_policy_generation_with_stop(test_input_data, tokenizer):
     config = deepcopy(basic_llama_test_config)
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
     # Add stop strings for testing
-    config["generation"]["stop_token_ids"] = [1690, 1920]  # [" process", "many"]
-    config["generation"]["stop_strings"] = ["because it is", "A. Houston"]
+    config["generation"]["stop_token_ids"] = [tokenizer("B")["input_ids"][0]]
+    config["generation"]["stop_strings"] = ["..."]
 
     # Ensure we can get same output
-    assert config["model_name"] == "meta-llama/Llama-3.2-1B", (
-        "Model name should be meta-llama/Llama-3.2-1B to get expected output"
+    assert config["model_name"] == TEST_ASSETS.TINY_LLAMA_MODEL_PATH, (
+        f"Model name should be {TEST_ASSETS.TINY_LLAMA_MODEL_PATH=} to get expected output"
     )
 
     # Create policy
@@ -685,16 +686,9 @@ def test_hf_policy_generation_with_stop(test_input_data, tokenizer):
 
     # Check result
     generated_texts = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
-    assert generated_texts == [
-        "Write a story about a magical forest. The forest is magical because it is",
-        "Explain how photosynthesis works\nExplain how photosynthesis works\nPhotosynthesis is the process",
-        "What are the benefits of exercise? The benefits of exercise are many",
-        "Describe the water cycle in your own words.\nDescribe the water cycle in your own words.\nDescribe the",
-        "What is the capital of France? A. Paris B. New York C. Washington D. Baton Rouge\nA",
-        "Who is the president of the USA? Who is the president of the USA? Who is the president of the USA?",
-        "What is the capital of the moon? A. Houston",
-        "Where is the sun? Where is the moon? Where is the earth? Where is the sky? Where",
-    ], "Output should be the same as the expected output"
+    assert generated_texts == ["a e i B", "s a r...", "a e i B", "s a r..."], (
+        "Output should be the same as the expected output"
+    )
 
     # Clean up after the test
     print("Cleaning up resources for test")

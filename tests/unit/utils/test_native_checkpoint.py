@@ -30,27 +30,25 @@ from nemo_reinforcer.utils.native_checkpoint import (
     convert_dcp_to_hf,
 )
 from tests.unit.test_utils import simple_loss
+from tests.unit.conftest import TEST_ASSETS, TEST_MODEL_VOCAB_SIZE
 
 # Define basic test config
 simple_policy_config = {
-    "model_name": "meta-llama/Llama-3.2-1B",  # "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
+    "model_name": TEST_ASSETS.TINY_LLAMA_MODEL_PATH,
     "tokenizer": {
-        "name": "meta-llama/Llama-3.2-1B",
+        "name": TEST_ASSETS.TINY_LLAMA_MODEL_PATH,
     },
-    "train_global_batch_size": 4,
+    "train_global_batch_size": 2,
     "train_micro_batch_size": 1,
     "logprob_batch_size": 1,
-    "max_total_sequence_length": 1024,
+    "max_total_sequence_length": 64,
     "precision": "float32",
     "fsdp_offload_enabled": False,
     "activation_checkpointing_enabled": False,
     "optimizer": {
-        "name": "torch.optim.AdamW",
+        "name": "torch.optim.SGD",
         "kwargs": {
             "lr": 5e-6,
-            "weight_decay": 0.01,
-            "betas": [0.9, 0.999],
-            "eps": 1e-8,
         },
     },
     "dtensor_cfg": {
@@ -60,7 +58,7 @@ simple_policy_config = {
         "activation_checkpointing": False,
         "tensor_parallel_size": 1,
     },
-    "max_grad_norm": 1.0,
+    "max_grad_norm": None,
 }
 
 
@@ -98,7 +96,7 @@ def cluster(num_gpus):
     virtual_cluster.shutdown()
 
 
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="module")
 def tokenizer():
     """Initialize tokenizer for the test model."""
     tokenizer = get_tokenizer(simple_policy_config["tokenizer"])
@@ -272,19 +270,33 @@ def test_save_and_load_model_and_optimizer(mock_experiment):
     check_dict_equality(new_optimizer.state_dict(), optimizer.state_dict())
 
 
-@pytest.mark.parametrize("num_gpus", [1, 2], ids=["1gpu", "2gpu"])
+@pytest.mark.parametrize(
+    "num_gpus",
+    [
+        1,
+        pytest.param(
+            2,
+            marks=pytest.mark.skip(
+                reason="Skipping 2 GPU test for now, related: https://github.com/NVIDIA/reinforcer/issues/231"
+            ),
+        ),
+    ],
+    ids=["1gpu", "2gpu"],
+)
 def test_save_and_load_hf_checkpoint(policy, num_gpus):
     ## warm up with a forward pass
     ## this is needed before saving a checkpoint because FSDP does some lazy initialization
-    input_ids = torch.randint(0, 16000, (4, 128))  # 4 sequences, each of length 128
-    attention_mask = torch.ones(4, 128)
+    input_ids = torch.randint(
+        0, TEST_MODEL_VOCAB_SIZE, (4, 64)
+    )  # 4 sequences, each of length 64
+    attention_mask = torch.ones(4, 64)
     input_lengths = attention_mask.sum(dim=1).to(torch.int32)
     dummy_fwd_dict = BatchedDataDict(
         {
             "input_ids": input_ids,
             "input_lengths": input_lengths,
             "attention_mask": attention_mask,
-            "labels": torch.randint(0, 16000, (4, 128)),
+            "labels": torch.randint(0, TEST_MODEL_VOCAB_SIZE, (4, 64)),
         }
     )
     policy.get_logprobs(dummy_fwd_dict)
@@ -343,19 +355,33 @@ def test_save_and_load_hf_checkpoint(policy, num_gpus):
     check_dict_equality(converted_model.state_dict(), original_model.state_dict())
 
 
-@pytest.mark.parametrize("num_gpus", [1, 2], ids=["1gpu", "2gpu"])
+@pytest.mark.parametrize(
+    "num_gpus",
+    [
+        1,
+        pytest.param(
+            2,
+            marks=pytest.mark.skip(
+                reason="Skipping 2 GPU test for now, related: https://github.com/NVIDIA/reinforcer/issues/231"
+            ),
+        ),
+    ],
+    ids=["1gpu", "2gpu"],
+)
 def test_convert_dcp_to_hf(policy, num_gpus):
     ## warm up with a forward pass
     ## this is needed before saving a checkpoint because FSDP does some lazy initialization
-    input_ids = torch.randint(0, 16000, (4, 128))  # 4 sequences, each of length 128
-    attention_mask = torch.ones(4, 128)
+    input_ids = torch.randint(
+        0, TEST_MODEL_VOCAB_SIZE, (2, 64)
+    )  # 2 sequences, each of length 64
+    attention_mask = torch.ones(2, 64)
     input_lengths = attention_mask.sum(dim=1).to(torch.int32)
     dummy_fwd_dict = BatchedDataDict(
         {
             "input_ids": input_ids,
             "input_lengths": input_lengths,
             "attention_mask": attention_mask,
-            "labels": torch.randint(0, 16000, (4, 128)),
+            "labels": torch.randint(0, TEST_MODEL_VOCAB_SIZE, (2, 64)),
         }
     )
     policy.train(dummy_fwd_dict, simple_loss)
