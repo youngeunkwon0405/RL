@@ -92,7 +92,7 @@ class RayWorkerBuilder:
         placement_group: PlacementGroup,
         placement_group_bundle_index: int,
         num_gpus: int,
-        bundle_indices: Optional[list] = None,
+        bundle_indices: Optional[tuple] = None,
         **extra_options: Dict[str, Any],
     ):
         """Create a Ray worker with the specified configuration.
@@ -109,7 +109,7 @@ class RayWorkerBuilder:
             placement_group: Ray placement group for resource allocation
             placement_group_bundle_index: Index of the bundle in the placement group
             num_gpus: Number of GPUs to allocate to this worker
-            bundle_indices: List of bundle indices for tensor parallelism (if applicable)
+            bundle_indices: Tuple of (node_idx, local_bundle_indices) for tensor parallelism (if applicable)
             extra_options: Additional options to pass to the Ray actor (may be overridden by actor's configure_worker(...) method)
 
         Returns:
@@ -136,7 +136,8 @@ class RayWorkerBuilder:
             if env_vars:
                 if "runtime_env" not in options:
                     options["runtime_env"] = {}
-                options["runtime_env"]["env_vars"] = env_vars
+                for k, v in env_vars.items():
+                    options["runtime_env"]["env_vars"][k] = v
 
             # Apply initialization parameters
             if init_kwargs:
@@ -208,7 +209,6 @@ class RayWorkerGroup:
         self.cluster = cluster
         self.name_prefix = name_prefix
         self.tied_workers_groups = []
-
         # Maps worker indices to their corresponding tied group index
         # For example, if worker with index 3 belongs to tied worker group 1,
         # then worker_to_tied_group_index[3] = 1
@@ -301,7 +301,7 @@ class RayWorkerGroup:
 
                 # For tensor parallel groups, only the first worker gets bundle_indices
                 worker_bundle_indices = (
-                    local_bundle_indices if local_rank == 0 else None
+                    (node_idx, local_bundle_indices) if local_rank == 0 else None
                 )
 
                 # Create a descriptive name based on group structure

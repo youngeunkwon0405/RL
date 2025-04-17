@@ -16,6 +16,16 @@ from collections import defaultdict
 from typing import List, Optional, Union
 
 import ray
+import torch
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.fsdp import (
+    CPUOffload,
+    FullyShardedDataParallel,
+    MixedPrecision,
+)
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
@@ -36,6 +46,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self,
         cluster: RayVirtualCluster,
         config: PolicyConfig,
+        tokenizer: AutoTokenizer,
         name_prefix: str = "hf_policy",
         workers_per_node: Optional[Union[int, List[int]]] = None,
         init_optimizer: bool = True,
@@ -61,6 +72,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         worker_builder = RayWorkerBuilder(
             worker_builder_cls,
             config,
+            tokenizer=tokenizer,
             init_optimizer=init_optimizer,
             weights_path=weights_path,
             optimizer_path=optimizer_path,
@@ -286,6 +298,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None,
         save_torch_dist: bool = True,
         save_hf: bool = False,
     ):
@@ -294,6 +307,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             "save_checkpoint",
             weights_path,
             optimizer_path,
+            tokenizer_path,
             save_torch_dist,
             save_hf,
             only_on="all_tied_workers",

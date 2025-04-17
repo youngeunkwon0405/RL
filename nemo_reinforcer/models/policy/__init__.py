@@ -25,9 +25,14 @@ class DTensorConfig(TypedDict):
     tensor_parallel_size: int
 
 
+class TokenizerConfig(TypedDict):
+    name: str
+    chat_template: str
+
+
 class PolicyConfig(TypedDict):
     model_name: str
-    tokenizer_name: str
+    tokenizer: TokenizerConfig
     train_global_batch_size: int
     train_micro_batch_size: int
     learning_rate: float
@@ -37,3 +42,5 @@ class PolicyConfig(TypedDict):
     dtensor_cfg: DTensorConfig
     make_sequence_length_divisible_by: int
     max_grad_norm: Optional[Union[float, int]]
+    fsdp_offload_enabled: bool
+    activation_checkpointing_enabled: bool
