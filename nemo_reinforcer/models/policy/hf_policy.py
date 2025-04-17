@@ -16,15 +16,7 @@ from collections import defaultdict
 from typing import List, Optional, Union
 
 import ray
-import torch
-from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import (
-    CPUOffload,
-    FullyShardedDataParallel,
-    MixedPrecision,
-)
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
@@ -243,7 +235,6 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             "prepare_for_training", only_on="all_tied_workers"
         )
         ray.get(futures)
-        pass
 
     def prepare_for_lp_inference(self, *args, **kwargs):
         futures = self.worker_group.run_all_workers_single_data(

@@ -14,21 +14,18 @@
 
 import gc
 
-import os
 from collections import defaultdict
 from contextlib import contextmanager
 from typing import Any, Dict, Optional
 
 import ray
 import torch
-from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     FSDPModule,
 )
-from transformers import AutoModelForCausalLM
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from nemo_reinforcer.models.dtensor.parallelize import _parallelize_model
 
-from nemo_reinforcer.algorithms.utils import get_tokenizer
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.models.policy import PolicyConfig
@@ -114,6 +111,7 @@ class DTensorPolicyWorker:
     def __init__(
         self,
         config: PolicyConfig,
+        tokenizer: AutoTokenizer,
         weights_path: Optional[str] = None,
         optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,
@@ -125,7 +123,7 @@ class DTensorPolicyWorker:
         rank = torch.distributed.get_rank()
         world_size = torch.distributed.get_world_size()
         model_name = self.cfg["model_name"]
-        tokenizer_name = self.cfg["tokenizer_name"]
+
         self.cpu_offload = self.cfg["dtensor_cfg"]["cpu_offload"]
         self.max_grad_norm = self.cfg["max_grad_norm"]
 
@@ -142,11 +140,7 @@ class DTensorPolicyWorker:
             device_map="cpu",  # load weights onto CPU initially
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
         )
-        self.tokenizer = get_tokenizer(tokenizer_name)
-        # If no pad token is defined, you might need:
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
-
+        self.tokenizer = tokenizer
         # ------------------------------------------------
         # 3) Move to GPU + Composable FSDP
         #    (Initialize device mesh, shard submodules, then shard entire model)
@@ -680,6 +674,7 @@ class DTensorPolicyWorker:
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None,
         save_torch_dist: bool = True,
         save_hf: bool = False,
     ):
@@ -694,6 +689,7 @@ class DTensorPolicyWorker:
             optimizer=self.optimizer if optimizer_path else None,
             scheduler=self.scheduler if optimizer_path else None,
             optimizer_path=optimizer_path,
+            tokenizer=self.tokenizer if tokenizer_path else None,
             save_torch_dist=save_torch_dist,
             save_hf=save_hf,
         )
@@ -710,5 +706,3 @@ class DTensorPolicyWorker:
 
     def shutdown(self):
         """Shutdown the policy."""
-        #
-        pass
