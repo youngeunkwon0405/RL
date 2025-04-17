@@ -148,7 +148,7 @@ class MathEnvironment(EnvironmentInterface):
         rewards = torch.tensor(results).cpu()
         done = torch.ones_like(rewards).cpu()
 
-        next_stop_strings = None
+        next_stop_strings = [[None]] * len(message_log_batch)
 
         return EnvironmentReturn(
             observations=observations,

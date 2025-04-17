@@ -302,6 +302,11 @@ def multi_step_setup_vllm(
         print("Cleaning up VllmGeneration (Multi-Step Calc Test)...")
         if vllm_generation:
             vllm_generation.shutdown()
+        # Force garbage collection to help release resources
+        import gc
+
+        gc.collect()
+        torch.cuda.empty_cache()
         print("VllmGeneration cleanup finished (Multi-Step Calc Test).")
 
 
