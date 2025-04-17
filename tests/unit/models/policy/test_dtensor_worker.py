@@ -439,9 +439,10 @@ def test_dtensor_fails_with_tp_and_tied_model(mock_2gpu_distributed_env):
         sequence_parallel=False,
         activation_checkpointing=False,
     )
+    tokenizer = get_tokenizer(config["tokenizer"])
     with pytest.raises(
         AssertionError, match="Tie word embeddings not supported when TP is enabled"
     ):
         DTensorPolicyWorker.__ray_actor_class__(
-            config=config, init_optimizer=False, init_reference_model=False
+            config=config, tokenizer=tokenizer, init_optimizer=False, init_reference_model=False
         )
