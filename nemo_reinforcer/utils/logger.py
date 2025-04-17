@@ -19,6 +19,7 @@ import glob
 import time
 import threading
 import requests
+import subprocess
 from abc import ABC, abstractmethod
 import logging
 from typing import List, Any, Dict, Optional, TypedDict, Union
@@ -125,10 +126,46 @@ class WandbLogger(LoggerInterface):
 
     def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None):
         self.run = wandb.init(**cfg, dir=log_dir)
-        self.run.log_code("./nemo_reinforcer")
+        self._log_code()
         print(
             f"Initialized WandbLogger for project {cfg.get('project')}, run {cfg.get('name')} at {log_dir}"
         )
+
+    def _log_code(self):
+        """Log code that is tracked by git to wandb.
+
+        This function gets a list of all files tracked by git in the project root
+        and manually uploads them to the current wandb run as an artifact.
+        """
+        try:
+            result = subprocess.run(
+                ["git", "ls-files"], capture_output=True, text=True, check=True
+            )
+
+            tracked_files = result.stdout.strip().split("\n")
+
+            if not tracked_files:
+                print("No git-tracked files found")
+                return
+
+            code_artifact = wandb.Artifact(
+                name=f"source-code-{self.run.project}", type="code"
+            )
+
+            for file_path in tracked_files:
+                if os.path.isfile(file_path):
+                    try:
+                        code_artifact.add_file(file_path, name=file_path)
+                    except Exception as e:
+                        print(f"Error adding file {file_path}: {e}")
+
+            self.run.log_artifact(code_artifact)
+            print(f"Logged {len(tracked_files)} git-tracked files to wandb")
+
+        except subprocess.CalledProcessError as e:
+            print(f"Error getting git-tracked files: {e}")
+        except Exception as e:
+            print(f"Unexpected error during git code logging: {e}")
 
     def define_metric(
         self,
