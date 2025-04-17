@@ -13,7 +13,7 @@
 # limitations under the License.
 from copy import deepcopy
 from collections import UserDict
-from typing import List, Dict, Optional, Iterator, TypeVar, Any, Generic
+from typing import List, Dict, Optional, Iterator, TypeVar, Any, Generic, Union
 from typing_extensions import Self
 
 import torch
@@ -275,12 +275,36 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             return len(self.data[key])
         return self.data[key].shape[0]
 
-    def to(self, device: torch.device) -> "BatchedDataDict":
-        """Move all tensors in the batch to a specific device."""
-        for k in self.data:
-            if torch.is_tensor(self.data[k]):
-                self.data[k] = self.data[k].to(device)
+    def to(self, device: torch.device) -> Self:
+        """Move tensors in batched dict to device."""
+        for k, v in self.data.items():
+            if torch.is_tensor(v):
+                self.data[k] = v.to(device)
         return self
+
+    def select_indices(
+        self, indices: Union[List[int], torch.Tensor]
+    ) -> "BatchedDataDict":
+        """Selects specific rows from the batch based on indices.
+
+        Args:
+            indices: A list or tensor of integer indices to select.
+
+        Returns:
+            BatchedDataDict: A new BatchedDataDict containing only the selected rows.
+        """
+        selected_batch = BatchedDataDict()
+        for k, v in self.data.items():
+            if torch.is_tensor(v):
+                selected_batch[k] = v[indices]
+            elif isinstance(v, list):
+                selected_batch[k] = [v[i] for i in indices]
+            else:
+                # Handle other potential types if necessary, or raise error
+                raise TypeError(
+                    f"Unsupported type {type(v)} for index selection in BatchedDataDict"
+                )
+        return selected_batch
 
     def get_dict(self) -> dict:
         """Get the underlying data dictionary."""
