@@ -312,7 +312,7 @@ def test_run_multi_step_calculator_hf(multi_step_setup_hf):
 
     print("\nRunning multi-step calculator rollout (HF)...")
     policy.prepare_for_generation()
-    final_batch = run_multi_turn_rollout(
+    final_batch, rollout_metrics = run_multi_turn_rollout(
         policy_generation=policy,
         initial_batch=initial_batch,
         tokenizer=tokenizer,
@@ -379,7 +379,7 @@ def test_run_multi_step_calculator_vllm(multi_step_setup_vllm):
 
     print("\nRunning multi-step calculator rollout (VLLM)...")
     vllm_generation.prepare_for_generation()
-    final_batch = run_multi_turn_rollout(
+    final_batch, rollout_metrics = run_multi_turn_rollout(
         policy_generation=vllm_generation,
         initial_batch=initial_batch,
         tokenizer=tokenizer,
@@ -570,7 +570,7 @@ def test_run_sliding_puzzle_vllm(sliding_puzzle_setup_vllm):
 
     print("\nRunning sliding puzzle rollout (VLLM)...")
     vllm_generation.prepare_for_generation()
-    final_batch = run_multi_turn_rollout(
+    final_batch, rollout_metrics = run_multi_turn_rollout(
         policy_generation=vllm_generation,
         initial_batch=initial_batch,
         tokenizer=tokenizer,
@@ -579,6 +579,7 @@ def test_run_sliding_puzzle_vllm(sliding_puzzle_setup_vllm):
         max_seq_len=max_seq_len,
         greedy=True,
     )
+    print(rollout_metrics)
     vllm_generation.finish_generation()
     print("Sliding puzzle rollout complete (VLLM).")
 

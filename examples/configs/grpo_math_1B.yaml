@@ -31,6 +31,7 @@ policy:
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
   max_total_sequence_length: 512
+  max_turns: 999999
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
