@@ -32,7 +32,6 @@ from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from tests.unit.test_utils import simple_loss
 from tests.unit.conftest import TEST_ASSETS
-from functools import partial
 from transformers import AutoModelForCausalLM
 
 
@@ -45,7 +44,7 @@ def create_test_config(
 ) -> PolicyConfig:
     return {
         "model_name": model_name,
-        "tokenizer_name": model_name,
+        "tokenizer": {"name": model_name},
         "generation_batch_size": 1,  # Small batch size for testing
         "train_global_batch_size": 4,
         "train_micro_batch_size": 1,
@@ -114,22 +113,17 @@ def gc_collect():
     gc.collect()
 
 
-@pytest.fixture(scope="function")
-def tokenizer():
-    """Initialize tokenizer for the test model."""
-    model_name = create_test_config()["model_name"]
-    tokenizer = get_tokenizer(model_name)
-    return tokenizer
-
-
 @pytest.fixture
-def policy_setup(tokenizer, two_gpu_virtual_cluster):
+def policy_setup(two_gpu_virtual_cluster):
     """Setup and teardown for policy tests - creates a virtual cluster and policy."""
     config = create_test_config()
+    tokenizer = get_tokenizer(config["tokenizer"])
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating HfPolicy...")
-    policy = HfPolicy(cluster=two_gpu_virtual_cluster, config=config)
+    policy = HfPolicy(
+        cluster=two_gpu_virtual_cluster, config=config, tokenizer=tokenizer
+    )
 
     yield policy
 
@@ -228,11 +222,15 @@ def training_setup(request, two_gpu_virtual_cluster):
         config = create_test_config(
             model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
         )
+        tokenizer = get_tokenizer(config["tokenizer"])
         print(
             f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
         )
         policy = HfPolicy(
-            cluster=two_gpu_virtual_cluster, config=config, init_reference_model=False
+            cluster=two_gpu_virtual_cluster,
+            config=config,
+            tokenizer=tokenizer,
+            init_reference_model=False,
         )
 
         # Create a test batch
@@ -336,11 +334,15 @@ def logprob_setup(request, two_gpu_virtual_cluster):
         config = create_test_config(
             model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
         )
+        tokenizer = get_tokenizer(config["tokenizer"])
         print(
             f"Creating logprob HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
         )
         policy = HfPolicy(
-            cluster=two_gpu_virtual_cluster, config=config, init_reference_model=False
+            cluster=two_gpu_virtual_cluster,
+            config=config,
+            tokenizer=tokenizer,
+            init_reference_model=False,
         )
 
         # Create a test batch
