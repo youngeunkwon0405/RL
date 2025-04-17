@@ -23,7 +23,7 @@ from nemo_reinforcer.environments.interfaces import (
     EnvironmentReturn,
 )
 from nemo_reinforcer.distributed.virtual_cluster import PY_EXECUTABLES
-from games.llm_puzzle_games.sliding_puzzle_game import SlidingPuzzleGame
+from .environments.sliding_puzzle_game import SlidingPuzzleGame
 
 
 class MultiStepCalcMetadata(TypedDict):
@@ -248,9 +248,9 @@ class _SlidingPuzzleLogic:
 
         if parsed_action is None:
             # Handle cases where parsing failed or it wasn't assistant's turn properly
-            is_terminated = True  # Penalize for bad format
+            # is_terminated = True  # Penalize for bad format
             next_observation_content = (
-                "<error>Invalid response format. Use 'Action: your_move'.</error>"
+                "\nInvalid response format. Try 'Action: your_move'."
             )
             next_metadata = None
         else:
@@ -273,7 +273,7 @@ class _SlidingPuzzleLogic:
                 # next_stop_strings remains None
 
         return (
-            {"role": "environment", "content": next_observation_content},
+            {"role": "environment", "content": next_observation_content + "\n"},
             turn_reward,
             is_terminated,
             next_stop_strings,

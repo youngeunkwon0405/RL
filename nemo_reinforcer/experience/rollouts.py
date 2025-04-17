@@ -51,6 +51,7 @@ def generate_responses(
     tokenizer: AutoTokenizer,
     input_lengths: torch.Tensor,
     include_logprobs: bool = True,
+    greedy: bool = False,
 ) -> Tuple[BatchedDataDict[DatumSpec], List[torch.Tensor], dict]:
     """Generate responses from policy."""
     # Add stop_strings to generation_input_data if present in the batch
@@ -61,7 +62,9 @@ def generate_responses(
         generation_input_data["stop_strings"] = [None] * len(input_lengths)
 
     # Generate responses
-    generation_outputs = policy_generation.generate(generation_input_data)
+    generation_outputs = policy_generation.generate(
+        generation_input_data, greedy=greedy
+    )
 
     # Extract generated tokens
     generated_ids = []
@@ -207,6 +210,7 @@ def run_multi_turn_rollout(
     task_to_env: Dict[str, EnvironmentInterface],
     max_seq_len: int,
     max_turns: int = 999999,
+    greedy: bool = False,
 ) -> BatchedDataDict[DatumSpec]:
     """Runs a multi-turn rollout loop, interacting with the environment.
 
@@ -295,6 +299,7 @@ def run_multi_turn_rollout(
             active_batch,
             tokenizer,
             active_input_lengths,
+            greedy=greedy,
         )
         print(
             f"    Generated responses (Avg len: {gen_metrics['mean_generation_length']:.1f})"

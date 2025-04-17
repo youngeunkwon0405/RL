@@ -552,7 +552,8 @@ class HfPolicyWorker:
                 if gen_cfg.get("stop_strings", None):
                     stop_strings.update(gen_cfg["stop_strings"])
 
-                stop_strings = list(stop_strings)
+                stop_strings = list(stop_strings) if len(stop_strings) > 0 else None
+                print(f"Stop strings: {stop_strings}")
 
                 batch_size, seq_len = input_ids.shape
 
@@ -859,14 +860,15 @@ class HfPolicyWorker:
         if self.cfg["fsdp_offload_enabled"]:
             return model
 
+        no_block = False
         for param in model.parameters():
-            param.data = param.data.to("cpu", non_blocking=True)
+            param.data = param.data.to("cpu", non_blocking=no_block)
             if hasattr(param, "_local_shard"):
                 param._local_shard = param.data
             if param.grad is not None:
-                param.grad = param.grad.to("cpu", non_blocking=True)
+                param.grad = param.grad.to("cpu", non_blocking=no_block)
         for buffer in model.buffers():
-            buffer.data = buffer.data.to("cpu", non_blocking=True)
+            buffer.data = buffer.data.to("cpu", non_blocking=no_block)
 
         if hasattr(model, "_fsdp_wrapped_module"):
             self.manual_offload_to_cpu(model._fsdp_wrapped_module)
@@ -877,14 +879,15 @@ class HfPolicyWorker:
         if self.cfg["fsdp_offload_enabled"]:
             return model
 
+        no_block = False
         for param in model.parameters():
-            param.data = param.data.to("cuda", non_blocking=True)
+            param.data = param.data.to("cuda", non_blocking=no_block)
             if hasattr(param, "_local_shard"):
                 param._local_shard = param.data
             if param.grad is not None:
-                param.grad = param.grad.to("cuda", non_blocking=True)
+                param.grad = param.grad.to("cuda", non_blocking=no_block)
         for buffer in model.buffers():
-            buffer.data = buffer.data.to("cuda", non_blocking=True)
+            buffer.data = buffer.data.to("cuda", non_blocking=no_block)
 
         if hasattr(model, "_fsdp_wrapped_module"):
             self.manual_load_to_gpu(model._fsdp_wrapped_module)

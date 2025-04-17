@@ -20,15 +20,12 @@ from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 
 
 # [batched] observations/responses, metadata, next_stop_strings, rewards, 'episode done' flags
-# Changed to NamedTuple for clarity
 class EnvironmentReturn(NamedTuple):
     observations: List[Dict[str, str]]
     metadata: List[Optional[Dict]]  # Metadata might be None if episode terminates
     next_stop_strings: List[Optional[List[str]]]
     rewards: Tensor
-    terminated: (
-        Tensor  # Renamed from 'done' for clarity, represents natural episode end
-    )
+    terminated: Tensor
 
 
 class EnvironmentInterface(abc.ABC):

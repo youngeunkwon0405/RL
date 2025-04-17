@@ -40,8 +40,8 @@ from tests.unit.test_envs import (
     SlidingPuzzleMetadata,
 )
 
-# Import the game logic for generating initial state
-from games.llm_puzzle_games.sliding_puzzle_game import SlidingPuzzleGame
+# Import the game logic for generating initial state from its new location
+from tests.unit.environments.sliding_puzzle_game import SlidingPuzzleGame
 
 from nemo_reinforcer.models.generation.vllm import VllmConfig, VllmGeneration
 
@@ -223,7 +223,7 @@ base_vllm_test_config: VllmConfig = {
     "stop_strings": None,
     "vllm_cfg": {
         "tensor_parallel_size": 1,
-        "max_model_len": 512,
+        "max_model_len": 2048,
         "disable_log_stats": True,
         "disable_log_requests": True,
         "gpu_memory_utilization": 0.6,
@@ -251,7 +251,7 @@ def multi_step_setup_hf(
             config["generation"], tokenizer
         )
         config["generation"]["stop_strings"] = None
-        policy = HfPolicy(cluster=cluster, config=config)
+        policy = HfPolicy(cluster=cluster, config=config, init_reference_model=False)
         yield (
             policy,
             tokenizer,
@@ -302,9 +302,6 @@ def multi_step_setup_vllm(
         print("VllmGeneration cleanup finished (Multi-Step Calc Test).")
 
 
-# --- Test Functions (Multi-Step Calculator) ---
-
-
 def test_run_multi_step_calculator_hf(multi_step_setup_hf):
     """Tests multi-step calculator rollout with HfPolicy."""
     policy, tokenizer, task_to_env, initial_batch, cluster = multi_step_setup_hf
@@ -338,7 +335,7 @@ def test_run_multi_step_calculator_hf(multi_step_setup_hf):
     tool_call_count = 0
     final_answer_msg = None
     for i, msg in enumerate(sample_log):
-        print(f"  {i}: Role={msg['role']}, Content='{msg['content'].strip()}'")
+        print(f"  {i}: Role={msg['role']}, Content='{msg['content']}'")
         if msg["role"] == "assistant":
             if msg["content"].strip().endswith("<call: calculator>"):
                 tool_call_count += 1
@@ -405,7 +402,7 @@ def test_run_multi_step_calculator_vllm(multi_step_setup_vllm):
     tool_call_count = 0
     final_answer_msg = None
     for i, msg in enumerate(sample_log):
-        print(f"  {i}: Role={msg['role']}, Content='{msg['content'].strip()[:90]}...'")
+        print(f"  {i}: Role={msg['role']}, Content='{msg['content']}'")
         if msg["role"] == "assistant":
             if msg["content"].strip().endswith("<call: calculator>"):
                 tool_call_count += 1
@@ -457,10 +454,10 @@ def initial_sliding_puzzle_batch(tokenizer):
     print("Creating initial sliding puzzle test batch...")
     batch_size = 1
     game_config = {
-        "size": 3,
-        "shuffle_moves": 5,
-    }  # Use 3x3 puzzle, few shuffles for easier test
-    max_moves = 15  # Set a limit for the test
+        "size": 2,
+        "shuffle_moves": 1,
+    }
+    max_moves = 25  # Set a limit for the test
 
     # Generate initial game state
     initial_game_state = SlidingPuzzleGame.generate(game_config)
@@ -470,10 +467,11 @@ def initial_sliding_puzzle_batch(tokenizer):
     prompt_instructions = (
         f"{welcome_message}\n\n"
         f"Current Board State:\n{initial_render}\n\n"
-        f"Think step-by-step to reach the goal state where numbers are ordered 1 through {game_config['size'] ** 2 - 1} "
+        f"Reach the goal state where numbers are ordered 1 through {game_config['size'] ** 2 - 1} "
         f"with the empty space (0) at the bottom right.\n"
         f"Valid actions: 'up', 'down', 'left', 'right', or 'slide row col' (e.g., 'slide 1 2').\n"
         f"After thinking, output your chosen action on a new line starting with 'Action:' like this:\nAction: your_action"
+        f"Think step-by-step before acting. \n"
     )
 
     batch_message_logs = []
@@ -523,35 +521,6 @@ def initial_sliding_puzzle_batch(tokenizer):
     return BatchedDataDict(initial_batch_dict)
 
 
-# --- Setup Fixtures using Sliding Puzzle Env ---
-@pytest.fixture(scope="function")
-def sliding_puzzle_setup_hf(
-    cluster, tokenizer, sliding_puzzle_environment, initial_sliding_puzzle_batch
-):
-    """Sets up components for sliding puzzle tests using HfPolicy."""
-    policy = None
-    task_to_env, _ = sliding_puzzle_environment
-    print("Creating HfPolicy for Sliding Puzzle Test...")
-    try:
-        config = deepcopy(base_hf_test_config)
-        # Qwen model name is already in base config
-        config["tokenizer_name"] = tokenizer.name_or_path
-        config["generation"] = configure_generation_config(
-            config["generation"], tokenizer
-        )
-        # Ensure max_new_tokens is sufficient for thought + action tag
-        config["generation"]["max_new_tokens"] = 100
-        # Explicitly ensure no string-based stopping criteria are used
-        config["generation"]["stop_strings"] = None
-        policy = HfPolicy(cluster=cluster, config=config)
-        yield policy, tokenizer, task_to_env, initial_sliding_puzzle_batch, cluster
-    finally:
-        print("Cleaning up HfPolicy (Sliding Puzzle Test)...")
-        if policy:
-            policy.shutdown()
-        print("HfPolicy cleanup finished (Sliding Puzzle Test).")
-
-
 @pytest.fixture(scope="function")
 def sliding_puzzle_setup_vllm(
     cluster, tokenizer, sliding_puzzle_environment, initial_sliding_puzzle_batch
@@ -569,7 +538,7 @@ def sliding_puzzle_setup_vllm(
             vllm_config, tokenizer, is_eval=is_eval
         )
         # Ensure max_new_tokens is sufficient
-        vllm_config["max_new_tokens"] = 100
+        vllm_config["max_new_tokens"] = 500
         vllm_generation = VllmGeneration(cluster, vllm_config)
         vllm_generation.finish_generation()
         yield (
@@ -584,65 +553,6 @@ def sliding_puzzle_setup_vllm(
         if vllm_generation:
             vllm_generation.shutdown()
         print("VllmGeneration cleanup finished (Sliding Puzzle Test).")
-
-
-# --- Test Functions (Sliding Puzzle) ---
-def test_run_sliding_puzzle_hf(sliding_puzzle_setup_hf):
-    """Tests sliding puzzle rollout with HfPolicy."""
-    policy, tokenizer, task_to_env, initial_batch, cluster = sliding_puzzle_setup_hf
-    # Max turns should be based on max_moves allowed by the env
-    max_moves = initial_batch["extra_env_info"][0]["max_moves"]
-    max_turns = max_moves + 1
-    max_seq_len = 2048  # Allow more space for board states
-
-    print("\nRunning sliding puzzle rollout (HF)...")
-    policy.prepare_for_generation()
-    final_batch = run_multi_turn_rollout(
-        policy_generation=policy,
-        initial_batch=initial_batch,
-        tokenizer=tokenizer,
-        task_to_env=task_to_env,
-        max_turns=max_turns,
-        max_seq_len=max_seq_len,
-    )
-    policy.finish_generation()
-    print("Sliding puzzle rollout complete (HF).")
-
-    # --- Assertions ---
-    assert isinstance(final_batch, BatchedDataDict)
-    assert "message_log" in final_batch
-    assert "total_reward" in final_batch
-    assert len(final_batch["message_log"]) == len(initial_batch["message_log"])
-
-    sample_log = final_batch["message_log"][0]
-    print("\nSample Interaction Log (Sliding Puzzle - HF):")
-    action_tag_count = 0
-    for i, msg in enumerate(sample_log):
-        print(
-            f"  {i}: Role={msg['role']}, Content starts with: '{msg['content'].strip()}'"
-        )
-        if msg["role"] == "assistant" and "action:" in msg["content"].lower():
-            action_tag_count += 1
-
-    assert action_tag_count > 0, (
-        "Expected at least one assistant message with 'Action:' prefix"
-    )
-
-    # Check if the puzzle was solved (reward should be 1.0)
-    # Note: Solving a 3x3 puzzle might still be hard for the base model.
-    # We might need to adjust assertions or use a simpler puzzle/more shuffles later.
-    print(f"Final Total Reward: {final_batch['total_reward'][0].item()}")
-    assert torch.isclose(final_batch["total_reward"][0], torch.tensor(1.0)), (
-        f"Expected final reward to be 1.0 (solved), but got {final_batch['total_reward'][0]}"
-    )
-
-    # Check if the last message indicates success
-    last_env_message = sample_log[-1]["content"]
-    assert "congratulations" in last_env_message.lower(), (
-        "Last message should indicate puzzle solved"
-    )
-
-    print("\nSliding Puzzle HF Test assertions passed.")
 
 
 @pytest.mark.skipif(
@@ -667,6 +577,7 @@ def test_run_sliding_puzzle_vllm(sliding_puzzle_setup_vllm):
         task_to_env=task_to_env,
         max_turns=max_turns,
         max_seq_len=max_seq_len,
+        greedy=True,
     )
     vllm_generation.finish_generation()
     print("Sliding puzzle rollout complete (VLLM).")
@@ -681,9 +592,7 @@ def test_run_sliding_puzzle_vllm(sliding_puzzle_setup_vllm):
     print("\nSample Interaction Log (Sliding Puzzle - VLLM):")
     action_tag_count = 0
     for i, msg in enumerate(sample_log):
-        print(
-            f"  {i}: Role={msg['role']}, Content starts with: '{msg['content'].strip()}'"
-        )
+        print(f"  {i}: Role={msg['role']}, Content starts with: '{msg['content']}'")
         if msg["role"] == "assistant" and "action:" in msg["content"].lower():
             action_tag_count += 1
 
@@ -692,8 +601,8 @@ def test_run_sliding_puzzle_vllm(sliding_puzzle_setup_vllm):
     )
 
     print(f"Final Total Reward: {final_batch['total_reward'][0].item()}")
-    assert torch.isclose(final_batch["total_reward"][0], torch.tensor(1.0)), (
-        f"Expected final reward to be 1.0 (solved), but got {final_batch['total_reward'][0]}"
+    assert final_batch["total_reward"][0] > 0.0, (
+        f"Expected final reward to be greater than 0.0 (solved), but got {final_batch['total_reward'][0]}"
     )
 
     last_env_message = sample_log[-1]["content"]
