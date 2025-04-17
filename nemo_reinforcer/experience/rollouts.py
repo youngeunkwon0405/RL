@@ -258,12 +258,7 @@ def run_multi_turn_rollout(
 
     for turn in range(max_turns):
         if len(active_indices) == 0:
-            print(f"  Turn {turn + 1}/{max_turns}: All samples finished.")
             break
-
-        print(
-            f"  Turn {turn + 1}/{max_turns}: Processing {len(active_indices)} active samples..."
-        )
 
         active_samples_per_turn.append(len(active_indices))
 
@@ -299,9 +294,6 @@ def run_multi_turn_rollout(
             active_input_lengths,
             greedy=greedy,
         )
-        print(
-            f"    Generated responses (Avg len: {gen_metrics['mean_generation_length']:.1f})"
-        )
 
         # Record token usage - assistant
         for i, global_idx in enumerate(active_indices.tolist()):
@@ -319,10 +311,6 @@ def run_multi_turn_rollout(
 
         # Record rewards for this turn
         reward_per_turn.append(env_output.rewards.mean().item())
-
-        print(
-            f"    Calculated rewards (Avg: {turn_rewards[active_indices].mean():.3f})"
-        )
 
         # Update message log for ALL active samples with env observation
         # This must happen BEFORE filtering based on done flags
@@ -372,11 +360,6 @@ def run_multi_turn_rollout(
             # Record whether this sample terminated naturally
             if env_output.terminateds[idx]:
                 sample_terminated[global_idx] = True
-
-        print(
-            f"    {len(newly_finished_indices_global)} samples finished this turn."
-            f" (Terminated: {env_output.terminateds.sum()})"
-        )
 
         # Update active indices for the next iteration
         active_indices_local_next = torch.where(active_mask)[0]
