@@ -137,7 +137,10 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         return chunked_batch
 
     def shard_by_batch_size(
-        self, shards: int, batch_size: Optional[int] = None
+        self,
+        shards: int,
+        batch_size: Optional[int] = None,
+        allow_uneven_shards: bool = False,
     ) -> List["SlicedDataDict"]:
         """Shards a batch by first dividing it into chunks of size batch_size, then further dividing each chunk into shards equal parts. Finally aggregates the sub-shards by their position.
 
@@ -150,10 +153,17 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         Args:
             shards (int): The number of shards to divide each batch_size chunk into.
             batch_size (int): The size of each initial chunk.
+            allow_uneven_shards (bool): Whether to allow shards to be unevenly sized.
+                                        If True, the last shard may be smaller than the others.
 
         Returns:
             List[BatchedDataDict]: A list of BatchedDataDicts, length equal to shards.
         """
+        if allow_uneven_shards:
+            assert batch_size is None, (
+                "batch_size must be None if allow_uneven_shards is True"
+            )
+
         # Get the total batch size
         batch_sizes = set()
         for val in self.data.values():
@@ -173,13 +183,18 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         assert total_batch_size % batch_size == 0, (
             f"Total batch size ({total_batch_size}) is not a multiple of batch_size ({batch_size})"
         )
-        assert batch_size % shards == 0, (
-            f"Batch size ({batch_size}) is not a multiple of shards ({shards})"
-        )
+        if not allow_uneven_shards:
+            assert batch_size % shards == 0, (
+                f"Batch size ({batch_size}) is not a multiple of shards ({shards})"
+            )
 
         num_chunks = total_batch_size // batch_size
-        shard_size = batch_size // shards
-        # Create one BatchedDataDict per shard position
+        # Calculate shard size, rounding up if not evenly divisible
+        shard_size = (
+            (batch_size + shards - 1) // shards
+            if allow_uneven_shards
+            else batch_size // shards
+        )
         aggregated_shards = [SlicedDataDict() for _ in range(shards)]
 
         # Group data by shard position across all chunks
@@ -189,6 +204,8 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                 chunk_start = chunk_idx * batch_size
                 shard_start = chunk_start + shard_idx * shard_size
                 shard_end = chunk_start + (shard_idx + 1) * shard_size
+                if allow_uneven_shards:
+                    shard_end = min(shard_end, total_batch_size)
                 indices = torch.arange(shard_start, shard_end)
 
                 for k in self.data:

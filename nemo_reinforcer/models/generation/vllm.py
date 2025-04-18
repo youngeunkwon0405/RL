@@ -224,6 +224,18 @@ class VllmGenerationWorker:
                 - generation_lengths: Lengths of each response
                 - unpadded_sequence_lengths: Lengths of each input + generated sequence
         """
+        # Handle empty input case
+        if len(data["input_ids"]) == 0:
+            # Return empty BatchedDataDict with all required fields
+            return BatchedDataDict[GenerationOutputSpec](
+                {
+                    "output_ids": torch.zeros((0, 0), dtype=torch.long),
+                    "logprobs": torch.zeros((0, 0), dtype=torch.float),
+                    "generation_lengths": torch.zeros(0, dtype=torch.long),
+                    "unpadded_sequence_lengths": torch.zeros(0, dtype=torch.long),
+                }
+            )
+
         input_ids = data["input_ids"]
         input_lengths = data["input_lengths"]
         # this function requires all generations have the same stop strings, so we collect all here
@@ -535,10 +547,8 @@ class VllmGeneration(GenerationInterface):
             "input_ids and input_lengths are required in data for vLLM generation"
         )
 
-        batch_size = data["input_ids"].shape[0]
-
         # Shard the data across the tied worker groups
-        sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=batch_size)
+        sharded_data = data.shard_by_batch_size(self.dp_size, allow_uneven_shards=True)
         future_bundle = self.worker_group.run_all_workers_multiple_data(
             "generate",
             sharded_data,

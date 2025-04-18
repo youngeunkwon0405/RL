@@ -308,7 +308,10 @@ def run_multi_turn_rollout(
             )["input_ids"][0]
 
             # check if new message overflows max_seq_len
-            if len(tokenized_obs) + active_input_lengths[i] > max_seq_len:
+            if (
+                len(tokenized_obs) + len(generated_ids[i]) + active_input_lengths[i]
+                >= max_seq_len
+            ):
                 # truncate
                 tokenized_obs = tokenized_obs[: max_seq_len - active_input_lengths[i]]
                 truncation_mask[i] = True
