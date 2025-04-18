@@ -135,10 +135,10 @@ def test_math_env_step_basic(math_env, basic_test_data):
     # Check rewards and done flags
     assert result.rewards.shape == (3,), "Rewards should be a tensor of shape (3,)"
     assert all(result.rewards == 1.0), "All rewards should be 1.0 for correct answers"
-    assert result.terminated.shape == (3,), (
+    assert result.terminateds.shape == (3,), (
         "Terminated flags should be a tensor of shape (3,)"
     )
-    assert all(result.terminated == 1.0), "All terminated flags should be 1.0"
+    assert all(result.terminateds == 1.0), "All terminated flags should be 1.0"
 
 
 def test_math_env_step_mixed(math_env, mixed_test_data):
@@ -177,7 +177,7 @@ def test_math_env_step_empty(math_env):
     assert len(result.observations) == 0, "Should return empty observations list"
     assert len(result.metadata) == 0, "Should return empty metadata list"
     assert result.rewards.shape == (0,), "Should return empty rewards tensor"
-    assert result.terminated.shape == (0,), "Should return empty terminated tensor"
+    assert result.terminateds.shape == (0,), "Should return empty terminateds tensor"
 
 
 def test_math_env_step_multiple_assistant_messages(
@@ -225,7 +225,7 @@ def test_math_env_various_batches(math_env, batch_size):
         "Rewards should be a tensor of shape (batch_size,)"
     )
     assert all(result.rewards == 1.0), "All rewards should be 1.0"
-    assert result.terminated.shape == (batch_size,), (
+    assert result.terminateds.shape == (batch_size,), (
         "Terminated flags should be a tensor of shape (batch_size,)"
     )
-    assert all(result.terminated == 1.0), "All terminated flags should be 1.0"
+    assert all(result.terminateds == 1.0), "All terminated flags should be 1.0"

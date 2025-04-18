@@ -126,7 +126,7 @@ def test_calculate_rewards_single_task(mock_env):
     batch = create_mock_batch(2, task_names, message_logs)
 
     # Calculate rewards
-    rewards, env_observations, terminateds, next_stop_strings, metadata = (
+    env_observations, metadata, next_stop_strings, rewards, terminateds = (
         calculate_rewards(batch, task_to_env)
     )
 
@@ -161,7 +161,7 @@ def test_calculate_rewards_multiple_tasks(mock_envs):
     batch = create_mock_batch(4, task_names, message_logs)
 
     # Calculate rewards
-    rewards, env_observations, terminateds, next_stop_strings, metadata = (
+    env_observations, metadata, next_stop_strings, rewards, terminateds = (
         calculate_rewards(batch, mock_envs)
     )
 
@@ -188,7 +188,7 @@ def test_calculate_rewards_empty_batch(mock_env):
     batch = create_mock_batch(0, [], [])
 
     # Calculate rewards
-    rewards, env_observations, terminateds, next_stop_strings, metadata = (
+    env_observations, metadata, next_stop_strings, rewards, terminateds = (
         calculate_rewards(batch, task_to_env)
     )
 

@@ -21,13 +21,27 @@ from nemo_reinforcer.data.interfaces import LLMMessageLogType
 
 
 class EnvironmentReturn(NamedTuple):
-    """Standard return type for environment step methods."""
+    """Standard batched return type for environment step methods.
+
+    **All elements are batched.**
+    observations: New observation from the environment.
+                  It's a (batched) 'message' type, which is a dict
+                  with keys 'role' and 'content'.
+    metadata: Updated metadata from the environment.
+    next_stop_strings: The stop strings for the next turn.
+                       If your environment is a game or similar,
+                       you may want to return a list of stop strings
+                       that are valid actions for the next turn or
+                       similar. This field lets you control this per turn.
+    rewards: the rewards for this turn.
+    terminateds: whether the episode ended this turn.
+    """
 
     observations: List[Dict[str, str]]
     metadata: List[Optional[dict]]
     next_stop_strings: List[Optional[List[str]]]
     rewards: Tensor
-    terminated: Tensor
+    terminateds: Tensor
 
 
 class EnvironmentInterface(abc.ABC):
@@ -61,7 +75,7 @@ class EnvironmentInterface(abc.ABC):
                       math solutions, code unit tests, or agent states. Can be None if episode terminated.
 
         Returns:
-        - EnvironmentReturn NamedTuple containing observations, metadata, next_stop_strings, rewards, and terminated flags.
+        - EnvironmentReturn NamedTuple containing observations, metadata, next_stop_strings, rewards, and terminateds flags.
         """
 
     @abc.abstractmethod
