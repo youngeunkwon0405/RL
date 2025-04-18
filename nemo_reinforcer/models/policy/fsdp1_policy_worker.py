@@ -721,6 +721,63 @@ class FSDP1PolicyWorker:
             torch.cuda.empty_cache()
         return {device_uuid: data}
 
+    @torch.no_grad()
+    def stream_weight_update(
+        self, remote_workers, update_weight_method_name, offload_model=True
+    ):
+        self._held_reference_model_params = None
+
+        class TensorDict(dict):
+            def __init__(self, tensor_processor, device_uuid):
+                self.tensor_processor = tensor_processor
+                self.device_uuid = device_uuid
+                self.known_keys = set()
+
+            def __setitem__(self, key, value):
+                processed_key, processed_tensor = self.tensor_processor(
+                    key, value, self.known_keys
+                )
+                has_processed_tensor = processed_tensor is not None
+                if has_processed_tensor:
+                    futures = [
+                        getattr(worker, update_weight_method_name).remote(
+                            {self.device_uuid: {processed_key: processed_tensor}}
+                        )
+                        for worker in remote_workers
+                    ]
+                    ret = ray.get(futures)
+                    assert all(ret) == True, "Update weight failed."
+
+                del processed_tensor, value
+
+                # Hacky way to set minimal tensor.
+                return super().__setitem__(key, torch.zeros(1, device="cpu"))
+
+        from torch.multiprocessing.reductions import reduce_tensor
+
+        device_uuid = self.report_device_id()
+
+        def tensor_processor(key, value, known_keys):
+            assert isinstance(value, torch.Tensor)
+            if not value.is_cuda:
+                return None, None
+
+            assert key not in known_keys
+            known_keys.add(key)
+
+            # Process the key to remove the FSDP wrapper.
+            key = key.replace("_fsdp_wrapped_module.", "")
+
+            tensor = value.to(self.dtype, non_blocking=True)
+
+            return key, reduce_tensor(tensor.detach())
+
+        target = TensorDict(tensor_processor, device_uuid)
+
+        self.model.state_dict(destination=target)
+
+        return True
+
     def prepare_for_lp_inference(self):
         self.model = self.manual_load_to_gpu(self.model)
         self.model.eval()
