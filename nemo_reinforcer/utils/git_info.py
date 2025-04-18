@@ -68,7 +68,7 @@ def get_git_diff() -> str:
             check=True,
             universal_newlines=True,
         )
-        return diff_output.stdout.strip()
+        return diff_output.stdout
     except (subprocess.CalledProcessError, OSError):
         warnings.warn("No git repo found! Returning empty string.")
         return ""
