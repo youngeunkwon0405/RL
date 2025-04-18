@@ -253,6 +253,8 @@ class NLLLoss(LossFunction):
 
 class DPOLossConfig(TypedDict):
     reference_policy_kl_penalty: float
+    preference_loss: str = "dpo"
+    gt_reward_scale: float = 1.0
     preference_loss_weight: float = 1.0
     sft_loss_weight: float = 0.0
     preference_average_log_probs: bool = False
@@ -326,6 +328,8 @@ class DPOLossFn(LossFunction):
 
     def __init__(self, cfg: DPOLossConfig):
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
+        self.preference_loss = cfg["preference_loss"]
+        self.gt_reward_scale = cfg["gt_reward_scale"]
         self.preference_loss_weight = cfg["preference_loss_weight"]
         self.sft_loss_weight = cfg["sft_loss_weight"]
         self.preference_average_log_probs = cfg["preference_average_log_probs"]
@@ -368,12 +372,60 @@ class DPOLossFn(LossFunction):
         rewards_chosen, rewards_rejected = self.split_output_tensor(rewards)
         rewards_delta = rewards_chosen - rewards_rejected
 
-        per_sample_loss = (
-            -torch.nn.functional.logsigmoid(
+        if self.preference_loss == "dpo":
+            per_sample_loss = -torch.nn.functional.logsigmoid(
                 self.reference_policy_kl_penalty * rewards_delta
             )
-            * sample_mask[::2]
-        )  ## zero out invalid samples
+        elif (
+            self.preference_loss == "rpo_bwd_kl" or self.preference_loss == "rpo_fwd_kl"
+        ):
+            logbeta_hat_chosen = torch.nn.functional.logsigmoid(
+                self.ref_policy_kl_penalty * rewards_delta
+            )
+            logbeta_hat_rejected = torch.nn.functional.logsigmoid(
+                -self.ref_policy_kl_penalty * rewards_delta
+            )
+
+            chosen_gt_rewards, reject_gt_rewards = self.split_output_tensor(gt_rewards)
+            gt_rewards_delta = self.gt_reward_scale * (
+                chosen_gt_rewards - reject_gt_rewards
+            )
+            logalpha_hat_chosen = torch.nn.functional.logsigmoid(gt_rewards_delta)
+            logalpha_hat_rejected = torch.nn.functional.logsigmoid(-gt_rewards_delta)
+
+            if self.preference_loss == "rpo_bwd_kl":
+                per_sample_loss = torch.exp(logalpha_hat_chosen) * (
+                    logalpha_hat_chosen - logbeta_hat_chosen
+                ) + torch.exp(logalpha_hat_rejected) * (
+                    logalpha_hat_rejected - logbeta_hat_rejected
+                )
+
+            else:  ## rpo_fwd_kl
+                per_sample_loss = torch.exp(logbeta_hat_chosen) * (
+                    logbeta_hat_chosen - logalpha_hat_chosen
+                ) + torch.exp(logbeta_hat_rejected) * (
+                    logbeta_hat_rejected - logalpha_hat_rejected
+                )
+
+        elif self.preference_loss == "rpo_sq":
+            chosen_gt_rewards, reject_gt_rewards = self.split_output_tensor(gt_rewards)
+            gt_rewards_delta = self.gt_reward_scale * (
+                chosen_gt_rewards - reject_gt_rewards
+            )
+
+            per_sample_loss = (
+                self.ref_policy_kl_penalty * rewards_delta - gt_rewards_delta
+            ) ** 2
+        elif self.preference_loss == "ipo":
+            per_sample_loss = (
+                rewards_chosen
+                - rewards_rejected
+                - 1.0 / (2.0 * self.ref_policy_kl_penalty)
+            ) ** 2
+        else:
+            raise NotImplementedError(
+                f"preference_loss {self.preference_loss} is not implemented"
+            )
 
         return (
             masked_mean(per_sample_loss, sample_mask[::2]),

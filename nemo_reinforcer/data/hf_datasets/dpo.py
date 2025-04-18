@@ -25,6 +25,8 @@ class DPODataset:
         "prompt": str,           # The input prompt/context
         "chosen_response": str,  # The preferred/winning response
         "rejected_response": str # The non-preferred/losing response
+        "chosen_reward": float, # (optional) The reward for the preferred response
+        "rejected_reward": float # (optional) The reward for the rejected response
     }
 
     Args:
@@ -33,12 +35,36 @@ class DPODataset:
 
     """
 
-    def __init__(self, train_data_path: str, val_data_path: str):
+    def __init__(
+        self,
+        train_data_path: str,
+        val_data_path: str,
+        default_chosen_reward: float = 1.0,
+        default_rejected_reward: float = 0.0,
+    ):
+        self.default_chosen_reward = default_chosen_reward
+        self.default_rejected_reward = default_rejected_reward
+
         self.formatted_ds = {
             "train": load_dataset("json", data_files=train_data_path, split="train"),
             "validation": load_dataset("json", data_files=val_data_path, split="train"),
         }
 
+        self.formatted_ds["train"] = self.formatted_ds["train"].map(
+            self.add_default_rewards
+        )
+        self.formatted_ds["validation"] = self.formatted_ds["validation"].map(
+            self.add_default_rewards
+        )
+
         self.task_spec = TaskDataSpec(
             task_name="DPO",
         )
+
+    def add_default_rewards(self, example):
+        if "chosen_reward" not in example:
+            example["chosen_reward"] = self.default_chosen_reward
+        if "rejected_reward" not in example:
+            example["rejected_reward"] = self.default_rejected_reward
+
+        return example
