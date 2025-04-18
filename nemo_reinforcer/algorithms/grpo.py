@@ -629,7 +629,7 @@ def grpo_train(
                             checkpoint_path, "policy", "optimizer"
                         ),
                         save_hf=is_last_checkpoint,
-                        git_info_filename=os.path.join(checkpoint_path, "git_info.txt"),
+                        git_info_dirname=os.path.join(checkpoint_path, "git_info"),
                     )
                     torch.save(
                         dataloader.state_dict(),

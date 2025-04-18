@@ -49,7 +49,7 @@ from nemo_reinforcer.utils.native_checkpoint import (
     save_checkpoint,
     load_checkpoint,
 )
-from nemo_reinforcer.utils.git_info import reinforcer_git_info
+from nemo_reinforcer.utils.git_info import get_git_info, get_git_diff
 
 
 @ray.remote
@@ -1090,7 +1090,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         optimizer_path: Optional[str] = None,
         save_torch_dist: bool = True,
         save_hf: bool = False,
-        git_info_filename: Optional[str] = None,
+        git_info_dirname: Optional[str] = None,
     ):
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
@@ -1103,10 +1103,14 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         )
         ray.get(futures)
 
-        if git_info_filename:
-            commit, branch = reinforcer_git_info()
-            with open(git_info_filename, "w") as f:
-                f.write(f"git commit: {commit}\ngit branch: {branch}")
+        if git_info_dirname:
+            os.makedirs(git_info_dirname, exist_ok=True)
+            commit, branch = get_git_info()
+            if commit:
+                with open(os.path.join(git_info_dirname, "git_commit.txt"), "w") as f:
+                    f.write(f"git commit: {commit}\ngit branch: {branch}")
+                with open(os.path.join(git_info_dirname, "git_diff.patch"), "w") as f:
+                    f.write(get_git_diff())
 
     def shutdown(self) -> bool:
         """Shut down all HF workers and clean up resources."""

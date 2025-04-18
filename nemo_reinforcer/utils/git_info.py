@@ -20,7 +20,7 @@ from typing import Tuple
 import warnings
 
 
-def reinforcer_git_info() -> Tuple[str, str]:
+def get_git_info() -> Tuple[str, str]:
     """Returns a tuple of (git_sha, git_branch) for the current commit and branch.
 
     If no git repo is found, returns ("", "").
@@ -51,3 +51,24 @@ def reinforcer_git_info() -> Tuple[str, str]:
     except (subprocess.CalledProcessError, OSError):
         warnings.warn("No git repo found! Returning empty strings.")
         return "", ""
+
+
+def get_git_diff() -> str:
+    """Returns a git patch for the current commit.
+
+    If no git repo is found, returns "".
+    """
+    root_path = Path(__file__).resolve().parent
+    try:
+        # Get the diff between working directory and last commit
+        diff_output = subprocess.run(
+            ["git", "diff", "HEAD"],
+            capture_output=True,
+            cwd=root_path,
+            check=True,
+            universal_newlines=True,
+        )
+        return diff_output.stdout.strip()
+    except (subprocess.CalledProcessError, OSError):
+        warnings.warn("No git repo found! Returning empty string.")
+        return ""
