@@ -100,6 +100,10 @@ class ClippedPGLossFn(LossFunction):
         mult_prob_error = masked_mean(torch.exp(lp_error), mask).item()
         if mult_prob_error == 0.0:
             # this sometimes gets 0 (everything masked/invalid). Doing this to avoid screwing up stats too much
+            print("mult_prob_error is 0")
+            print("mask sum", mask.sum())
+            print(f"token_mask: {token_mask}")
+            print(f"sample_mask: {sample_mask}")
             mult_prob_error = 1.0
 
         next_token_logits = next_token_logits.to(torch.float32)
