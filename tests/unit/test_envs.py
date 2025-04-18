@@ -326,7 +326,7 @@ class MultiStepCalculatorEnv(EnvironmentInterface):
             metadata=all_next_metadata,
             next_stop_strings=all_stop_strings,
             rewards=rewards_tensor,
-            terminated=done_tensor,
+            terminateds=done_tensor,
         )
 
     def shutdown(self):
@@ -387,7 +387,7 @@ class SlidingPuzzleEnv(EnvironmentInterface):
             metadata=all_next_metadata,
             next_stop_strings=all_stop_strings,
             rewards=rewards_tensor,
-            terminated=terminated_tensor,
+            terminateds=terminated_tensor,
         )
 
     def shutdown(self):

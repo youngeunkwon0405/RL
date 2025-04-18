@@ -363,13 +363,6 @@ def grpo_train(
                     pad_value_dict={"token_ids": tokenizer.pad_token_id},
                 )
                 input_ids = batched_flat["token_ids"]
-                # # Create generation-specific input structure
-                # generation_input_data = BatchedDataDict[GenerationDatumSpec](
-                # {
-                # "input_ids": input_ids,
-                # "input_lengths": input_lengths,
-                # }
-                # )
 
             # Generate responses - this updates the LLMMessageLogType in repeated_batch
             print(f"▶ Generating responses for batch of size {repeated_batch.size}...")

@@ -39,15 +39,6 @@ from nemo_reinforcer.environments.interfaces import (
 )
 
 
-# Return type for calculate_rewards
-class RewardsOutput(NamedTuple):
-    rewards: torch.Tensor
-    env_observations: List[Dict[str, str]]
-    terminateds: torch.Tensor
-    next_stop_strings: List[Optional[List[str]]]
-    metadata: List[Optional[Dict[str, Any]]]
-
-
 def generate_responses(
     policy_generation: GenerationInterface,
     generation_input_data: BatchedDataDict[GenerationDatumSpec],
@@ -111,7 +102,7 @@ def generate_responses(
 def calculate_rewards(
     batch: BatchedDataDict[DatumSpec],
     task_to_env: Dict[str, EnvironmentInterface],
-) -> RewardsOutput:
+) -> EnvironmentReturn:
     """Calculate rewards for generated responses and get environment feedback.
 
     Args:
@@ -119,19 +110,19 @@ def calculate_rewards(
         task_to_env: Dictionary mapping task names to their corresponding environments
 
     Returns:
-        Tuple containing:
-            - rewards: Tensor of rewards for the last turn.
-            - env_observations: List of observations from the environment for the next turn.
-            - terminateds: Tensor of booleans indicating if an episode ended naturally.
-            - next_stop_strings: List of stop strings for the next generation step.
+        EnvironmentReturn namedtuple containing:
+            - observations: List of observations from the environment for the next turn.
             - metadata: List of extracted metadata from the environment.
+            - next_stop_strings: List of stop strings for the next generation step.
+            - rewards: Tensor of rewards for the last turn.
+            - terminateds: Tensor of booleans indicating if an episode ended naturally.
     """
     # Extract message logs for environment (most recent interaction)
     to_env = [
         get_keys_from_message_log(batch["message_log"][i], ["role", "content"])
         for i in range(len(batch["message_log"]))
     ]
-    task_names = [batch["task_name"][i] for i in range(len(batch["task_name"]))]
+    task_names = batch["task_name"]
 
     # Group messages by task type
     task_groups = {}
@@ -195,16 +186,15 @@ def calculate_rewards(
     next_stop_strings = [all_next_stop_strings[i] for i in sorted_indices]
     metadata = [all_metadata[i] for i in sorted_indices]  # Sort metadata
 
-    # Ensure tensors are on CPU
-    rewards = rewards.cpu()
-    terminateds = terminateds.cpu()
+    rewards = rewards
+    terminateds = terminateds
 
-    return RewardsOutput(
-        rewards=rewards,
-        env_observations=env_observations,
-        terminateds=terminateds,
-        next_stop_strings=next_stop_strings,
+    return EnvironmentReturn(
+        observations=env_observations,
         metadata=metadata,
+        next_stop_strings=next_stop_strings,
+        rewards=rewards,
+        terminateds=terminateds,
     )
 
 
@@ -236,7 +226,6 @@ def run_multi_turn_rollout(
     current_batch = initial_batch.copy()  # Work on a copy
     batch_size = len(current_batch["message_log"])
     active_indices = torch.arange(batch_size)
-    turn_rewards = torch.zeros(batch_size, dtype=torch.float32)
     total_rewards = torch.zeros(batch_size, dtype=torch.float32)
 
     # Initialize stop_strings from the initial batch if present
@@ -253,7 +242,6 @@ def run_multi_turn_rollout(
 
     # Tracking per-turn metrics
     total_gen_tokens_per_turn = []
-    reward_per_turn = []
     active_samples_per_turn = []
 
     for turn in range(max_turns):
@@ -304,19 +292,15 @@ def run_multi_turn_rollout(
         total_gen_tokens_per_turn.append(sum(len(ids) for ids in generated_ids))
 
         # Calculate rewards and get environment feedback
-        env_output: RewardsOutput = calculate_rewards(active_batch, task_to_env)
+        env_output: EnvironmentReturn = calculate_rewards(active_batch, task_to_env)
 
-        turn_rewards[active_indices] = env_output.rewards
-        total_rewards[active_indices] += turn_rewards[active_indices]
-
-        # Record rewards for this turn
-        reward_per_turn.append(env_output.rewards.mean().item())
+        total_rewards[active_indices] += env_output.rewards
 
         # Update message log for ALL active samples with env observation
         # This must happen BEFORE filtering based on done flags
         truncation_mask = torch.zeros_like(env_output.terminateds, dtype=torch.bool)
         for i, global_idx in enumerate(active_indices.tolist()):
-            env_obs_content = env_output.env_observations[i]["content"]
+            env_obs_content = env_output.observations[i]["content"]
             # Tokenize the raw content from the environment
             # TODO @sahilj: handle if we want these subsequent messages to have a chat template
             tokenized_obs = tokenizer(
@@ -332,7 +316,7 @@ def run_multi_turn_rollout(
                 sample_truncated[active_indices[i]] = True
 
             tokenized_env_obs_message = {
-                "role": env_output.env_observations[i]["role"],
+                "role": env_output.observations[i]["role"],
                 "content": env_obs_content,
                 "token_ids": tokenized_obs,
             }
@@ -347,22 +331,11 @@ def run_multi_turn_rollout(
 
         # Determine done samples and update active set
         terminateds = env_output.terminateds.bool()
-        done = terminateds | truncation_mask
-        active_mask = ~done
-
-        # Identify samples that just finished this turn
-        newly_finished_indices_local = torch.where(done)[0]
-        newly_finished_indices_global = active_indices[newly_finished_indices_local]
-
-        # Record termination status
-        for i, idx in enumerate(newly_finished_indices_local.tolist()):
-            global_idx = active_indices[idx].item()
-            # Record whether this sample terminated naturally
-            if env_output.terminateds[idx]:
-                sample_terminated[global_idx] = True
+        done = truncation_mask | terminateds
+        sample_terminated[active_indices] |= done
 
         # Update active indices for the next iteration
-        active_indices_local_next = torch.where(active_mask)[0]
+        active_indices_local_next = torch.where(~done)[0]
         active_indices = active_indices[active_indices_local_next]
         continuing_indices_global = active_indices  # Indices relative to original batch
         # Get next stop strings and infos corresponding to the indices that are *continuing*
@@ -382,8 +355,7 @@ def run_multi_turn_rollout(
                 current_batch["extra_env_info"][global_idx] = continuing_metadata[i]
 
     # Record samples that reached max turns
-    if len(active_indices) > 0:
-        sample_max_turns_reached[active_indices] = True
+    sample_max_turns_reached[active_indices] = True
 
     # Add total rewards to the final batch
     current_batch["total_reward"] = total_rewards
