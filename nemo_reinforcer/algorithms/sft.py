@@ -355,9 +355,11 @@ def sft_train(
                     roles_to_train_on=["assistant"],
                 )
 
-                cat_and_padded, input_lengths = batched_message_log_to_flat_message(
-                    batch["message_log"],
-                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                cat_and_padded, input_lengths, num_valid_tokens = (
+                    batched_message_log_to_flat_message(
+                        batch["message_log"],
+                        pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                    )
                 )
 
                 train_data: BatchedDataDict = BatchedDataDict(
@@ -366,6 +368,7 @@ def sft_train(
                         "input_lengths": input_lengths,
                         "token_mask": cat_and_padded["token_loss_mask"],
                         "sample_mask": batch["loss_multiplier"],
+                        "num_valid_tokens_in_batch": num_valid_tokens,
                     }
                 )
 

@@ -272,8 +272,9 @@ class FSDP1PolicyWorker:
 
                 # Backward pass
 
+                ## no need to scale anymore because we're scaling by the total number of tokens in the loss itself
                 # Loss is accumulated across microbatches, so we need to scale by the number of microbatches
-                loss = loss / num_microbatches
+                # loss = loss / num_microbatches
                 if not eval_mode:
                     loss.backward()
                 mb_losses.append(loss.item())

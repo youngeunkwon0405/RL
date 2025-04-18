@@ -310,7 +310,18 @@ def batched_message_log_to_flat_message(
         padded = [_pad_tensor(t, max_len, "right", pad_value) for t in values]
         result[key] = torch.stack(padded)
 
-    return result, input_lengths_tensor
+    num_valid_tokens = torch.sum(result["token_loss_mask"])
+    torch.distributed.all_reduce(
+        num_valid_tokens,
+        op=torch.distributed.ReduceOp.SUM,
+        group=dp_group,  ## TODO: set TP group for fsdp1 and dtensor
+    )
+
+    return (
+        result,
+        input_lengths_tensor,
+        torch.tensor([num_valid_tokens] * result["token_ids"].size(0)),
+    )
 
 
 def message_log_shape(message_log: LLMMessageLogType) -> List[Dict[str, List[int]]]:
