@@ -617,25 +617,10 @@ def validate(
             if batch_idx >= max_batches:
                 break
 
-            # Convert LLMMessageLogType to FlatMessagesType for generation
-            batched_flat, input_lengths = batched_message_log_to_flat_message(
-                val_batch["message_log"],
-                pad_value_dict={"token_ids": tokenizer.pad_token_id},
-            )
-            # Extract input IDs
-            input_ids = batched_flat["token_ids"]
-            # Create generation-specific input structure
-            generation_input_data = BatchedDataDict(
-                {
-                    "input_ids": input_ids,
-                    "input_lengths": input_lengths,
-                }
-            )
-
             # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
             val_batch, gen_metrics = run_multi_turn_rollout(
                 policy_generation,
-                generation_input_data,
+                val_batch,
                 tokenizer,
                 val_task_to_env,
                 max_seq_len=master_config["policy"]["max_total_sequence_length"],
