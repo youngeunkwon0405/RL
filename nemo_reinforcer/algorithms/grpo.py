@@ -634,7 +634,7 @@ def validate(
             rewards = val_batch["total_reward"]
 
             total_rewards.extend(rewards.tolist())
-            total_lengths.extend(gen_metrics["mean_generation_length"].tolist())
+            total_lengths.extend(gen_metrics["mean_gen_tokens_per_sample"].tolist())
 
             # Collect message logs for later display
             to_env = get_keys_from_message_log(
