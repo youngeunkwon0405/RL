@@ -205,6 +205,9 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                 shard_start = chunk_start + shard_idx * shard_size
                 shard_end = chunk_start + (shard_idx + 1) * shard_size
                 if allow_uneven_shards:
+                    # Cap the end index at the total batch size for the last shard
+                    # or if shard_end calculation goes beyond total_batch_size
+                    shard_start = min(shard_start, total_batch_size)
                     shard_end = min(shard_end, total_batch_size)
                 indices = torch.arange(shard_start, shard_end)
 
