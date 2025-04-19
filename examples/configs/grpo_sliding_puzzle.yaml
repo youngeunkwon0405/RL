@@ -8,10 +8,10 @@ env:
     cfg:
       # Game generation parameters
       game_config:
-        size: 3          # Size of the puzzle (e.g., 2 for 2x2, 3 for 3x3)
-        shuffle_moves: 5 # Number of random moves to shuffle the solved state
+        size: 4          # Size of the puzzle (e.g., 2 for 2x2, 3 for 3x3)
+        shuffle_moves: 15 # Number of random moves to shuffle the solved state
       # Gameplay parameters
-      max_moves: 50      # Maximum moves allowed per episode
+      max_moves: 70      # Maximum moves allowed per episode
 
 grpo:
   max_num_steps: 10000
@@ -32,8 +32,8 @@ policy:
   train_micro_batch_size: 4
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
-  max_total_sequence_length: 1024
-  max_turns: 50 
+  max_total_sequence_length: 2048
+  max_turns: 70 
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
