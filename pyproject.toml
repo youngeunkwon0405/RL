@@ -59,13 +59,11 @@ docs = [
 dev = [
     "pre-commit==3.6.0",
     "ruff==0.9.9",
-    "jupyter",
 ]
 test = [
     "pytest>=7.0.0",
     "pytest-timeout",
     "pytest-cov",
-    "pytest-line-profiler",
 ]
 
 
@@ -81,8 +79,7 @@ exclude = '''
 '''
 
 [tool.pytest.ini_options]
-#addopts = "--durations=20 --cov=nemo_reinforcer --cov-report=term --cov-report=json -s -rA -x"
-addopts = "--durations=30 -s -rA -x"
+addopts = "-s -rA -x"
 testpaths = ["tests"]
 python_files = "test_*.py"
 
