@@ -135,10 +135,16 @@ class DTensorPolicyWorker:
             raise ValueError(f"Unknown precision: {self.cfg['precision']}")
 
         print(f"[Rank {rank}] Loading model {model_name} on CPU...")
+        extra_from_pretrained_kwargs = {}
+        if os.environ.get("NRL_AUTOMODEL_ATTN_IMPLEMENTATION", None):
+            extra_from_pretrained_kwargs["attn_implementation"] = os.environ.get(
+                "NRL_AUTOMODEL_ATTN_IMPLEMENTATION"
+            )
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
+            **extra_from_pretrained_kwargs,
         )
         self.tokenizer = tokenizer
         # ------------------------------------------------
