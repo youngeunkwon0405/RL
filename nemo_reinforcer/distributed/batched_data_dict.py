@@ -158,6 +158,36 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
         Returns:
             List[BatchedDataDict]: A list of BatchedDataDicts, length equal to shards.
+
+        Examples:
+        ```{doctest}
+        >>> from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
+        >>> # Create a batch of two message logs with different lengths
+        >>> batch = BatchedDataDict({
+        ...     'problem_id': [0, 0, 1, 1, 2, 2, 3, 3],
+        ...     'arbitrary_data': [1, 2, 3, 4, 5, 6, 7, 8]
+        ... })
+        >>> shards = batch.shard_by_batch_size(shards=2)
+        >>> shards
+        [{'problem_id': [0, 0, 1, 1], 'arbitrary_data': [1, 2, 3, 4]}, {'problem_id': [2, 2, 3, 3], 'arbitrary_data': [5, 6, 7, 8]}]
+        >>> # Now say that I'm training with a GBS of 4 and I want to take gradients steps on problems 0 and 1 before 2 and 3 (problems are repeated because GRPO)
+        >>> # In the current case, problems 0 and 2 will be trained on first since they're the first elements in each DP rank's batch.
+        >>> # So, we'll use the batch_size argument to split the batch into chunks of size 4 first.
+        >>> shards = batch.shard_by_batch_size(shards=2, batch_size=4)
+        >>> shards
+        [{'problem_id': [0, 0, 2, 2], 'arbitrary_data': [1, 2, 5, 6]}, {'problem_id': [1, 1, 3, 3], 'arbitrary_data': [3, 4, 7, 8]}]
+        >>> # Now, the ranks have 0 and 1 first so when they split their batches into microbatches (of size 2 since GBS=4 and DP=2), they'll train on 0 and 1 first.
+        >>> # Another way to use this function is with the 'allow_uneven_shards' flag, which allows the last shard to be smaller than the others when necessary.
+        >>> # This is necessary in multi-turn rollouts when some sequences terminate early, leaving unclean batch sizes.
+        >>> batch = BatchedDataDict({
+        ...     'problem_id': [0, 1, 2, 3, 4],
+        ...     'arbitrary_data': [10, 11, 12, 13, 14]
+        ... })
+        >>> shards = batch.shard_by_batch_size(shards=2, allow_uneven_shards=True)
+        >>> shards
+        [{'problem_id': [0, 1, 2], 'arbitrary_data': [10, 11, 12]}, {'problem_id': [3, 4], 'arbitrary_data': [13, 14]}]
+        >>> # This is incompatible with the batch_size argument
+        ```
         """
         if allow_uneven_shards:
             assert batch_size is None, (
