@@ -188,18 +188,23 @@ class _SlidingPuzzleLogic:
         pass  # No initialization needed as game methods are static
 
     def _parse_action(self, text: str) -> Optional[str]:
-        """Parses the action from 'Action: ...' prefix."""
-        prefix = "Action:"
+        """Parses the action from '<action></action>'"""
+        prefix = "<action>"
+        suffix = "</action>"
         # Find the prefix, case-insensitive, and potentially after some thought process
         text_lower = text.lower()
         prefix_lower = prefix.lower()
+        suffix_lower = suffix.lower()
+        
         start_idx = text_lower.rfind(prefix_lower)  # Find the last occurrence
-
+        
         if start_idx != -1:
-            # Return the part after the prefix
-            action_part = text[start_idx + len(prefix) :].strip()
-            # Take only the first line if multiple lines were generated after prefix
-            return action_part.split("\n")[0].strip()
+            # Find the end tag after the start tag
+            end_idx = text_lower.find(suffix_lower, start_idx + len(prefix_lower))
+            if end_idx != -1:
+                # Extract content between tags
+                action_content = text[start_idx + len(prefix):end_idx].strip()
+                return action_content
         return None
 
     def process_turn(
@@ -220,7 +225,7 @@ class _SlidingPuzzleLogic:
 
         turn_reward = 0.0
         is_terminated = False
-        next_stop_strings = None  # Let model finish its thought and action naturally
+        next_stop_strings = ["</action>"]
         next_metadata = metadata.copy()
         next_observation_content = ""
 
@@ -249,10 +254,16 @@ class _SlidingPuzzleLogic:
         if parsed_action is None:
             # Handle cases where parsing failed or it wasn't assistant's turn properly
             # is_terminated = True  # Penalize for bad format
+            rendered_board = SlidingPuzzleGame.render(game_state)
             next_observation_content = (
-                "\nInvalid response format. Try 'Action: your_move'."
+                f"<environment>\n{rendered_board}\n\nInvalid response format no move made. Try <action></action> like this: <action>your_action</action></environment>"
             )
             next_metadata = None
+        elif parsed_action == "view":
+            rendered_board = SlidingPuzzleGame.render(game_state)
+            next_observation_content = (
+                f"<environment>\n{rendered_board}\n\nViewing the board. No move made.</environment>"
+            )
         else:
             # Execute the game step
             step_response, reward, game_over, next_game_state = SlidingPuzzleGame.step(
@@ -266,7 +277,9 @@ class _SlidingPuzzleLogic:
 
             # Combine rendered board and step response for the next observation
             rendered_board = SlidingPuzzleGame.render(next_game_state)
-            next_observation_content = f"{rendered_board}\n\n{step_response}"
+            # next_observation_content = f"<environment>\n{rendered_board}\n\n{step_response}</environment>"
+            next_observation_content = f"<environment>\n{step_response}\n</environment>"
+            # next_observation_content = f"\n{step_response}"
 
             if is_terminated:
                 next_metadata = None  # Clear metadata on termination

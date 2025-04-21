@@ -8,7 +8,7 @@ env:
     cfg:
       # Game generation parameters
       game_config:
-        size: 4          # Size of the puzzle (e.g., 2 for 2x2, 3 for 3x3)
+        size: 5          # Size of the puzzle (e.g., 2 for 2x2, 3 for 3x3)
         shuffle_moves: 15 # Number of random moves to shuffle the solved state
       # Gameplay parameters
       max_moves: 70      # Maximum moves allowed per episode
@@ -29,17 +29,17 @@ policy:
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 512
-  train_micro_batch_size: 4
+  train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
-  max_total_sequence_length: 2048
+  max_total_sequence_length: 3072
   max_turns: 70 
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
 
   dtensor_cfg:
-    enabled: false
+    enabled: true
     cpu_offload: False
     sequence_parallel: false
     activation_checkpointing: false
@@ -78,8 +78,8 @@ policy:
     backend: "vllm"
     max_new_tokens: ${policy.max_total_sequence_length}
     temperature: 1.0
-    top_p: 1.0
-    top_k: null
+    top_p: 0.999
+    top_k: 10000
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
