@@ -380,7 +380,7 @@ def grpo_train(
                     tokenizer=tokenizer,
                     task_to_env=task_to_env,
                     max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_rollout_turns=master_config["policy"]["max_rollout_turns"],
+                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
                     greedy=False,
                 )
                 policy_generation.finish_generation()
@@ -621,7 +621,7 @@ def validate(
                 tokenizer,
                 val_task_to_env,
                 max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                max_rollout_turns=master_config["policy"]["max_rollout_turns"],
+                max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
                 greedy=False,
             )
             rewards = val_batch["total_reward"]

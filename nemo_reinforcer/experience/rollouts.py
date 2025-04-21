@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Generate rollouts
+# Generate rollouts for arbitrary environments
+# Supports multi-turn rollouts and many simultaneous environments (E.g. you can train on math, code, multi-turn games and more at once)
 
 import torch
 from typing import List, Tuple, Dict, Optional, Any, NamedTuple
