@@ -186,9 +186,6 @@ def calculate_rewards(
     next_stop_strings = [all_next_stop_strings[i] for i in sorted_indices]
     metadata = [all_metadata[i] for i in sorted_indices]  # Sort metadata
 
-    rewards = rewards
-    terminateds = terminateds
-
     return EnvironmentReturn(
         observations=env_observations,
         metadata=metadata,
@@ -200,21 +197,21 @@ def calculate_rewards(
 
 def run_multi_turn_rollout(
     policy_generation: GenerationInterface,
-    initial_batch: BatchedDataDict[DatumSpec],
+    input_batch: BatchedDataDict[DatumSpec],
     tokenizer: AutoTokenizer,
     task_to_env: Dict[str, EnvironmentInterface],
     max_seq_len: int,
-    max_turns: int = 999999,
+    max_rollout_turns: int = 999999,
     greedy: bool = False,
 ) -> Tuple[BatchedDataDict[DatumSpec], Dict[str, Any]]:
     """Runs a multi-turn rollout loop, interacting with the environment.
 
     Args:
         policy_generation: The generation interface (policy).
-        initial_batch: The starting batch containing initial message logs.
+        input_batch: The starting batch containing initial message logs.
         tokenizer: The tokenizer.
         task_to_env: Dictionary mapping task names to environment instances.
-        max_turns: Maximum number of agent-environment interaction turns.
+        max_rollout_turns: Maximum number of agent-environment interaction turns.
         max_seq_len: Maximum sequence length allowed.
         greedy: Whether to use greedy decoding.
 
@@ -223,7 +220,7 @@ def run_multi_turn_rollout(
             - BatchedDataDict with the full interaction history and accumulated rewards
             - Dictionary of rollout metrics
     """
-    current_batch = initial_batch.copy()  # Work on a copy
+    current_batch = input_batch.copy()  # Work on a copy
     batch_size = len(current_batch["message_log"])
     active_indices = torch.arange(batch_size)
     total_rewards = torch.zeros(batch_size, dtype=torch.float32)
@@ -245,7 +242,7 @@ def run_multi_turn_rollout(
     total_gen_tokens_per_turn = []
     active_samples_per_turn = []
 
-    for turn in range(max_turns):
+    for turn in range(max_rollout_turns):
         if len(active_indices) == 0:
             break
 

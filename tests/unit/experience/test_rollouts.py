@@ -315,7 +315,7 @@ def test_run_multi_step_calculator_hf(multi_step_setup_hf):
     policy, rollout_tokenizer, task_to_env, initial_batch, rollout_cluster = (
         multi_step_setup_hf
     )
-    max_turns = (
+    max_rollout_turns = (
         initial_batch["extra_env_info"][0]["max_steps"] + 1
     )  # Allow max steps + final answer
     max_seq_len = 1024  # Increased for potentially longer interaction
@@ -324,11 +324,11 @@ def test_run_multi_step_calculator_hf(multi_step_setup_hf):
     policy.prepare_for_generation()
     final_batch, rollout_metrics = run_multi_turn_rollout(
         policy_generation=policy,
-        initial_batch=initial_batch,
+        input_batch=initial_batch,
         tokenizer=rollout_tokenizer,
         task_to_env=task_to_env,
         max_seq_len=max_seq_len,
-        max_turns=max_turns,
+        max_rollout_turns=max_rollout_turns,
     )
     policy.finish_generation()
     print("Multi-step calculator rollout complete (HF).")
@@ -384,18 +384,18 @@ def test_run_multi_step_calculator_vllm(multi_step_setup_vllm):
     vllm_generation, rollout_tokenizer, task_to_env, initial_batch, rollout_cluster = (
         multi_step_setup_vllm
     )
-    max_turns = initial_batch["extra_env_info"][0]["max_steps"] + 1
+    max_rollout_turns = initial_batch["extra_env_info"][0]["max_steps"] + 1
     max_seq_len = 1024
 
     print("\nRunning multi-step calculator rollout (VLLM)...")
     vllm_generation.prepare_for_generation()
     final_batch, rollout_metrics = run_multi_turn_rollout(
         policy_generation=vllm_generation,
-        initial_batch=initial_batch,
+        input_batch=initial_batch,
         tokenizer=rollout_tokenizer,
         task_to_env=task_to_env,
         max_seq_len=max_seq_len,
-        max_turns=max_turns,
+        max_rollout_turns=max_rollout_turns,
     )
     vllm_generation.finish_generation()
     print("Multi-step calculator rollout complete (VLLM).")
@@ -579,17 +579,17 @@ def test_run_sliding_puzzle_vllm(sliding_puzzle_setup_vllm):
         sliding_puzzle_setup_vllm
     )
     max_moves = initial_batch["extra_env_info"][0]["max_moves"]
-    max_turns = max_moves + 1
+    max_rollout_turns = max_moves + 1
     max_seq_len = 2048
 
     print("\nRunning sliding puzzle rollout (VLLM)...")
     vllm_generation.prepare_for_generation()
     final_batch, rollout_metrics = run_multi_turn_rollout(
         policy_generation=vllm_generation,
-        initial_batch=initial_batch,
+        input_batch=initial_batch,
         tokenizer=rollout_tokenizer,
         task_to_env=task_to_env,
-        max_turns=max_turns,
+        max_rollout_turns=max_rollout_turns,
         max_seq_len=max_seq_len,
         greedy=True,
     )

@@ -376,11 +376,11 @@ def grpo_train(
             with timer.time("generation"):
                 repeated_batch, rollout_metrics = run_multi_turn_rollout(
                     policy_generation=policy_generation,
-                    initial_batch=repeated_batch,
+                    input_batch=repeated_batch,
                     tokenizer=tokenizer,
                     task_to_env=task_to_env,
                     max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_turns=master_config["policy"]["max_turns"],
+                    max_rollout_turns=master_config["policy"]["max_rollout_turns"],
                     greedy=False,
                 )
                 policy_generation.finish_generation()
@@ -621,7 +621,7 @@ def validate(
                 tokenizer,
                 val_task_to_env,
                 max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                max_turns=master_config["policy"]["max_turns"],
+                max_rollout_turns=master_config["policy"]["max_rollout_turns"],
                 greedy=False,
             )
             rewards = val_batch["total_reward"]
