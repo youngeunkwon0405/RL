@@ -250,7 +250,6 @@ class VllmGenerationWorker:
             stop_strings.update(self.cfg["stop_strings"])
 
         stop_strings = list(stop_strings)
-        print(f"stop_strings: {stop_strings}")
 
         # verify inputs have correct padding
         verify_right_padding(data, pad_value=self.cfg["pad_token_id"])

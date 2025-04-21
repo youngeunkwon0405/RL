@@ -166,7 +166,7 @@ def calculate_rewards(
             result
         )
         if next_stop_strings is None:
-            next_stop_strings = [[None]] * len(task_rewards)
+            next_stop_strings = [None] * len(task_rewards)
 
         # Store results with their original indices
         for i, idx in enumerate(indices):

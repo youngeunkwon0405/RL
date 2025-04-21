@@ -529,7 +529,6 @@ class FSDP1PolicyWorker:
                     stop_strings.update(gen_cfg["stop_strings"])
 
                 stop_strings = list(stop_strings) if len(stop_strings) > 0 else None
-                print(f"Stop strings: {stop_strings}")
 
                 if isinstance(
                     self.model, torch.distributed.fsdp.FullyShardedDataParallel

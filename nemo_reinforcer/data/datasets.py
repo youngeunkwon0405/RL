@@ -125,7 +125,7 @@ def rl_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
     batch_max_length = torch.ones_like(length) * length.max()
 
     # Extract stop_strings if present
-    stop_strings = [datum.get("stop_strings", [None]) for datum in data_batch]
+    stop_strings = [datum.get("stop_strings", None) for datum in data_batch]
 
     output = BatchedDataDict(
         message_log=message_log,
