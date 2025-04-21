@@ -18,6 +18,7 @@ import pprint
 import itertools  # For infinite counter
 from collections import defaultdict
 from typing import Any, Dict, Tuple, List, Iterator  # Added Iterator
+import random
 
 import torch  # Added torch import
 from omegaconf import OmegaConf
@@ -56,6 +57,16 @@ def generate_puzzle_datum(
 ) -> DatumSpec:
     """Generates a single sliding puzzle datum (prompt and metadata)."""
     # (Content copied from previous correct version)
+    def generate_random_config(max_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate a random config for the sliding puzzle game."""
+        shuffle_moves = random.randint(1, max_config.get("shuffle_moves"))
+        if shuffle_moves % 2 == 0:
+            shuffle_moves += 1
+        return {
+            "size": random.randint(2, max_config.get("size", 3)),
+            "shuffle_moves": shuffle_moves,
+        }
+    game_config = generate_random_config(game_config)
     initial_game_state = SlidingPuzzleGame.generate(game_config)
     initial_render = SlidingPuzzleGame.render(initial_game_state)
     welcome_message = SlidingPuzzleGame.init(initial_game_state)
@@ -66,8 +77,9 @@ def generate_puzzle_datum(
         f"Reach the goal state where numbers are ordered 1 through {puzzle_size**2 - 1} "
         f"with the empty space (0) at the bottom right.\n"
         f"Valid actions: 'up', 'down', 'left', 'right', or 'slide row col' (e.g., 'slide 1 2').\n"
-        f"After thinking, output your chosen action on a new line starting with 'Action:' like this:\nAction: your_action"
-        f"\nThink step-by-step before acting.\n"
+        f"After thinking, output your chosen action on a new line starting with '<action></action>' like this:\n<action>your_action</action>"
+        f"\nIf you just want to see the board, output <action>view</action>"
+        f"\nThink carefully step-by-step before acting.\n"
     )
     add_system_prompt = "chat" in policy_model_name.lower()
     initial_prompt_content = tokenizer.apply_chat_template(
@@ -97,15 +109,14 @@ def generate_puzzle_datum(
         "loss_multiplier": 1.0,
         "idx": idx,
         "task_name": task_name,
+        "stop_strings": ["</action>"],
     }
     return datum
 
 
-# === MODIFIED: Replace PreGeneratedPuzzleDataset with IterablePuzzleDataset ===
 class IterablePuzzleDataset(IterableDataset):
     """An IterableDataset that generates sliding puzzle data indefinitely."""
 
-    # === MODIFIED: Removed dataset_size, generates indefinitely ===
     def __init__(
         self, tokenizer, game_config, max_moves, task_name, policy_model_name, length
     ):
@@ -131,8 +142,6 @@ class IterablePuzzleDataset(IterableDataset):
                 idx=i,
                 policy_model_name=self.policy_model_name,
             )
-        # This print message will never be reached in normal operation
-        # print(f"Finished iteration of IterablePuzzleDataset.")
 
     def __len__(self):
         return self.length
