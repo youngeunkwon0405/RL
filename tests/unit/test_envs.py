@@ -195,15 +195,15 @@ class _SlidingPuzzleLogic:
         text_lower = text.lower()
         prefix_lower = prefix.lower()
         suffix_lower = suffix.lower()
-        
+
         start_idx = text_lower.rfind(prefix_lower)  # Find the last occurrence
-        
+
         if start_idx != -1:
             # Find the end tag after the start tag
             end_idx = text_lower.find(suffix_lower, start_idx + len(prefix_lower))
             if end_idx != -1:
                 # Extract content between tags
-                action_content = text[start_idx + len(prefix):end_idx].strip()
+                action_content = text[start_idx + len(prefix) : end_idx].strip()
                 return action_content
         return None
 
@@ -255,15 +255,11 @@ class _SlidingPuzzleLogic:
             # Handle cases where parsing failed or it wasn't assistant's turn properly
             # is_terminated = True  # Penalize for bad format
             rendered_board = SlidingPuzzleGame.render(game_state)
-            next_observation_content = (
-                f"<environment>\n{rendered_board}\n\nInvalid response format no move made. Try <action></action> like this: <action>your_action</action></environment>"
-            )
+            next_observation_content = f"<environment>\n{rendered_board}\n\nInvalid response format no move made. Try <action></action> like this: <action>your_action</action></environment>"
             next_metadata = None
         elif parsed_action == "view":
             rendered_board = SlidingPuzzleGame.render(game_state)
-            next_observation_content = (
-                f"<environment>\n{rendered_board}\n\nViewing the board. No move made.</environment>"
-            )
+            next_observation_content = f"<environment>\n{rendered_board}\n\nViewing the board. No move made.</environment>"
         else:
             # Execute the game step
             step_response, reward, game_over, next_game_state = SlidingPuzzleGame.step(
