@@ -228,7 +228,6 @@ def run_multi_turn_rollout(
 
     # Initialize stop_strings from the initial batch if present
     current_stop_strings = current_batch.get("stop_strings", [None] * batch_size)
-    # print(f"current_stop_strings: {current_stop_strings}") # Keep commented out
 
     # Tracking metrics for each sample
     sample_turn_counts = torch.zeros(batch_size, dtype=torch.int32)
