@@ -23,7 +23,6 @@ from nemo_reinforcer.environments.interfaces import (
     EnvironmentReturn,
 )
 from nemo_reinforcer.distributed.virtual_cluster import PY_EXECUTABLES
-from .environments.sliding_puzzle_game import SlidingPuzzleGame
 
 
 class MultiStepCalcMetadata(TypedDict):
@@ -31,12 +30,6 @@ class MultiStepCalcMetadata(TypedDict):
     expected_final_answer: float
     max_steps: int
     current_step: int
-
-
-class SlidingPuzzleMetadata(TypedDict):
-    game_state: Dict[str, Any]  # Stores the dict returned by SlidingPuzzleGame methods
-    num_moves: int
-    max_moves: int
 
 
 class _MultiStepCalculatorLogic:
@@ -183,113 +176,6 @@ class _MultiStepCalculatorLogic:
         )
 
 
-class _SlidingPuzzleLogic:
-    def __init__(self):
-        pass  # No initialization needed as game methods are static
-
-    def _parse_action(self, text: str) -> Optional[str]:
-        """Parses the action from '<action></action>'"""
-        prefix = "<action>"
-        suffix = "</action>"
-        # Find the prefix, case-insensitive, and potentially after some thought process
-        text_lower = text.lower()
-        prefix_lower = prefix.lower()
-        suffix_lower = suffix.lower()
-
-        start_idx = text_lower.rfind(prefix_lower)  # Find the last occurrence
-
-        if start_idx != -1:
-            # Find the end tag after the start tag
-            end_idx = text_lower.find(suffix_lower, start_idx + len(prefix_lower))
-            if end_idx != -1:
-                # Extract content between tags
-                action_content = text[start_idx + len(prefix) : end_idx].strip()
-                return action_content
-        return None
-
-    def process_turn(
-        self,
-        message_log: LLMMessageLogType,
-        metadata: SlidingPuzzleMetadata,
-    ) -> Tuple[
-        Dict[str, str],
-        float,
-        bool,
-        Optional[List[str]],
-        Optional[SlidingPuzzleMetadata],
-    ]:
-        """Processes a single turn for the sliding puzzle task."""
-        game_state = metadata["game_state"]
-        current_moves = metadata["num_moves"]
-        max_moves = metadata["max_moves"]
-
-        turn_reward = 0.0
-        is_terminated = False
-        next_stop_strings = ["</action>"]
-        next_metadata = metadata.copy()
-        next_observation_content = ""
-
-        # Check if max moves reached
-        if current_moves >= max_moves:
-            is_terminated = True
-            next_observation_content = (
-                f"<error>Maximum moves ({max_moves}) reached.</error>"
-            )
-            next_metadata = None
-            return (
-                {"role": "environment", "content": next_observation_content},
-                0.0,
-                is_terminated,
-                None,
-                next_metadata,
-            )
-
-        # Get last assistant message and parse action
-        last_assistant_msg_content = ""
-        if message_log and message_log[-1]["role"] == "assistant":
-            last_assistant_msg_content = message_log[-1]["content"].strip()
-
-        parsed_action = self._parse_action(last_assistant_msg_content)
-
-        if parsed_action is None:
-            # Handle cases where parsing failed or it wasn't assistant's turn properly
-            # is_terminated = True  # Penalize for bad format
-            rendered_board = SlidingPuzzleGame.render(game_state)
-            next_observation_content = f"<environment>\n{rendered_board}\n\nInvalid response format no move made. Try <action></action> like this: <action>your_action</action></environment>"
-            next_metadata = None
-        elif parsed_action == "view":
-            rendered_board = SlidingPuzzleGame.render(game_state)
-            next_observation_content = f"<environment>\n{rendered_board}\n\nViewing the board. No move made.</environment>"
-        else:
-            # Execute the game step
-            step_response, reward, game_over, next_game_state = SlidingPuzzleGame.step(
-                parsed_action, game_state
-            )
-
-            turn_reward = reward
-            is_terminated = game_over
-            next_metadata["game_state"] = next_game_state
-            next_metadata["num_moves"] = current_moves + 1
-
-            # Combine rendered board and step response for the next observation
-            rendered_board = SlidingPuzzleGame.render(next_game_state)
-            # next_observation_content = f"<environment>\n{rendered_board}\n\n{step_response}</environment>"
-            next_observation_content = f"<environment>\n{step_response}\n</environment>"
-            # next_observation_content = f"\n{step_response}"
-
-            if is_terminated:
-                next_metadata = None  # Clear metadata on termination
-                # next_stop_strings remains None
-
-        return (
-            {"role": "environment", "content": next_observation_content + "\n"},
-            turn_reward,
-            is_terminated,
-            next_stop_strings,
-            next_metadata,
-        )
-
-
 @ray.remote
 class MultiStepCalculatorEnv(EnvironmentInterface):
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
@@ -350,69 +236,3 @@ class MultiStepCalculatorEnv(EnvironmentInterface):
         )
         success_rate = final_rewards.mean().item() if len(final_rewards) > 0 else 0.0
         return batch, {"success_rate": success_rate}
-
-
-@ray.remote
-class SlidingPuzzleEnv(EnvironmentInterface):
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
-    """Sliding Puzzle environment (Ray Actor)."""
-
-    def __init__(self, cfg: Optional[Dict] = None):
-        # cfg could contain game generation config like {'size': 3, 'shuffle_moves': 50}
-        self.game_config = cfg.get("game_config", {}) if cfg else {}
-        self.logic = _SlidingPuzzleLogic()
-
-    def step(
-        self,
-        message_log_batch: List[LLMMessageLogType],
-        metadata_batch: List[SlidingPuzzleMetadata],
-    ) -> EnvironmentReturn:
-        """Processes a batch of sliding puzzle interactions."""
-        # Since logic is synchronous, process sequentially (can parallelize if logic becomes heavy)
-        results = [
-            self.logic.process_turn(log, meta)
-            for log, meta in zip(message_log_batch, metadata_batch)
-        ]
-
-        # Unpack results and format according to EnvironmentReturn NamedTuple
-        observations = []
-        rewards = []
-        terminateds = []
-        all_stop_strings = []
-        all_next_metadata = []
-
-        for obs, rew, term, stops, meta in results:
-            observations.append(obs)
-            rewards.append(rew)
-            terminateds.append(term)
-            all_stop_strings.append(stops)
-            all_next_metadata.append(meta)
-
-        rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
-        terminated_tensor = torch.tensor(terminateds, dtype=torch.bool)
-
-        return EnvironmentReturn(
-            observations=observations,
-            metadata=all_next_metadata,
-            next_stop_strings=all_stop_strings,
-            rewards=rewards_tensor,
-            terminateds=terminated_tensor,
-        )
-
-    def shutdown(self):
-        pass
-
-    def global_post_process_and_metrics(
-        self, batch: BatchedDataDict
-    ) -> Tuple[BatchedDataDict, dict]:
-        # Calculate success rate based on final reward == 1.0
-        final_rewards = batch.get(
-            "total_reward", torch.tensor([0.0] * len(batch["idx"]))
-        )
-        success_rate = (
-            (final_rewards == 1.0).float().mean().item()
-            if len(final_rewards) > 0
-            else 0.0
-        )
-        # Could also calculate average number of moves for successful episodes, etc.
-        return batch, {"sliding_puzzle_success_rate": success_rate}
