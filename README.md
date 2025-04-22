@@ -3,7 +3,7 @@
 <!-- markdown all in one -->
 - [Nemo-Reinforcer: A Scalable and Efficient Post-Training Library for Models Ranging from tiny to \>100B Parameters, scaling from 1 GPU to 100s](#nemo-reinforcer-a-scalable-and-efficient-post-training-library-for-models-ranging-from-tiny-to-100b-parameters-scaling-from-1-gpu-to-100s)
   - [Features](#features)
-  - [Prerequisuites](#prerequisuites)
+  - [Prerequisites](#prerequisites)
   - [Quick start](#quick-start)
     - [GRPO](#grpo)
       - [Single Node](#single-node)
@@ -12,8 +12,8 @@
       - [Single Node](#single-node-1)
       - [Multi-node](#multi-node-1)
     - [DPO](#dpo)
-      - [Single Node](#single-node-2)
-      - [Multi-node](#multi-node-2)
+      - [Single Node](#dpo-single-node)
+      - [Multi-node](#dpo-multi-node)
   - [Cluster Start](#cluster-start)
 
 **Nemo-Reinforcer** is a scalable and efficient post-training library designed for models ranging from 1 GPU to thousands, and from tiny to over 100 billion parameters.
@@ -41,7 +41,7 @@ What you can expect:
 - 🔜 **Advanced Parallelism** - FSDP2, TP, SP, and sequence packing for efficient training
 - 🔜 **Environment Isolation** - Dependency isolation between components
 
-## Prerequisuites
+## Prerequisites
 
 ```sh
 # For faster setup and environment isolation, we use `uv`
@@ -168,6 +168,7 @@ sbatch \
 
 We provide a sample DPO experiment that uses the [HelpSteer3 dataset](https://huggingface.co/datasets/nvidia/HelpSteer3) for preference-based training.
 
+(dpo-single-node)=
 #### Single Node
 
 The default DPO experiment is configured to run on a single GPU. To launch the experiment:
@@ -198,8 +199,9 @@ uv run python examples/run_dpo.py \
   logger.wandb.name="llama-dpo-sft"
 ```
 
-Refer to [dpo.yaml](examples/configs/dpo.yaml) for a full list of parameters that can be overridden. For an in-depth explanation of how to add your own DPO dataset, refer to the [DPO documentation](docs/guides/dpo.md).
+Refer to [dpo.yaml](../examples/configs/dpo.yaml) for a full list of parameters that can be overridden. For an in-depth explanation of how to add your own DPO dataset, refer to the [DPO documentation](docs/guides/dpo.md).
 
+(dpo-multi-node)=
 #### Multi-node
 
 For distributed DPO training across multiple nodes, modify the following script for your use case:
