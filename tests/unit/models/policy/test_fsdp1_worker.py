@@ -760,3 +760,51 @@ def test_hf_policy_generation_with_stop(test_input_data, tokenizer):
     print("Cleaning up resources for test")
     cluster.shutdown()
     policy.worker_group.shutdown()
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    "num_gpus, training_setup",
+    [(2, None)],
+    indirect=["training_setup"],
+)
+def test_fsdp1_worker_train_scopes(training_setup, num_gpus):
+    """Test that verifies the scopes and contexts in FSDP1PolicyWorker's train method."""
+    policy, _, data, loss_fn = training_setup
+
+    # Verify resources were created properly
+    assert policy is not None, "Training policy was not created properly"
+    assert data is not None, "Test data was not created properly"
+    assert loss_fn is not None, "Loss function was not created properly"
+
+    # Call prepare_for_training
+    print("\nPreparing for training...")
+    policy.prepare_for_training()
+
+    # Test 1: Verify eval mode when eval_mode=True
+    print("\nTesting eval mode...")
+    results = policy.train(data, loss_fn, eval_mode=True)
+
+    # Verify metrics were collected
+    assert "all_mb_metrics" in results and len(results["all_mb_metrics"]) > 0, (
+        "Metrics should be collected in eval mode"
+    )
+    assert results["grad_norm"] is None, "Grad norm should not be computed in eval mode"
+    assert "loss" in results and len(results["loss"]) > 0, (
+        "Loss should be collected in eval mode"
+    )
+
+    # Test 2: Verify train mode when eval_mode=False
+    print("\nTesting train mode...")
+    results = policy.train(data, loss_fn, eval_mode=False)
+
+    # Verify metrics were collected
+    assert "all_mb_metrics" in results and len(results["all_mb_metrics"]) > 0, (
+        "Metrics should be collected in train mode"
+    )
+    assert results["grad_norm"] > 0, "Grad norm should be computed in train mode"
+    assert "loss" in results and len(results["loss"]) > 0, (
+        "Loss should be collected in train mode"
+    )
+
+    policy.finish_training()

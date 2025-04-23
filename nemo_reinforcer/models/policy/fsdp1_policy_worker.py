@@ -310,8 +310,9 @@ class FSDP1PolicyWorker:
                         all_mb_metrics.append(loss_metrics)
 
                 # Clip gradients
+                grad_norm = None
                 if not eval_mode:
-                    torch.nn.utils.clip_grad_norm_(
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(), max_norm=self.cfg["max_grad_norm"]
                     )
 
@@ -336,6 +337,7 @@ class FSDP1PolicyWorker:
             metrics = {
                 "global_loss": global_loss.cpu(),
                 "local_loss": local_loss.cpu(),
+                "grad_norm": grad_norm,
                 "rank": torch.distributed.get_rank(),
                 "all_mb_metrics": dict(mb_metrics),
             }

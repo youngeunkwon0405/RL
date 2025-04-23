@@ -458,3 +458,51 @@ def test_dtensor_fails_with_tp_and_tied_model(mock_2gpu_distributed_env):
             init_optimizer=False,
             init_reference_model=False,
         )
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.parametrize(
+    "training_setup",
+    [(TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, True, True, True)],
+    indirect=True,
+)
+def test_dtensor_worker_train_scopes(training_setup):
+    """Test that verifies the scopes and contexts in DTensorPolicyWorker's train method."""
+    policy, data, loss_fn = training_setup
+
+    # Verify resources were created properly
+    assert policy is not None, "Training policy was not created properly"
+    assert data is not None, "Test data was not created properly"
+    assert loss_fn is not None, "Loss function was not created properly"
+
+    # Call prepare_for_training
+    print("\nPreparing for training...")
+    policy.prepare_for_training()
+
+    # Test 1: Verify eval mode when eval_mode=True
+    print("\nTesting eval mode...")
+    results = policy.train(data, loss_fn, eval_mode=True)
+
+    # Verify metrics were collected
+    assert "all_mb_metrics" in results and len(results["all_mb_metrics"]) > 0, (
+        "Metrics should be collected in eval mode"
+    )
+    assert results["grad_norm"] is None, "Grad norm should not be computed in eval mode"
+    assert "loss" in results and len(results["loss"]) > 0, (
+        "Loss should be collected in eval mode"
+    )
+
+    # Test 2: Verify train mode when eval_mode=False
+    print("\nTesting train mode...")
+    results = policy.train(data, loss_fn, eval_mode=False)
+
+    # Verify metrics were collected
+    assert "all_mb_metrics" in results and len(results["all_mb_metrics"]) > 0, (
+        "Metrics should be collected in train mode"
+    )
+    assert results["grad_norm"] > 0, "Grad norm be computed in eval mode"
+    assert "loss" in results and len(results["loss"]) > 0, (
+        "Loss should be collected in train mode"
+    )
+
+    policy.finish_training()
