@@ -40,7 +40,6 @@ from nemo_reinforcer.algorithms.utils import (
 )
 from nemo_reinforcer.data import DataConfig
 from nemo_reinforcer.data.datasets import AllTaskProcessedDataset, dpo_collate_fn
-from nemo_reinforcer.data.interfaces import TaskDataSpec
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_reinforcer.models.interfaces import PolicyInterface

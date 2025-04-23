@@ -19,17 +19,16 @@ from pathlib import Path
 from typing import Callable, Optional, TypedDict
 import numpy as np
 import torch
-from torch.masked import as_masked_tensor
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
 from nemo_reinforcer.data import hf_datasets
 from nemo_reinforcer.data.datasets import AllTaskProcessedDataset
-from nemo_reinforcer.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
+from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
 from nemo_reinforcer.models.policy import PolicyConfig, TokenizerConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from nemo_reinforcer.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_reinforcer.utils.logger import LoggerConfig, Logger
+from nemo_reinforcer.utils.logger import Logger
 
 
 def calculate_kl_penalty_joschu2020(
