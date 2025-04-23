@@ -11,17 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
 import random
 import warnings
 from functools import wraps
-
+from pathlib import Path
+from typing import Callable, Optional, TypedDict
 import numpy as np
 import torch
 from torch.masked import as_masked_tensor
+from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
 from nemo_reinforcer.data import hf_datasets
-from nemo_reinforcer.models.policy import TokenizerConfig
+from nemo_reinforcer.data.datasets import AllTaskProcessedDataset
+from nemo_reinforcer.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
+from nemo_reinforcer.models.policy import PolicyConfig, TokenizerConfig
+from nemo_reinforcer.models.policy.hf_policy import HfPolicy
+from nemo_reinforcer.utils.checkpoint import CheckpointingConfig, CheckpointManager
+from nemo_reinforcer.utils.logger import LoggerConfig, Logger
 
 
 def calculate_kl_penalty_joschu2020(
@@ -208,3 +216,220 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
         print("No chat template provided, using tokenizer's default")
 
     return tokenizer
+
+
+## utils for main entry point functions
+def extract_individual_configs(master_config: "MasterConfig"):
+    policy_config = master_config["policy"]
+    data_config = master_config["data"]
+    logger_config = master_config["logger"]
+    cluster_config = master_config["cluster"]
+    checkpointing_config = master_config["checkpointing"]
+    return (
+        policy_config,
+        data_config,
+        logger_config,
+        cluster_config,
+        checkpointing_config,
+    )
+
+
+def configure_logger(master_config: "MasterConfig"):
+    logger_config = master_config["logger"]
+    logger = Logger(logger_config)
+    logger.log_hyperparams(master_config)
+    return logger
+
+
+def setup_checkpointer(
+    checkpointer_config: CheckpointingConfig,
+    default_save_state: Optional[TypedDict] = None,
+):
+    checkpointer = CheckpointManager(checkpointer_config)
+    last_checkpoint_path = checkpointer.get_latest_checkpoint_path()
+    if last_checkpoint_path is not None:
+        save_state = checkpointer.load_training_info(last_checkpoint_path)
+    else:
+        save_state = default_save_state
+    return checkpointer, last_checkpoint_path, save_state
+
+
+def validate_checkpointing_config(
+    checkpointer_config: CheckpointingConfig,
+    algorithm_config: TypedDict,
+):
+    # config validation checks
+    if checkpointer_config["enabled"]:
+        assert checkpointer_config["save_period"] > 0
+        assert (
+            checkpointer_config["save_period"] % algorithm_config["val_period"] == 0
+        ), (
+            f"Checkpointing save period {checkpointer_config['save_period']} "
+            f"must be a multiple of validation period {algorithm_config['val_period']}"
+            f", or we won't know what metric to save!"
+        )
+
+
+def setup_dataloaders(
+    train_dataset: AllTaskProcessedDataset,
+    val_dataset: Optional[AllTaskProcessedDataset],
+    collate_fn: Callable,
+    algorithm_config: TypedDict,
+    policy_config: PolicyConfig,
+    last_checkpoint_path: Optional[str],
+    return_train_dl_kwargs: bool = False,
+):
+    train_dataloader_kwargs = {
+        "dataset": train_dataset,
+        "batch_size": policy_config["train_global_batch_size"],
+        "shuffle": True,
+        "collate_fn": collate_fn,
+        "drop_last": True,
+    }
+    train_dataloader = StatefulDataLoader(
+        **train_dataloader_kwargs,
+        generator=torch.Generator().manual_seed(algorithm_config["seed"]),
+    )
+    if last_checkpoint_path is not None:
+        dataloader_state_dict = torch.load(
+            os.path.join(last_checkpoint_path, "train_dataloader.pt")
+        )
+        train_dataloader.load_state_dict(dataloader_state_dict)
+
+    print(f"  ✓ Training dataloader loaded with {len(train_dataset)} samples")
+
+    # Load validation dataset if provided
+    val_dataloader = None
+    # If validation is enabled, load the validation dataloader
+    ## TODO: make val batch size configs match between grpo and dpo
+    if algorithm_config["val_period"] > 0 or algorithm_config["val_at_start"]:
+        val_dataloader = StatefulDataLoader(
+            val_dataset,
+            batch_size=algorithm_config[
+                "val_global_batch_size"
+            ],  ## this is val_batch_size in grpo
+            shuffle=False,
+            collate_fn=collate_fn,
+        )
+        print(f"  ✓ Validation dataloader loaded with {len(val_dataset)} samples")
+
+    if return_train_dl_kwargs:
+        return train_dataloader, val_dataloader, train_dataloader_kwargs
+    else:
+        return train_dataloader, val_dataloader
+
+
+def setup_policy(
+    cluster: RayVirtualCluster,
+    policy_config: PolicyConfig,
+    tokenizer: AutoTokenizer,
+    last_checkpoint_path: Optional[str],
+    init_reference_model: bool = True,
+):
+    return HfPolicy(
+        cluster=cluster,
+        config=policy_config,
+        tokenizer=tokenizer,
+        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
+        if last_checkpoint_path
+        else None,
+        optimizer_path=Path(last_checkpoint_path) / "policy" / "optimizer"
+        if last_checkpoint_path
+        else None,
+        init_optimizer=True,
+        init_reference_model=init_reference_model,
+    )
+
+
+def should_validate(val_period, step):
+    return val_period > 0 and (step + 1) % val_period == 0
+
+
+def should_checkpoint(checkpointer_config, step):
+    return (
+        checkpointer_config["enabled"]
+        and (step + 1) % checkpointer_config["save_period"] == 0
+    )
+
+
+def save_checkpoint(
+    checkpointer,
+    master_config,
+    save_state,
+    total_steps,
+    train_dataloader,
+    policy,
+    timer,
+):
+    ## TODO: save HF at the end of training!!
+    ## don't add this logic here because it's verbose
+    ## and we should always be saving a checkpoint at the end of training anyway
+    # is_last_checkpoint = (
+    #     min(
+    #         len(train_dataloader) * max_num_epochs,
+    #         master_config["sft"]["max_num_steps"],
+    #     )
+    #     - (total_steps + 1)
+    #     < master_config["checkpointing"]["save_period"]
+    # )
+
+    with timer.time("checkpointing"):
+        print(f"Saving checkpoint for step {total_steps + 1}...")
+        checkpoint_path = checkpointer.init_tmp_checkpoint(
+            total_steps + 1, save_state, master_config
+        )
+
+        policy.save_checkpoint(
+            weights_path=os.path.join(checkpoint_path, "policy", "weights"),
+            optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
+            tokenizer_path=os.path.join(checkpoint_path, "policy", "tokenizer"),
+            save_hf=False,  # is_last_checkpoint,
+        )
+        torch.save(
+            train_dataloader.state_dict(),
+            os.path.join(checkpoint_path, "train_dataloader.pt"),
+        )
+        checkpointer.finalize_checkpoint(checkpoint_path)
+
+
+def reduce_microbatch_metrics(metrics):
+    for k, v in metrics.items():
+        if k == "num_valid_samples":
+            metrics[k] = np.sum(v).item()
+        else:
+            metrics[k] = np.mean(v).item()
+    return metrics
+
+
+## print metrics to std out, log metrics to wandb/tensorboard
+def log_metrics(log_to_console, metrics, timer, total_steps, logger, is_val=False):
+    prefix = "validation" if is_val else "train"
+
+    ## print metrics to std out
+    print(f"\n📊 {prefix.capitalize()} Results:")
+    for k, v in log_to_console.items():
+        print(f"  • {k}: {v:.4f}")
+    print(f"\n⏱️  {prefix.capitalize()} Timing:")
+
+    # Display total time first, separately
+    ## TODO: make this cleaner
+    timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+    total_time = (
+        timing_metrics.get("total_step_time", 0)
+        if prefix == "train"
+        else timing_metrics.get("total_validation_time", 0)
+    )
+    print(f"  • Total {prefix} time: {total_time:.2f}s")
+
+    if not is_val:
+        # Display all other timing metrics (if any)
+        for k, v in sorted(
+            timing_metrics.items(), key=lambda item: item[1], reverse=True
+        ):
+            if k != "total_step_time":
+                percent = (v / total_time * 100) if total_time > 0 else 0
+                print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
+
+    ## log metrics to wandb/tensorboard
+    logger.log_metrics(metrics, total_steps + 1, prefix=f"{prefix}")
+    logger.log_metrics(timing_metrics, total_steps + 1, prefix=f"timing/{prefix}")
