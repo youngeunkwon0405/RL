@@ -22,6 +22,7 @@ import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 from nemo_reinforcer.algorithms.loss_functions import NLLLoss
 from nemo_reinforcer.algorithms.utils import (
+    configure_logger,
     extract_individual_configs,
     log_metrics,
     reduce_microbatch_metrics,
@@ -130,7 +131,7 @@ def setup(
     # ==========================
     #      Checkpointing
     # ==========================
-    checkpointer, last_checkpoint_path, grpo_save_state = setup_checkpointer(
+    checkpointer, last_checkpoint_path, sft_save_state = setup_checkpointer(
         checkpointing_config, _default_sft_save_state()
     )
 
@@ -420,6 +421,9 @@ def sft_train(
             metrics.update(reduce_microbatch_metrics(train_results["all_mb_metrics"]))
             timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
+            log_to_console = {
+                "loss": float(metrics["loss"]),
+            }
             log_metrics(
                 log_to_console, metrics, timer, total_steps, logger, is_val=False
             )

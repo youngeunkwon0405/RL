@@ -290,7 +290,7 @@ def validate(
 
     else:
         log_to_console = {
-            "loss": val_metrics["loss"],
+            "loss": float(val_metrics["loss"]),
         }
         log_metrics(log_to_console, val_metrics, timer, step, logger, is_val=True)
 
@@ -409,7 +409,7 @@ def dpo_train(
             metrics.update(reduce_microbatch_metrics(train_results["all_mb_metrics"]))
 
             log_to_console = {
-                "loss": metrics["loss"],
+                "loss": float(metrics["loss"]),
             }
             log_metrics(log_to_console, metrics, timer, total_steps, logger)
 

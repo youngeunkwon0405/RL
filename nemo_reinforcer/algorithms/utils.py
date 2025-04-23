@@ -305,9 +305,10 @@ def setup_dataloaders(
     if algorithm_config["val_period"] > 0 or algorithm_config["val_at_start"]:
         val_dataloader = StatefulDataLoader(
             val_dataset,
-            batch_size=algorithm_config[
-                "val_global_batch_size"
-            ],  ## this is val_batch_size in grpo
+            batch_size=(
+                algorithm_config.get("val_global_batch_size", None)  ## sft, dpo
+                or algorithm_config["val_batch_size"]  ## grpo
+            ),
             shuffle=False,
             collate_fn=collate_fn,
         )

@@ -86,13 +86,15 @@ from nemo_reinforcer.experience.rollouts import run_multi_turn_rollout
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
+    max_rollout_turns: int
     max_num_steps: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
-    val_batch_size: int
     val_at_start: bool
-    checkpoint_dir: str
+    max_val_samples: int
+    val_batch_size: int
+    seed: int
 
 
 class GRPOSaveState(TypedDict):
@@ -155,7 +157,7 @@ def setup(
     ) = extract_individual_configs(master_config)
     loss_config = master_config["loss_fn"]
     grpo_config = master_config["grpo"]
-    generation_config = master_config["generation"]
+    generation_config = policy_config["generation"]
 
     logger = configure_logger(master_config)
 
@@ -224,7 +226,7 @@ def setup(
         policy,
         policy_generation,
         cluster,
-        dataloader,
+        train_dataloader,
         val_dataloader,
         loss_fn,
         logger,
@@ -458,17 +460,15 @@ def grpo_train(
 
                 grpo_save_state["step"] = step + 1
                 grpo_save_state["val_reward"] = val_metrics["accuracy"]
-                with timer.time("checkpointing"):
-                    print(f"Saving checkpoint for step {step + 1}...")
-                    save_checkpoint(
-                        checkpointer,
-                        master_config,
-                        grpo_save_state,
-                        step,
-                        dataloader,
-                        policy,
-                        timer,
-                    )
+                save_checkpoint(
+                    checkpointer,
+                    master_config,
+                    grpo_save_state,
+                    step,
+                    dataloader,
+                    policy,
+                    timer,
+                )
                 policy.offload_after_refit()
 
         # Logging
