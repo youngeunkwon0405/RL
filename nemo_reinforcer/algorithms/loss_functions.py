@@ -19,6 +19,7 @@ from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
+    masked_global_mean,
 )
 
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
@@ -97,7 +98,9 @@ class ClippedPGLossFn(LossFunction):
         mask = token_mask * sample_mask.unsqueeze(-1)
 
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
-        mult_prob_error = masked_mean(torch.exp(lp_error), mask).item()
+        mult_prob_error = masked_global_mean(
+            torch.exp(lp_error), mask, data["num_valid_tokens_in_batch"][0]
+        ).item()
 
         next_token_logits = next_token_logits.to(torch.float32)
 
@@ -123,7 +126,7 @@ class ClippedPGLossFn(LossFunction):
                 logprobs_policy=curr_logprobs,
                 logprobs_reference=reference_policy_logprobs,
             )
-            kl = masked_mean(kl, mask)
+            kl = masked_global_mean(kl, mask, data["num_valid_tokens_in_batch"][0])
         else:
             kl = 0
 
@@ -140,11 +143,17 @@ class ClippedPGLossFn(LossFunction):
         loss1 = -advantages * ratios
         loss2 = -advantages * ratios_clamped
 
-        actor_loss = masked_mean(torch.max(loss1, loss2), mask)
+        actor_loss = masked_global_mean(
+            torch.max(loss1, loss2), mask, data["num_valid_tokens_in_batch"][0]
+        )
         loss = actor_loss + kl
         with torch.no_grad():
-            probs_ratio = masked_mean(ratios.detach(), mask).item()
-            probs_ratio_clamped = masked_mean(ratios_clamped.detach(), mask).item()
+            probs_ratio = masked_global_mean(
+                ratios.detach(), mask, data["num_valid_tokens_in_batch"][0]
+            ).item()
+            probs_ratio_clamped = masked_global_mean(
+                ratios_clamped.detach(), mask, data["num_valid_tokens_in_batch"][0]
+            ).item()
 
         return (
             loss,
@@ -163,7 +172,6 @@ class NLLLoss(LossFunction):
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict,
-        num_microbatches: int,
     ) -> Tuple[torch.Tensor, dict]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
@@ -180,22 +188,11 @@ class NLLLoss(LossFunction):
             dim=-1, index=next_tokens.unsqueeze(-1)
         ).squeeze(-1)
 
-        # Only compute loss on generated tokens (not input tokens)
-        # by applying the token_loss_mask (shifted by 1 since we're predicting next tokens)
-        num_unmasked_tokens = torch.sum(mask)
-        if num_unmasked_tokens == 0:
-            # prevent division by zero
-            num_unmasked_tokens = torch.tensor(1)
-
         ## scale by the total number of tokens in the batch
-        ## divide by num_microbatches and dp size because those end up getting scaled out in the policy
-        loss = (
-            -(torch.sum(token_logprobs * mask) / data["num_valid_tokens_in_batch"][0])
-            * num_microbatches
-            * torch.distributed.get_world_size()
+        loss = -masked_global_mean(
+            token_logprobs, mask, data["num_valid_tokens_in_batch"][0]
         )
         return loss, {
             "loss": loss.item(),
-            "num_unmasked_tokens": num_unmasked_tokens.item(),
-            "total_tokens": mask.numel(),
+            "num_unmasked_tokens": data["num_valid_tokens_in_batch"][0].item(),
         }

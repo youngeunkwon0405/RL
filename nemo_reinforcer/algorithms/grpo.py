@@ -558,6 +558,7 @@ def grpo_train(
                         "generation_logprobs": flat_messages["generation_logprobs"],
                         "token_mask": flat_messages["token_loss_mask"],
                         "sample_mask": repeated_batch["loss_multiplier"],
+                        "num_valid_tokens_in_batch": flat_messages["num_valid_tokens"],
                     }
                 )
                 train_data.to("cpu")

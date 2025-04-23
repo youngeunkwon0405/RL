@@ -18,6 +18,7 @@ import torch
 from copy import deepcopy
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
+from nemo_reinforcer.algorithms.loss_functions import ClippedPGLossFn, NLLLoss
 from nemo_reinforcer.algorithms.utils import get_tokenizer
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
@@ -700,3 +701,108 @@ def test_hf_policy_generation_with_stop(test_input_data, tokenizer):
     print("Cleaning up resources for test")
     cluster.shutdown()
     policy.worker_group.shutdown()
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.parametrize("num_gpus", [2], ids=["2gpu"])
+def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
+    """Tests that changing microbatch size while keeping global batch size constant does not affect loss values."""
+
+    # Create test batch with global batch size of 8
+    global_batch_size = 8
+    seq_len = 128
+    vocab_size = 32000
+
+    # Create test input_ids and attention_mask
+    input_ids = torch.randint(0, vocab_size, (global_batch_size, seq_len))
+    attention_mask = torch.ones(global_batch_size, seq_len)
+    input_lengths = attention_mask.sum(dim=1).to(torch.int32)
+
+    # Create data dictionary
+    data = BatchedDataDict(
+        {
+            "input_ids": input_ids,
+            "input_lengths": input_lengths,
+            "attention_mask": attention_mask,
+            "token_mask": torch.triu(
+                torch.ones(global_batch_size, seq_len), diagonal=1
+            ),  ## give different examples different numbers of valid tokens
+            "sample_mask": torch.ones((global_batch_size,)),
+            "labels": torch.randint(0, vocab_size, (global_batch_size, seq_len)),
+            "num_valid_tokens_in_batch": torch.tensor(
+                [seq_len] * global_batch_size, dtype=torch.float32
+            ),
+            "advantages": torch.randn(global_batch_size, seq_len),
+            "prev_logprobs": torch.randn(global_batch_size, seq_len),
+            "reference_policy_logprobs": torch.randn(global_batch_size, seq_len),
+            "generation_logprobs": torch.randn(global_batch_size, seq_len),
+        }
+    )
+
+    # Compute loss with microbatching
+    cluster = RayVirtualCluster(
+        name=f"test-{num_gpus}gpu",
+        bundle_ct_per_node_list=[num_gpus],
+        use_gpus=True,
+        num_gpus_per_node=num_gpus,
+        max_colocated_worker_groups=1,
+    )
+
+    config = basic_llama_test_config
+    config["generation"] = configure_generation_config(config["generation"], tokenizer)
+
+    print("Creating training HfPolicy...")
+    policy_mbs1 = HfPolicy(
+        cluster=cluster,
+        config=config,
+        init_reference_model=False,
+        tokenizer=tokenizer,
+    )
+    # Test NLLLoss and ClippedPGLossFn with mbs=1
+    nll_loss_fn = NLLLoss()
+    pg_loss_fn = ClippedPGLossFn(
+        {
+            "ratio_eps_min": 0.2,
+            "ratio_eps_max": 0.2,
+            "reference_policy_kl_penalty": 0.1,
+            "disable_ppo_ratio": False,
+        }
+    )
+
+    # Compute loss with mbs1
+    policy_mbs1.prepare_for_training()
+    mbs1_results = policy_mbs1.train(data, nll_loss_fn)
+    mbs1_nll_loss = mbs1_results["loss"]
+
+    mbs1_results = policy_mbs1.train(data, pg_loss_fn)
+    mbs1_pg_loss = mbs1_results["loss"]
+
+    policy_mbs1.worker_group.shutdown()
+
+    # Compute loss with mbs2
+    config = basic_llama_test_config
+    config["train_micro_batch_size"] = 2
+    config["generation"] = configure_generation_config(config["generation"], tokenizer)
+
+    print("Creating training HfPolicy...")
+    policy_mbs2 = HfPolicy(
+        cluster=cluster,
+        config=config,
+        init_reference_model=False,
+        tokenizer=tokenizer,
+    )
+
+    # Compute loss with mbs2
+    policy_mbs2.prepare_for_training()
+    mbs2_results = policy_mbs2.train(data, nll_loss_fn)
+    mbs2_nll_loss = mbs2_results["loss"]
+
+    mbs2_results = policy_mbs2.train(data, pg_loss_fn)
+    mbs2_pg_loss = mbs1_results["loss"]
+
+    # Verify NLLLoss is independent of microbatch size
+    torch.testing.assert_close(mbs1_nll_loss, mbs2_nll_loss)
+    torch.testing.assert_close(mbs1_pg_loss, mbs2_pg_loss)
+
+    cluster.shutdown()
+    policy_mbs2.worker_group.shutdown()

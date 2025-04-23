@@ -208,3 +208,8 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
         print("No chat template provided, using tokenizer's default")
 
     return tokenizer
+
+
+def masked_global_mean(values, mask, normalization_factor):
+    """Computes the global mean of values, ignoring masked values."""
+    return torch.sum(values * mask) / (normalization_factor + 1e-8)

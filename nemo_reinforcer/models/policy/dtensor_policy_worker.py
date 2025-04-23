@@ -310,8 +310,17 @@ class DTensorPolicyWorker:
                 else:
                     logits = outputs.logits
 
+                ## we scale by the total number of microbatches here because any token-level loss functions
+                ## will already be normalized by the number of tokens in the global batch.
+                ## we don't need to additionally divide loss by the number of microbatches, but this happens automatically
+                ## in the policy, so we cancel that scaling out here.
+                if "num_valid_tokens_in_batch" in mb:
+                    mb["num_valid_tokens_in_batch"] /= (
+                        num_microbatches * torch.distributed.get_world_size()
+                    )
                 loss, loss_metrics = loss_fn(logits, mb)
                 loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
+
                 # Backward pass
 
                 # Loss is accumulated across microbatches so we need to scale by the number of microbatches
