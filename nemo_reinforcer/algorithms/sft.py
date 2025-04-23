@@ -244,11 +244,9 @@ def validate(
                 roles_to_train_on=["assistant"],
             )
 
-            cat_and_padded, input_lengths, num_valid_tokens = (
-                batched_message_log_to_flat_message(
-                    val_batch["message_log"],
-                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
-                )
+            cat_and_padded, input_lengths = batched_message_log_to_flat_message(
+                val_batch["message_log"],
+                pad_value_dict={"token_ids": tokenizer.pad_token_id},
             )
 
             val_data: BatchedDataDict = BatchedDataDict(

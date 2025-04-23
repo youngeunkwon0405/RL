@@ -317,10 +317,7 @@ def batched_message_log_to_flat_message(
         [num_valid_tokens] * result["token_ids"].size(0)
     )
 
-    return (
-        result,
-        input_lengths_tensor,
-    )
+    return result, input_lengths_tensor
 
 
 def message_log_shape(message_log: LLMMessageLogType) -> List[Dict[str, List[int]]]:

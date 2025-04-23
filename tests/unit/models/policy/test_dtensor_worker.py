@@ -23,6 +23,7 @@ import torch.distributed as dist
 pytestmark = pytest.mark.modelconfig
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
+from nemo_reinforcer.algorithms.loss_functions import ClippedPGLossFn, NLLLoss
 from nemo_reinforcer.algorithms.utils import get_tokenizer
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
@@ -495,8 +496,8 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus, tokenizer):
         max_colocated_worker_groups=1,
     )
 
-    # Test with mbs=1
-    config = basic_llama_test_config
+    # Test with mbs=1, 4 microbatches per GPU
+    config = create_test_config(tp=2)
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating training HfPolicy with mbs=1...")
@@ -527,8 +528,8 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus, tokenizer):
 
     policy_mbs1.worker_group.shutdown()
 
-    # Test with mbs=2
-    config = basic_llama_test_config
+    # Test with mbs=2, 1 microbatch per GPU
+    config = create_test_config(tp=1)
     config["train_micro_batch_size"] = 2
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
