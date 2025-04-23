@@ -17,6 +17,7 @@ import warnings
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Optional
+import os
 
 import ray
 import torch
@@ -38,6 +39,7 @@ from nemo_reinforcer.models.generation.interfaces import (
 )
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.modeling_utils import _get_tied_weight_keys
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
@@ -92,6 +94,7 @@ class FSDP1PolicyWorker:
             device_map="cpu",  # load weights onto CPU initially
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
         )
+
         if init_reference_model:
             self.reference_model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -225,6 +228,14 @@ class FSDP1PolicyWorker:
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
+        # Check if the model has tied weights
+        num_tied_weights = len(_get_tied_weight_keys(self.model))
+        skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
+        if num_tied_weights != 0 and not skip_tie_check:
+            raise ValueError(
+                f"Using FSP1 with a model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
+            )
+
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]
         if mbs is None:

@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import gc
 
 from collections import defaultdict
@@ -24,6 +25,7 @@ from torch.distributed.fsdp import (
     FSDPModule,
 )
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.modeling_utils import _get_tied_weight_keys
 from nemo_reinforcer.models.dtensor.parallelize import _parallelize_model
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
@@ -140,6 +142,7 @@ class DTensorPolicyWorker:
             device_map="cpu",  # load weights onto CPU initially
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
         )
+
         self.tokenizer = tokenizer
         # ------------------------------------------------
         # 3) Move to GPU + Composable FSDP
@@ -253,6 +256,17 @@ class DTensorPolicyWorker:
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
+        num_tied_weights = len(_get_tied_weight_keys(self.model))
+        skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
+        if (
+            num_tied_weights != 0
+            and self.cfg["dtensor_cfg"]["tensor_parallel_size"] > 1
+            and not skip_tie_check
+        ):
+            raise ValueError(
+                f"Using dtensor policy with tp size {self.cfg['dtensor_cfg']['tensor_parallel_size']} for model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
+            )
+
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]
         if mbs is None:
