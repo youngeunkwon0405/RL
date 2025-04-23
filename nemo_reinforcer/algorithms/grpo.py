@@ -299,9 +299,17 @@ def grpo_train(
             val_task_to_env,
             step=0,
             master_config=master_config,
-            logger=logger,
         )
         policy_generation.finish_generation()
+
+        log_metrics(
+            log_to_console,
+            val_metrics,
+            timer,
+            0,
+            logger,
+            is_val=True,
+        )
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
@@ -441,16 +449,24 @@ def grpo_train(
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
-                val_metrics = validate(
+                val_metrics, log_to_console = validate(
                     policy_generation,
                     val_dataloader,
                     tokenizer,
                     val_task_to_env,
                     step=step + 1,
                     master_config=master_config,
-                    logger=logger,
                 )
                 policy_generation.finish_generation()
+
+                log_metrics(
+                    log_to_console,
+                    val_metrics,
+                    timer,
+                    step + 1,
+                    logger,
+                    is_val=True,
+                )
 
             ## Checkpointing
             if should_checkpoint(master_config["checkpointing"], step):
@@ -492,7 +508,7 @@ def grpo_train(
             "Avg Reward": np.mean(rewards.numpy()),
             "Avg Generation Length": rollout_metrics["mean_gen_tokens_per_sample"],
         }
-        log_metrics(log_to_console, metrics, timer, step, logger, is_val=False)
+        log_metrics(log_to_console, metrics, timer, step + 1, logger, is_val=False)
 
         timer.reset()
         step += 1
@@ -507,7 +523,6 @@ def validate(
     val_task_to_env: Dict[str, EnvironmentInterface],
     step: int,
     master_config: MasterConfig,
-    logger: Logger,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -581,9 +596,8 @@ def validate(
         "Average response length:": avg_length,
         "Samples processed:": len(total_rewards),
     }
-    log_metrics(log_to_console, val_metrics, timer, step, logger, is_val=True)
 
     # Make sure to reset the timer after validation
     timer.reset()
 
-    return val_metrics
+    return val_metrics, log_to_console

@@ -402,7 +402,7 @@ def reduce_microbatch_metrics(metrics):
 
 
 ## print metrics to std out, log metrics to wandb/tensorboard
-def log_metrics(log_to_console, metrics, timer, total_steps, logger, is_val=False):
+def log_metrics(log_to_console, metrics, timer, step, logger, is_val=False):
     prefix = "validation" if is_val else "train"
 
     ## print metrics to std out
@@ -431,5 +431,5 @@ def log_metrics(log_to_console, metrics, timer, total_steps, logger, is_val=Fals
                 print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
     ## log metrics to wandb/tensorboard
-    logger.log_metrics(metrics, total_steps + 1, prefix=f"{prefix}")
-    logger.log_metrics(timing_metrics, total_steps + 1, prefix=f"timing/{prefix}")
+    logger.log_metrics(metrics, step, prefix=f"{prefix}")
+    logger.log_metrics(timing_metrics, step, prefix=f"timing/{prefix}")

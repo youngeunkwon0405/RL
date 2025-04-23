@@ -233,7 +233,6 @@ def validate(
     val_batches: int,
     val_batch_size: int,
     val_mbs: int,
-    logger: Logger,
 ):
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -286,17 +285,17 @@ def validate(
             "No validation metrics were collected."
             " This is likely because there were no valid samples in the validation set."
         )
+        log_to_console = {}
 
     else:
         log_to_console = {
             "loss": float(val_metrics["loss"]),
         }
-        log_metrics(log_to_console, val_metrics, timer, step, logger, is_val=True)
 
     # Make sure to reset the timer after validation
     timer.reset()
 
-    return val_metrics
+    return val_metrics, log_to_console
 
 
 def dpo_train(
@@ -332,7 +331,7 @@ def dpo_train(
     # Run validation at the start if configured
     if val_at_start and total_steps == 0:
         print("\n🔍 Running initial validation...")
-        val_metrics = validate(
+        val_metrics, log_to_console = validate(
             policy,
             val_dataloader,
             tokenizer,
@@ -342,7 +341,14 @@ def dpo_train(
             val_batches=dpo_config["val_batches"],
             val_batch_size=dpo_config["val_global_batch_size"],
             val_mbs=dpo_config["val_micro_batch_size"],
-            logger=logger,
+        )
+        log_metrics(
+            log_to_console,
+            val_metrics,
+            timer,
+            0,
+            logger,
+            is_val=True,
         )
 
     policy.prepare_for_training()
@@ -372,7 +378,7 @@ def dpo_train(
 
                 # Run validation if it's a validation step
                 if should_validate(val_period, total_steps):
-                    val_metrics = validate(
+                    val_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
                         tokenizer,
@@ -382,7 +388,14 @@ def dpo_train(
                         val_batches=dpo_config["val_batches"],
                         val_batch_size=dpo_config["val_global_batch_size"],
                         val_mbs=dpo_config["val_micro_batch_size"],
-                        logger=logger,
+                    )
+                    log_metrics(
+                        log_to_console,
+                        val_metrics,
+                        timer,
+                        total_steps + 1,
+                        logger,
+                        is_val=True,
                     )
 
                 ## Checkpointing
@@ -410,7 +423,7 @@ def dpo_train(
             log_to_console = {
                 "loss": float(metrics["loss"]),
             }
-            log_metrics(log_to_console, metrics, timer, total_steps, logger)
+            log_metrics(log_to_console, metrics, timer, total_steps + 1, logger)
 
             timer.reset()
             current_step += 1
