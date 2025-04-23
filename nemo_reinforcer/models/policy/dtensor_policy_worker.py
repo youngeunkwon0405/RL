@@ -51,6 +51,7 @@ from torch import nn
 from nemo_reinforcer.models.policy.utils import get_gpu_info
 from nemo_reinforcer.utils.hf_utils import ensure_snapshot
 
+
 @contextmanager
 def unshard_fsdp2_model(model: nn.Module):
     """Explicitly unshard and then reshard the FSDP2 modules. Useful for logprob inference."""

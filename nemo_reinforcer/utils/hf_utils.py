@@ -16,14 +16,14 @@ from pathlib import Path
 import torch
 from huggingface_hub import snapshot_download
 
+
 def ensure_snapshot(
     repo_id: str,
     *,
     revision: str | None = None,
     cache_dir: str | os.PathLike | None = None,
 ) -> Path:
-    """
-    Make sure *all* files for `repo_id` are present locally.
+    """Make sure *all* files for `repo_id` are present locally.
 
     1. Every rank first tries a *cheap* cache-only lookup.
     2. If the snapshot is missing       → rank 0 downloads it (resuming if partial).
@@ -37,7 +37,7 @@ def ensure_snapshot(
             repo_id,
             revision=revision,
             cache_dir=cache_dir,
-            local_files_only=True,   # <-- do not hit the network here
+            local_files_only=True,  # <-- do not hit the network here
         )
     except EnvironmentError:
         pass  # not cached yet
@@ -49,7 +49,7 @@ def ensure_snapshot(
             repo_id,
             revision=revision,
             cache_dir=cache_dir,
-            resume_download=True,    # continue a partial DL if one exists
+            resume_download=True,  # continue a partial DL if one exists
         )
 
     # 3️⃣ — all ranks sync; after this everyone has the files on disk
