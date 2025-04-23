@@ -16,7 +16,8 @@ from pathlib import Path
 import torch
 from huggingface_hub import snapshot_download
 
-def ensure_snapshot(
+
+def prefetch_hf_model(
     repo_id: str,
     *,
     revision: str | None = None,
@@ -40,9 +41,13 @@ def ensure_snapshot(
             local_files_only=True,  # do not hit the network here
         )
         # Check that weight files exist, not just tokenizer/config
-        weight_extensions = ['.bin', '.pt', '.pth', '.safetensors']
-        weight_files = [f for f in Path(path).glob('**/*') if f.is_file() and f.suffix in weight_extensions]
-        
+        weight_extensions = [".bin", ".pt", ".pth", ".safetensors"]
+        weight_files = [
+            f
+            for f in Path(path).glob("**/*")
+            if f.is_file() and f.suffix in weight_extensions
+        ]
+
         if weight_files:
             print("Model weights already cached locally. Using that")
             model_is_cached = True
