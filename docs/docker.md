@@ -28,8 +28,22 @@ This image is useful in situations where you may not have network connectivity t
 # SquashFS Container
 
 To run reinforcer on a Slurm cluster, you need to build a SquashFS Container from the base docker image.
+First, push the docker image to docker hub.
 
-Follow [these installation commands](https://github.com/NVIDIA/enroot/blob/master/doc/installation.md#standard-flavor) to install enroot. Then build the container with the following command.
+```sh
+docker tag reinforcer your-username/reinforcer
+docker push your-username/reinforcer
+```
+
+Follow [these installation commands](https://github.com/NVIDIA/enroot/blob/master/doc/installation.md#standard-flavor) to install enroot.
+Then build the container with the following command on the cluster.
+
+```sh
+srun --time=1:0:0 -p $PARTITION -A $ACCOUNT enroot import -o reinforcer.sqsh docker://your-username/reinforcer
+```
+
+Alternatively, if you work on a local machine where you built the docker image, you can directly build the container from docker dameon (`dockerd`).
+You may then copy the container to your cluster via `scp`.
 
 ```sh
 enroot import -o reinforcer.sqsh dockerd://reinforcer
