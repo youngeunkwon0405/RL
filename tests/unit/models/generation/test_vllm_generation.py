@@ -17,6 +17,7 @@ from copy import deepcopy
 import pytest
 import torch
 import ray
+import os
 
 from nemo_reinforcer.algorithms.grpo import refit_policy_generation
 from nemo_reinforcer.algorithms.utils import get_tokenizer
@@ -25,7 +26,6 @@ from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.models.generation.interfaces import configure_generation_config
 from nemo_reinforcer.models.generation.vllm import VllmGeneration, VllmConfig
 from nemo_reinforcer.models.policy import PolicyConfig
-
 
 # Define basic vLLM test config
 basic_vllm_test_config: VllmConfig = {
@@ -159,6 +159,17 @@ def test_input_data(tokenizer):
             "input_lengths": input_lengths,
         }
     )
+
+
+@pytest.fixture(scope="module", autouse=True)
+def skip_tied_weight_check_for_all():
+    """Automatically skip tied weight check for all tests in this module."""
+    os.environ["NRL_SKIP_TIED_WEIGHT_CHECK"] = "1"
+
+    yield
+
+    # Restore the original value
+    os.environ.pop("NRL_SKIP_TIED_WEIGHT_CHECK", None)
 
 
 def test_vllm_missing_required_config_key(cluster):
