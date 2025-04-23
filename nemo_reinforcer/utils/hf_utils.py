@@ -16,7 +16,6 @@ from pathlib import Path
 import torch
 from huggingface_hub import snapshot_download
 
-
 def ensure_snapshot(
     repo_id: str,
     *,
@@ -31,31 +30,45 @@ def ensure_snapshot(
 
     Returns the path to the snapshot root.
     """
-    # 1️⃣ — fast path: already cached?
+    # Check if the model is already fully cached
+    model_is_cached = False
     try:
-        return snapshot_download(
+        path = snapshot_download(
             repo_id,
             revision=revision,
             cache_dir=cache_dir,
-            local_files_only=True,  # <-- do not hit the network here
+            local_files_only=True,  # do not hit the network here
         )
+        # Check that weight files exist, not just tokenizer/config
+        weight_extensions = ['.bin', '.pt', '.pth', '.safetensors']
+        weight_files = [f for f in Path(path).glob('**/*') if f.is_file() and f.suffix in weight_extensions]
+        
+        if weight_files:
+            print("Model weights already cached locally. Using that")
+            model_is_cached = True
+            return path
+        else:
+            print("Found cached files but no model weights, proceeding with download")
     except EnvironmentError:
-        pass  # not cached yet
+        print("Model not cached, downloading on head")
 
-    # 2️⃣ — only main process is allowed to fetch
-    if torch.distributed.get_rank() == 0:
-        print(f"[rank 0] Downloading {repo_id} from the Hub...")
-        snapshot_download(
-            repo_id,
-            revision=revision,
-            cache_dir=cache_dir,
-            resume_download=True,  # continue a partial DL if one exists
-        )
-
-    # 3️⃣ — all ranks sync; after this everyone has the files on disk
+    # Only download if model isn't fully cached
     torch.distributed.barrier()
+    if not model_is_cached:
+        # Only main process is allowed to fetch
+        if torch.distributed.get_rank() == 0:
+            print(f"[rank 0] Downloading {repo_id} from the Hub...")
+            snapshot_download(
+                repo_id,
+                revision=revision,
+                cache_dir=cache_dir,
+                resume_download=True,  # continue a partial DL if one exists
+            )
 
-    # Make the same call again, now cache-only; guaranteed to succeed
+        # All ranks sync; after this everyone has the files on disk
+        torch.distributed.barrier()
+
+    # Make the call again, now cache-only; guaranteed to succeed
     return snapshot_download(
         repo_id,
         revision=revision,
