@@ -244,9 +244,11 @@ def validate(
                 roles_to_train_on=["assistant"],
             )
 
-            cat_and_padded, input_lengths = batched_message_log_to_flat_message(
-                val_batch["message_log"],
-                pad_value_dict={"token_ids": tokenizer.pad_token_id},
+            cat_and_padded, input_lengths, num_valid_tokens = (
+                batched_message_log_to_flat_message(
+                    val_batch["message_log"],
+                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                )
             )
 
             val_data: BatchedDataDict = BatchedDataDict(
@@ -255,6 +257,7 @@ def validate(
                     "input_lengths": input_lengths,
                     "token_mask": cat_and_padded["token_loss_mask"],
                     "sample_mask": val_batch["loss_multiplier"],
+                    "num_valid_tokens_in_batch": num_valid_tokens,
                 }
             )
 
@@ -433,11 +436,7 @@ def sft_train(
                     )
                     checkpointer.finalize_checkpoint(checkpoint_path)
 
-        losses = train_results["loss"]
-        metrics = {
-            "loss": train_results["loss"].numpy(),
-        }
-        metrics.update(train_results["all_mb_metrics"])
+        metrics = train_results["all_mb_metrics"]
         metrics = {k: np.mean(v).item() for k, v in metrics.items()}
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 

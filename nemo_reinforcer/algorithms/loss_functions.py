@@ -160,7 +160,10 @@ class ClippedPGLossFn(LossFunction):
 
 class NLLLoss(LossFunction):
     def __call__(
-        self, next_token_logits: torch.Tensor, data: BatchedDataDict
+        self,
+        next_token_logits: torch.Tensor,
+        data: BatchedDataDict,
+        num_microbatches: int,
     ) -> Tuple[torch.Tensor, dict]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
@@ -185,8 +188,12 @@ class NLLLoss(LossFunction):
             num_unmasked_tokens = torch.tensor(1)
 
         ## scale by the total number of tokens in the batch
-        loss = -torch.sum(token_logprobs * mask) / data["num_valid_tokens_in_batch"][0]
-
+        ## divide by num_microbatches and dp size because those end up getting scaled out in the policy
+        loss = (
+            -(torch.sum(token_logprobs * mask) / data["num_valid_tokens_in_batch"][0])
+            * num_microbatches
+            * torch.distributed.get_world_size()
+        )
         return loss, {
             "loss": loss.item(),
             "num_unmasked_tokens": num_unmasked_tokens.item(),

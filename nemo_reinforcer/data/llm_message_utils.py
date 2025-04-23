@@ -311,11 +311,13 @@ def batched_message_log_to_flat_message(
         result[key] = torch.stack(padded)
 
     num_valid_tokens = torch.sum(result["token_loss_mask"])
-    torch.distributed.all_reduce(
-        num_valid_tokens,
-        op=torch.distributed.ReduceOp.SUM,
-        group=dp_group,  ## TODO: set TP group for fsdp1 and dtensor
-    )
+
+    ## we don't need this because data isn't sharded yet, right?
+    # torch.distributed.all_reduce(
+    #     num_valid_tokens,
+    #     op=torch.distributed.ReduceOp.SUM,
+    #     group=dp_group,  ## TODO: set TP group for fsdp1 and dtensor
+    # )
 
     return (
         result,
