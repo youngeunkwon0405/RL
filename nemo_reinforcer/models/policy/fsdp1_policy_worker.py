@@ -15,13 +15,15 @@
 import gc
 import warnings
 from collections import defaultdict
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Optional
+import os
 
 import ray
 import torch
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
+    CPUOffload,
     FullyShardedDataParallel,
     MixedPrecision,
 )
@@ -37,6 +39,7 @@ from nemo_reinforcer.models.generation.interfaces import (
 )
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers.integrations.accelerate import find_tied_parameters
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
@@ -91,6 +94,7 @@ class FSDP1PolicyWorker:
             device_map="cpu",  # load weights onto CPU initially
             torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/reinforcer/issues/13 is fixed
         )
+
         if init_reference_model:
             self.reference_model = AutoModelForCausalLM.from_pretrained(
                 model_name,
@@ -148,7 +152,11 @@ class FSDP1PolicyWorker:
             self.reference_model = do_fsdp(self.reference_model)
             self.reference_model = self.manual_offload_to_cpu(self.reference_model)
         self.model = self.manual_load_to_gpu(self.model)
-        self._held_reference_model_params = None
+
+        # used for streaming update inference engine weights
+        self._held_sharded_state_dict_reference = None
+        self._held_streamed_param_reference = None
+
         # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
             optimizer_cls = import_class_from_path(self.cfg["optimizer"]["name"])
@@ -204,6 +212,9 @@ class FSDP1PolicyWorker:
     def is_alive(self):
         return True
 
+    def reset_peak_memory_stats(self):
+        torch.cuda.reset_peak_memory_stats()
+
     def get_gpu_info(self):
         """Return information about the GPU being used by this worker."""
         return get_gpu_info(self.model)
@@ -217,6 +228,14 @@ class FSDP1PolicyWorker:
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
+        # Check if the model has tied weights
+        num_tied_weights = len(find_tied_parameters(self.model))
+        skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
+        if num_tied_weights != 0 and not skip_tie_check:
+            raise ValueError(
+                f"Using FSP1 with a model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
+            )
+
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]
         if mbs is None:
@@ -224,107 +243,119 @@ class FSDP1PolicyWorker:
         local_gbs = gbs // torch.distributed.get_world_size()
         dataset_size = data.get("input_ids").shape[0]
 
-        # Ensure model is in training mode
-        self.model.train()
+        if eval_mode:
+            ctx = torch.no_grad()
+            self.model.eval()
+        else:
+            ctx = nullcontext()
+            # Ensure model is in training mode
+            self.model.train()
 
-        # Get data from batch and move to device
-        data.to("cuda")
+        with ctx:
+            # Get data from batch and move to device
+            data.to("cuda")
 
-        losses = []
-        all_mb_metrics = []
-        for gb_start in range(0, dataset_size, local_gbs):
-            self.optimizer.zero_grad()
-            mb_losses = []
+            losses = []
+            all_mb_metrics = []
+            for gb_start in range(0, dataset_size, local_gbs):
+                self.optimizer.zero_grad()
+                mb_losses = []
 
-            # Calculate number of microbatches to process
-            # make_microbatch_iterator assumes that the batch size is a multiple of the microbatch size
-            # so its safe to not check for the case where the last data slice is smaller than mbs
-            num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
+                # Calculate number of microbatches to process
+                # make_microbatch_iterator assumes that the batch size is a multiple of the microbatch size
+                # so its safe to not check for the case where the last data slice is smaller than mbs
+                num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
 
-            for mb in data.slice(
-                gb_start, gb_start + local_gbs
-            ).make_microbatch_iterator(mbs):
-                input_ids = mb.get("input_ids")
+                for mb in data.slice(
+                    gb_start, gb_start + local_gbs
+                ).make_microbatch_iterator(mbs):
+                    input_ids = mb.get("input_ids")
 
-                input_lengths = mb.get("input_lengths")
-                batch_size, seq_len = input_ids.shape
-                attention_mask = torch.ones(
-                    (batch_size, seq_len), dtype=torch.long, device=input_ids.device
-                )
-                for i, length in enumerate(input_lengths):
-                    # For right-padded sequence, set 1s at the beginning of the sequence
-                    attention_mask[i, :length] = 1
-
-                with torch.autocast(device_type="cuda", dtype=self.dtype):
-                    outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        use_cache=False,
+                    input_lengths = mb.get("input_lengths")
+                    batch_size, seq_len = input_ids.shape
+                    attention_mask = torch.ones(
+                        (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                     )
-                    # Get logprobs
-                    if not hasattr(outputs, "logits"):
-                        logits = self.model.lm_head(outputs.last_hidden_state)
-                    else:
-                        logits = outputs.logits
+                    for i, length in enumerate(input_lengths):
+                        # For right-padded sequence, set 1s at the beginning of the sequence
+                        attention_mask[i, :length] = 1
 
-                ## we scale by the total number of microbatches here because any token-level loss functions
-                ## will already be normalized by the number of tokens in the global batch.
-                ## we don't need to additionally divide loss by the number of microbatches, but this happens automatically
-                ## in the policy, so we cancel that scaling out here.
-                if "num_valid_tokens_in_batch" in mb:
-                    mb["num_valid_tokens_in_batch"] /= (
-                        num_microbatches * torch.distributed.get_world_size()
-                    )
-                loss, loss_metrics = loss_fn(logits, mb)
-                loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
+                    with torch.autocast(device_type="cuda", dtype=self.dtype):
+                        outputs = self.model(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask,
+                            use_cache=False,
+                        )
+                        # Get logprobs
+                        if not hasattr(outputs, "logits"):
+                            logits = self.model.lm_head(outputs.last_hidden_state)
+                        else:
+                            logits = outputs.logits
 
-                # Backward pass
+                    ## we scale by the total number of microbatches here because any token-level loss functions
+                    ## will already be normalized by the number of tokens in the global batch.
+                    ## we don't need to additionally divide loss by the number of microbatches, but this happens automatically
+                    ## in the policy, so we cancel that scaling out here.
+                    if "num_valid_tokens_in_batch" in mb:
+                        mb["num_valid_tokens_in_batch"] /= (
+                            num_microbatches * torch.distributed.get_world_size()
+                        )
+                    loss, loss_metrics = loss_fn(logits, mb)
+                    num_valid_samples = loss_metrics["num_valid_samples"]
+                    loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
 
-                # Loss is accumulated across microbatches, so we need to scale by the number of microbatches
-                loss = loss / num_microbatches
+                    # Backward pass
+
+                    # Loss is accumulated across microbatches, so we need to scale by the number of microbatches
+                    loss = loss / num_microbatches
+                    if not eval_mode:
+                        ## NOTE: invalid samples should be multiplied
+                        ## by zero in the loss function to prevent them
+                        ## from affecting the gradient
+                        loss.backward()
+                    if num_valid_samples > 0:
+                        mb_losses.append(loss.item())
+                        all_mb_metrics.append(loss_metrics)
+
+                # Clip gradients
                 if not eval_mode:
-                    loss.backward()
-                mb_losses.append(loss.item())
-                all_mb_metrics.append(loss_metrics)
-
-            # Clip gradients
-            if not eval_mode:
-                if self.cfg["max_grad_norm"] is not None:
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(), max_norm=self.cfg["max_grad_norm"]
                     )
 
-                # Update parameters
-                self.optimizer.step()
-                self.scheduler.step()
-            losses.append(torch.tensor(mb_losses).sum().item())
+                    # Update parameters
+                    self.optimizer.step()
+                    self.scheduler.step()
+                losses.append(torch.tensor(mb_losses).sum().item())
 
-        # Compute global loss across all ranks
-        with torch.no_grad():
-            local_loss = torch.tensor(losses, device="cuda")
-            global_loss = torch.zeros_like(local_loss)
-            torch.distributed.all_reduce(local_loss)
-            global_loss = local_loss / torch.distributed.get_world_size()
+            # Compute global loss across all ranks
+            with torch.no_grad():
+                local_loss = torch.tensor(losses, device="cuda")
+                global_loss = torch.zeros_like(local_loss)
+                torch.distributed.all_reduce(local_loss)
+                global_loss = local_loss / torch.distributed.get_world_size()
 
-        # Aggregate metrics across all microbatches
-        mb_metrics = defaultdict(list)
-        for m in all_mb_metrics:
-            for k, v in m.items():
-                mb_metrics[k].append(v)
+            # Aggregate metrics across all microbatches
+            mb_metrics = defaultdict(list)
+            for m in all_mb_metrics:
+                for k, v in m.items():
+                    mb_metrics[k].append(v)
 
-        metrics = {
-            "global_loss": global_loss.cpu(),
-            "local_loss": local_loss.cpu(),
-            "rank": torch.distributed.get_rank(),
-            "all_mb_metrics": dict(mb_metrics),
-        }
+            metrics = {
+                "global_loss": global_loss.cpu(),
+                "local_loss": local_loss.cpu(),
+                "rank": torch.distributed.get_rank(),
+                "all_mb_metrics": dict(mb_metrics),
+            }
 
-        return metrics
+            return metrics
 
-    def get_logprobs(self, data: BatchedDataDict) -> BatchedDataDict:
+    def get_logprobs(
+        self, data: BatchedDataDict, micro_batch_size: int = None
+    ) -> BatchedDataDict:
         """Get the logprobs of the model for a batch of data.
 
-        Uses the configured logprob_batch_size to do microbatching.
+        If no micro-batch size is provided, uses the configured logprob_batch_size to do microbatching.
 
         Input data is assumed to be right-padded. The method internally converts to
         left-padded format for computation, and returns outputs in right-padded format.
@@ -334,7 +365,11 @@ class FSDP1PolicyWorker:
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
-        logprob_batch_size = self.cfg["logprob_batch_size"]
+        logprob_batch_size = (
+            micro_batch_size
+            if micro_batch_size is not None
+            else self.cfg["logprob_batch_size"]
+        )
         all_log_probs = []
         self.model.eval()
 
@@ -428,7 +463,9 @@ class FSDP1PolicyWorker:
             gc.collect()
             torch.cuda.empty_cache()
 
-    def get_reference_policy_logprobs(self, data: BatchedDataDict) -> BatchedDataDict:
+    def get_reference_policy_logprobs(
+        self, data: BatchedDataDict, micro_batch_size: int = None
+    ) -> BatchedDataDict:
         """Get the logprobs from the reference policy for a batch of data.
 
         Returns:
@@ -437,7 +474,7 @@ class FSDP1PolicyWorker:
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
         with self.use_reference_model():
-            reference_logprobs = self.get_logprobs(data)
+            reference_logprobs = self.get_logprobs(data, micro_batch_size)
 
         return_data = BatchedDataDict()
         return_data["reference_logprobs"] = reference_logprobs["logprobs"].cpu()
@@ -506,6 +543,19 @@ class FSDP1PolicyWorker:
                     # Set attention mask for the actual tokens (at the end for left padding)
                     left_padded_attention_mask[i, seq_len - length :] = 1
 
+                # this function requires all generations have the same stop strings, so we collect all here
+                batch_stop_strings = gen_batch.get("stop_strings", [])
+                stop_strings = set()
+                for sample_stop_strings in batch_stop_strings:
+                    if sample_stop_strings:
+                        stop_strings.update(sample_stop_strings)
+
+                # Add default stop strings from config
+                if gen_cfg.get("stop_strings", None):
+                    stop_strings.update(gen_cfg["stop_strings"])
+
+                stop_strings = list(stop_strings) if len(stop_strings) > 0 else None
+
                 if isinstance(
                     self.model, torch.distributed.fsdp.FullyShardedDataParallel
                 ):
@@ -522,7 +572,7 @@ class FSDP1PolicyWorker:
                     top_k=gen_cfg["top_k"],
                     pad_token_id=gen_cfg["pad_token_id"],
                     eos_token_id=gen_cfg["stop_token_ids"],
-                    stop_strings=gen_cfg["stop_strings"],
+                    stop_strings=stop_strings,
                     tokenizer=self.tokenizer,  # needs for stop_strings
                     return_dict_in_generate=True,
                     output_scores=True,
@@ -696,38 +746,61 @@ class FSDP1PolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def get_weight_ipc_handles(self, offload_model=True):
-        from torch.multiprocessing.reductions import reduce_tensor
+    def prepare_weights_for_ipc(self):
+        from torch.distributed.fsdp.api import ShardedStateDictConfig, StateDictType
 
         # If the model is not FSDP, then we need to manually move it to the GPU
         # For an FSDP model, model.state_dict() will move the params to the GPU
-        if not isinstance(self.model, torch.distributed.fsdp.FullyShardedDataParallel):
+        if not isinstance(self.model, FullyShardedDataParallel):
             self.model = self.manual_load_to_gpu(self.model)
+            self._held_sharded_state_dict_reference = self.model.state_dict()
+        else:
+            # Get sharded state dict instead of full state dict for FSDP1
+            with FullyShardedDataParallel.state_dict_type(
+                self.model,
+                state_dict_type=StateDictType.SHARDED_STATE_DICT,
+                state_dict_config=ShardedStateDictConfig(),
+            ):
+                self._held_sharded_state_dict_reference = self.model.state_dict()
 
-        # TODO @sahilj: do this without an allgather (maybe FSDP2)
-        params = self.model.state_dict()
+        # Collect info for streaming multiple tensors
+        state_dict_info = []
+        for name, tensor in self._held_sharded_state_dict_reference.items():
+            # dtensor's numel will return complete tensor instead of only local tensor
+            size_in_bytes = tensor.element_size() * tensor.numel()
+            state_dict_info.append((name, size_in_bytes))
 
-        # Create a copy of parameters in the desired dtype (bfloat16 or float32)
-        dtype_params = {}
-        for name, param in params.items():
+        return state_dict_info
+
+    @torch.no_grad()
+    def get_weights_ipc_handles(self, keys):
+        from torch.distributed.tensor import DTensor
+        from torch.multiprocessing.reductions import reduce_tensor
+
+        converted_params = {}
+        for key in keys:
+            # Get full_tensor for dtensor (GPU > 1)
+            tensor = self._held_sharded_state_dict_reference[key]
+            if isinstance(tensor, DTensor):
+                full_tensor = tensor.full_tensor()
+            else:
+                full_tensor = tensor
             # Convert parameters to the configured dtype
-            dtype_params[name] = param.to(self.dtype, non_blocking=True)
+            converted_params[key] = full_tensor.to(self.dtype, non_blocking=True)
 
-        # Replace the original params with the converted ones
-        params = dtype_params
-        # For FSDP1, params may get GC'ed before sending to vllm,
-        # so we need to hold a reference to them
-        self._held_reference_model_params = params
-        data = {}
+        # Temporary record the full tensor for cleanup
+        # It is needed for cleanup the last full_tensor in the refit process
+        self._held_streamed_param_reference = converted_params
+
+        # Get device UUID for IPC
         device_uuid = self.report_device_id()
-        for name, p in params.items():
-            data[name] = reduce_tensor(p.detach())
+        # Create handles for the tensors
+        all_handles = []
+        for key, p in converted_params.items():
+            handle = reduce_tensor(p.detach())
+            all_handles.append((key, handle))
 
-        if offload_model:
-            self.model = self.manual_offload_to_cpu(self.model)
-            gc.collect()
-            torch.cuda.empty_cache()
-        return {device_uuid: data}
+        return {device_uuid: all_handles}
 
     def prepare_for_lp_inference(self):
         self.model = self.manual_load_to_gpu(self.model)
@@ -778,9 +851,13 @@ class FSDP1PolicyWorker:
         torch.randn(1).cuda()  # wake up torch allocator
         self.offload_before_refit()  # rerun the old offload function
 
-        if self._held_reference_model_params is not None:
-            del self._held_reference_model_params
-            self._held_reference_model_params = None
+        # Clean up the held tensors
+        if self._held_sharded_state_dict_reference is not None:
+            del self._held_sharded_state_dict_reference
+            self._held_sharded_state_dict_reference = None
+        if self._held_streamed_param_reference is not None:
+            del self._held_streamed_param_reference
+            self._held_streamed_param_reference = None
 
         gc.collect()
         torch.cuda.empty_cache()

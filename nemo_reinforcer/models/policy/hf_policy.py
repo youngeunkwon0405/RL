@@ -129,7 +129,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         return logprobs
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict[GenerationDatumSpec]
+        self, data: BatchedDataDict[GenerationDatumSpec], micro_batch_size: int = None
     ) -> BatchedDataDict:
         """Get the logprobs of the reference policy for a data dict.
 
@@ -137,7 +137,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         """
         sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=None)
         futures = self.worker_group.run_all_workers_multiple_data(
-            "get_reference_policy_logprobs", sharded_data, only_on="all_tied_workers"
+            "get_reference_policy_logprobs",
+            sharded_data,
+            common_kwargs={"micro_batch_size": micro_batch_size},
+            only_on="all_tied_workers",
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -153,11 +156,11 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         mbs: Optional[int] = None,
     ):
         """Train the policy on a batch of data with a given loss function."""
+        batch_size = gbs or self.cfg["train_global_batch_size"]
+        micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
         # Shard and replicate the batch
         shards = self.dp_size
-        sharded_data = data.shard_by_batch_size(
-            shards, batch_size=self.cfg["train_global_batch_size"]
-        )
+        sharded_data = data.shard_by_batch_size(shards, batch_size=batch_size)
 
         # Train each shard in parallel
         futures = self.worker_group.run_all_workers_multiple_data(
@@ -166,8 +169,8 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
-                "gbs": gbs,
-                "mbs": mbs,
+                "gbs": batch_size,
+                "mbs": micro_batch_size,
             },
             only_on="all_tied_workers",
         )
@@ -250,7 +253,19 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         # Placeholder implementation
         pass
 
-    def get_weights_ipc_handles(self):
+    def prepare_weights_for_ipc(self):
+        """Prepare the weights for IPC.
+
+        Returns:
+            dict: A dictionary containing the state_dict_info of the model.
+        """
+        futures = self.worker_group.run_all_workers_single_data(
+            "prepare_weights_for_ipc", only_on="all_tied_workers"
+        )
+        # only get the first worker's result is enough since all workers will have the same result
+        return ray.get(futures)[0]
+
+    def get_weights_ipc_handles(self, key):
         """Fetch weight IPC handles from all workers.
 
         Returns:
@@ -259,7 +274,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         # Collect IPC handles from all workers
         worker_handles = ray.get(
             [
-                worker.get_weight_ipc_handles.remote()
+                worker.get_weights_ipc_handles.remote(key)
                 for worker in self.worker_group.workers
             ]
         )

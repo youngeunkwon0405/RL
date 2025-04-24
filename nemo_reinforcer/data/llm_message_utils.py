@@ -109,22 +109,34 @@ def get_keys_from_message_log(
 def add_loss_mask_to_message_log(
     message_log: LLMMessageLogType,
     roles_to_train_on: List[str] = ["assistant"],
+    only_unmask_final: bool = False,
 ) -> None:
     """Add token-level loss masks to each message in a message log.
 
     Args:
         message_log (LLMMessageLogType): List of message dictionaries containing token IDs and metadata
         roles_to_train_on (List[str]): List of strings indicating which speakers to unmask. Default: ["assistant"]
+        only_unmask_final (bool): If True, only unmask the final message in the log. Default: False
     """
     for i, role in enumerate(roles_to_train_on):
         roles_to_train_on[i] = role.lower()
 
     for message in message_log:
-        for sentence in message:
-            if sentence["role"] in roles_to_train_on:
-                sentence["token_loss_mask"] = torch.ones_like(sentence["token_ids"])
+        for i, sentence in enumerate(message):
+            if only_unmask_final:
+                if i == len(message) - 1:
+                    sentence["token_loss_mask"] = torch.ones_like(sentence["token_ids"])
+                else:
+                    sentence["token_loss_mask"] = torch.zeros_like(
+                        sentence["token_ids"]
+                    )
             else:
-                sentence["token_loss_mask"] = torch.zeros_like(sentence["token_ids"])
+                if sentence["role"] in roles_to_train_on:
+                    sentence["token_loss_mask"] = torch.ones_like(sentence["token_ids"])
+                else:
+                    sentence["token_loss_mask"] = torch.zeros_like(
+                        sentence["token_ids"]
+                    )
 
 
 def _pad_tensor(
@@ -277,8 +289,11 @@ def batched_message_log_to_flat_message(
     # Create input_lengths tensor
     input_lengths = []
     for seq in sequenced_lists:
-        seq_len = next(
-            (v.size(0) for v in seq.values() if isinstance(v, torch.Tensor)), 0
+        # Find the maximum length among all tensors in the dictionary, default to 0 if none exist
+        # Use maximum here since there may be keys that aren't populated for all messages yet.
+        # For example, logprobs don't get populated for non-generated tokens until post-processing.
+        seq_len = max(
+            (v.size(0) for v in seq.values() if isinstance(v, torch.Tensor)), default=0
         )
         input_lengths.append(seq_len)
     input_lengths_tensor = torch.tensor(input_lengths, dtype=torch.int32)
