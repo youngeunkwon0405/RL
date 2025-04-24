@@ -498,8 +498,8 @@ def grpo_train(
 
             ## Checkpointing
             if (
-                checkpointer_config["enabled"]
-                and (step + 1) % checkpointer_config["save_period"] == 0
+                master_config["checkpointing"]["enabled"]
+                and (step + 1) % master_config["checkpointing"]["save_period"] == 0
             ):
                 policy.prepare_for_training()
 

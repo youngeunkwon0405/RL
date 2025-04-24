@@ -411,8 +411,10 @@ def sft_train(
 
                 ## Checkpointing
                 if (
-                    checkpointer_config["enabled"]
-                    and (total_steps + 1) % checkpointer_config["save_period"] == 0
+                    master_config["checkpointing"]["enabled"]
+                    and (total_steps + 1)
+                    % master_config["checkpointing"]["save_period"]
+                    == 0
                 ):
                     sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     sft_save_state["total_steps"] = total_steps + 1
