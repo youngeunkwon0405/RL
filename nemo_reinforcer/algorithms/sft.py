@@ -387,7 +387,7 @@ def sft_train(
                 train_results = policy.train(train_data, loss_fn)
 
                 # Run validation if it's a validation step
-                if val_period > 0 and (step + 1) % val_period == 0:
+                if val_period > 0 and (total_steps + 1) % val_period == 0:
                     val_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
@@ -412,7 +412,7 @@ def sft_train(
                 ## Checkpointing
                 if (
                     checkpointer_config["enabled"]
-                    and (step + 1) % checkpointer_config["save_period"] == 0
+                    and (total_steps + 1) % checkpointer_config["save_period"] == 0
                 ):
                     sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     sft_save_state["total_steps"] = total_steps + 1
