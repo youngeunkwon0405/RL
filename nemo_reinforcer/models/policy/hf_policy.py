@@ -177,8 +177,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         results = self.worker_group.get_all_worker_results(futures)
 
         # Aggregate the results
-        aggregated_results = {}
-        aggregated_results["loss"] = results[0]["global_loss"]
+        aggregated_results = {
+            "loss": results[0]["global_loss"],
+            "grad_norm": results[0]["grad_norm"],
+        }
 
         # Aggregate metrics across all workers
         all_mb_metrics = defaultdict(list)
@@ -253,7 +255,19 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         # Placeholder implementation
         pass
 
-    def get_weights_ipc_handles(self):
+    def prepare_weights_for_ipc(self):
+        """Prepare the weights for IPC.
+
+        Returns:
+            dict: A dictionary containing the state_dict_info of the model.
+        """
+        futures = self.worker_group.run_all_workers_single_data(
+            "prepare_weights_for_ipc", only_on="all_tied_workers"
+        )
+        # only get the first worker's result is enough since all workers will have the same result
+        return ray.get(futures)[0]
+
+    def get_weights_ipc_handles(self, key):
         """Fetch weight IPC handles from all workers.
 
         Returns:
@@ -262,7 +276,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         # Collect IPC handles from all workers
         worker_handles = ray.get(
             [
-                worker.get_weight_ipc_handles.remote()
+                worker.get_weights_ipc_handles.remote(key)
                 for worker in self.worker_group.workers
             ]
         )
