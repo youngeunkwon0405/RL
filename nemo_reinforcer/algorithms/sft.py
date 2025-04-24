@@ -259,6 +259,7 @@ def validate(
                 make_sequence_length_divisible_by=master_config["policy"][
                     "make_sequence_length_divisible_by"
                 ],
+                loss_multiplier=val_batch["loss_multiplier"],
             )
 
             val_data: BatchedDataDict = BatchedDataDict(
@@ -402,6 +403,7 @@ def sft_train(
                         make_sequence_length_divisible_by=master_config["policy"][
                             "make_sequence_length_divisible_by"
                         ],
+                        loss_multiplier=batch["loss_multiplier"],
                     )
 
                     train_data: BatchedDataDict = BatchedDataDict(
@@ -493,7 +495,7 @@ def sft_train(
             }
             metrics.update(train_results["all_mb_metrics"])
             for k, v in metrics.items():
-                if k == "num_valid_samples":
+                if k == "num_valid_samples" or k == "num_unmasked_tokens":
                     metrics[k] = np.sum(v).item()
                 else:
                     metrics[k] = np.mean(v).item()

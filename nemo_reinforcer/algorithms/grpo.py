@@ -462,6 +462,7 @@ def grpo_train(
                     make_sequence_length_divisible_by=master_config["policy"][
                         "make_sequence_length_divisible_by"
                     ],
+                    loss_multiplier=repeated_batch["loss_multiplier"],
                 )
 
                 # Create training data from flattened messages

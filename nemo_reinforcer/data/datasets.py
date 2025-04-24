@@ -238,6 +238,7 @@ def dpo_collate_fn(
         batch["message_log"],
         pad_value_dict={"token_ids": tokenizer.pad_token_id},
         make_sequence_length_divisible_by=make_sequence_length_divisible_by,
+        loss_multiplier=loss_multiplier,
     )
 
     train_data: BatchedDataDict = BatchedDataDict(

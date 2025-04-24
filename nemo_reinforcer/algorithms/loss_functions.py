@@ -251,9 +251,8 @@ class NLLLoss(LossFunction):
         return loss, {
             "loss": loss.item() if loss.ndim == 0 else loss,
             "total_tokens_per_mb": mask.numel(),
-            "num_unmasked_tokens": data["num_valid_tokens_in_batch"][
-                0
-            ].item(),  ## TODO: figure out what to do with this for DPO
+            "num_unmasked_tokens": data["num_valid_tokens_in_batch"][0].item(),
+            "num_valid_samples": sample_mask.sum().item(),
         }
 
 
