@@ -6,11 +6,11 @@
   - [Prerequisites](#prerequisites)
   - [Quick start](#quick-start)
     - [GRPO](#grpo)
-      - [Single Node](#single-node)
-      - [Multi-node](#multi-node)
+      - [Single Node](#grpo-single-node)
+      - [Multi-node](#grpo-multi-node)
     - [SFT](#sft)
-      - [Single Node](#single-node-1)
-      - [Multi-node](#multi-node-1)
+      - [Single Node](#sft-single-node)
+      - [Multi-node](#sft-multi-node)
     - [DPO](#dpo)
       - [Single Node](#dpo-single-node)
       - [Multi-node](#dpo-multi-node)
@@ -66,7 +66,7 @@ pip install uv
 
 We have a reference GRPO experiment config set up trained for math benchmarks using the [OpenInstructMath2](https://huggingface.co/datasets/nvidia/OpenMathInstruct-2) dataset.
 
-#### Single Node
+#### GRPO Single Node
 
 To run GRPO on a single GPU for `Llama-3.2-1B-Instruct`:
 
@@ -94,7 +94,7 @@ uv run python examples/run_grpo_math.py \
   logger.num_val_samples_to_print=10 \
 ```
 
-#### Multi-node
+#### GRPO Multi-node
 
 ```sh
 # Run from the root of NeMo-Reinforcer repo
@@ -121,7 +121,7 @@ sbatch \
 
 We provide a sample SFT experiment that uses the [SQuAD dataset](https://rajpurkar.github.io/SQuAD-explorer/).
 
-#### Single Node
+#### SFT Single Node
 
 The default SFT experiment is configured to run on a single GPU. To launch the experiment,
 
@@ -143,7 +143,7 @@ uv run python examples/run_sft.py \
 
 Refer to `examples/configs/sft.yaml` for a full list of parameters that can be overridden.
 
-#### Multi-node
+#### SFT Multi-node
 
 ```sh
 # Run from the root of NeMo-Reinforcer repo
@@ -168,8 +168,8 @@ sbatch \
 
 We provide a sample DPO experiment that uses the [HelpSteer3 dataset](https://huggingface.co/datasets/nvidia/HelpSteer3) for preference-based training.
 
-(dpo-single-node)=
-#### Single Node
+
+#### DPO Single Node
 
 The default DPO experiment is configured to run on a single GPU. To launch the experiment:
 
@@ -201,8 +201,7 @@ uv run python examples/run_dpo.py \
 
 Refer to [dpo.yaml](../examples/configs/dpo.yaml) for a full list of parameters that can be overridden. For an in-depth explanation of how to add your own DPO dataset, refer to the [DPO documentation](docs/guides/dpo.md).
 
-(dpo-multi-node)=
-#### Multi-node
+#### DPO Multi-node
 
 For distributed DPO training across multiple nodes, modify the following script for your use case:
 
