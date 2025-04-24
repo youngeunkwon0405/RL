@@ -194,5 +194,6 @@ class NLLLoss(LossFunction):
         )
         return loss, {
             "loss": loss.item(),
+            "total_tokens_per_mb": mask.numel(),
             "num_unmasked_tokens": data["num_valid_tokens_in_batch"][0].item(),
         }

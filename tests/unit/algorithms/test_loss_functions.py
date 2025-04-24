@@ -37,6 +37,7 @@ def test_nll_loss():
         .to("cuda"),
         "token_mask": torch.tensor([[0, 0, 1, 1]]).to("cuda"),
         "sample_mask": torch.tensor([[1]]).to("cuda"),
+        "num_valid_tokens_in_batch": torch.tensor([2]),
     }
 
     ### assume we predict the correct token with high probability
@@ -56,7 +57,7 @@ def test_nll_loss():
     torch.testing.assert_close(loss.cpu(), torch.tensor(0.0))
     # Check the metrics dictionary contains the expected values
     assert metrics_dict["num_unmasked_tokens"] == 2
-    assert metrics_dict["total_tokens"] == 3
+    assert metrics_dict["total_tokens_per_mb"] == 3
 
     ## now assume we predict the incorrect token with high probability
     next_token_logits = (
@@ -76,7 +77,7 @@ def test_nll_loss():
     ## NLLLoss averages the loss over unmasked tokens
     torch.testing.assert_close(loss.cpu(), torch.tensor(999.0))
     assert metrics_dict["num_unmasked_tokens"] == 2
-    assert metrics_dict["total_tokens"] == 3
+    assert metrics_dict["total_tokens_per_mb"] == 3
 
 
 def _setup_clipped_pg_test_data(batch_size=1, seq_len=4, vocab_size=8, device="cuda"):
@@ -105,6 +106,9 @@ def _setup_clipped_pg_test_data(batch_size=1, seq_len=4, vocab_size=8, device="c
             "prev_logprobs": prev_logprobs,
             "reference_policy_logprobs": reference_policy_logprobs,
             "generation_logprobs": generation_logprobs,
+            "num_valid_tokens_in_batch": torch.tensor(
+                [batch_size * (seq_len - 1)] * batch_size
+            ),
         }
     )
     # Return seq_len and vocab_size needed by tests

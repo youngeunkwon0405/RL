@@ -255,7 +255,7 @@ def validate(
                     "input_lengths": input_lengths,
                     "token_mask": cat_and_padded["token_loss_mask"],
                     "sample_mask": val_batch["loss_multiplier"],
-                    "num_valid_tokens_in_batch": num_valid_tokens,
+                    "num_valid_tokens_in_batch": cat_and_padded["num_valid_tokens"],
                 }
             )
 
@@ -367,7 +367,7 @@ def sft_train(
                         "input_lengths": input_lengths,
                         "token_mask": cat_and_padded["token_loss_mask"],
                         "sample_mask": batch["loss_multiplier"],
-                        "num_valid_tokens": cat_and_padded["num_valid_tokens"],
+                        "num_valid_tokens_in_batch": cat_and_padded["num_valid_tokens"],
                     }
                 )
 
