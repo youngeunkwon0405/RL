@@ -23,7 +23,10 @@ from nemo.tron.state import GlobalState
 
 from nemo_reinforcer.algorithms.loss_functions import LossFunction
 from megatron.training.utils import get_ltor_masks_and_position_ids
-from megatron.core.parallel_state import get_tensor_model_parallel_group
+from megatron.core.parallel_state import (
+    get_tensor_model_parallel_group,
+    get_tensor_model_parallel_rank,
+)
 
 
 def forward_step_arbitrary_loss(
@@ -36,10 +39,10 @@ def forward_step_arbitrary_loss(
         data_iterator : Input data iterator
         model (GPTModel): The GPT Model
     """
-    timers = state.timers
+    # timers = state.timers
     straggler_timer = state.straggler_timer
 
-    timers("batch-generator", log_level=2).start()
+    # timers("batch-generator", log_level=2).start()
     with straggler_timer(bdata=True):
         data_dict = next(data_iterator).to("cuda")
         input_ids = data_dict["input_ids"]
@@ -48,11 +51,14 @@ def forward_step_arbitrary_loss(
         )
         output_tensor = model(input_ids, position_ids, attention_mask)
         loss_data = data_dict
-    timers("batch-generator").stop()
+    # timers("batch-generator").stop()
 
     with straggler_timer:
         output_tensor = model(input_ids, position_ids, attention_mask)
 
     return output_tensor, partial(
-        loss_fn, data=loss_data, logit_gather_group=get_tensor_model_parallel_group()
+        loss_fn,
+        data=loss_data,
+        vocab_parallel_rank=get_tensor_model_parallel_rank(),
+        vocab_parallel_group=get_tensor_model_parallel_group(),
     )  # lambda x: (torch.sum(x), {'a': x}) #

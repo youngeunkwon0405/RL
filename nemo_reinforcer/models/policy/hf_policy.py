@@ -30,7 +30,6 @@ from nemo_reinforcer.models.generation.interfaces import (
 from nemo_reinforcer.models.interfaces import PolicyInterface
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.fsdp1_policy_worker import FSDP1PolicyWorker
-from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 
 
 class HfPolicy(PolicyInterface, GenerationInterface):
@@ -55,6 +54,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self.tensor_parallel_size = 1
 
         if config["dtensor_cfg"]["enabled"]:
+            from nemo_reinforcer.models.policy.dtensor_policy_worker import (
+                DTensorPolicyWorker,
+            )
+
             worker_builder_cls = DTensorPolicyWorker
             self.tensor_parallel_size = config["dtensor_cfg"]["tensor_parallel_size"]
             node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
