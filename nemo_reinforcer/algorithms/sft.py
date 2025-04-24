@@ -431,6 +431,7 @@ def sft_train(
             losses = train_results["loss"]
             metrics = {
                 "loss": train_results["loss"].numpy(),
+                "grad_norm": train_results["grad_norm"].numpy(),
             }
             metrics.update(reduce_microbatch_metrics(train_results["all_mb_metrics"]))
             timing_metrics = timer.get_timing_metrics(reduction_op="sum")
