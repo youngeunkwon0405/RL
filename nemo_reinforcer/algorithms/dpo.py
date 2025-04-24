@@ -33,8 +33,6 @@ from nemo_reinforcer.algorithms.utils import (
     setup_checkpointer,
     setup_dataloaders,
     setup_policy,
-    should_checkpoint,
-    should_validate,
     validate_checkpointing_config,
     set_seed,
 )
@@ -377,7 +375,7 @@ def dpo_train(
                 )
 
                 # Run validation if it's a validation step
-                if should_validate(val_period, total_steps):
+                if val_period > 0 and (step + 1) % val_period == 0:
                     val_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
@@ -399,7 +397,10 @@ def dpo_train(
                     )
 
                 ## Checkpointing
-                if should_checkpoint(master_config["checkpointing"], total_steps):
+                if (
+                    checkpointer_config["enabled"]
+                    and (step + 1) % checkpointer_config["save_period"] == 0
+                ):
                     dpo_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     dpo_save_state["total_steps"] = total_steps + 1
                     dpo_save_state["epoch"] = current_epoch

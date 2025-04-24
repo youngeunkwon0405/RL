@@ -341,17 +341,6 @@ def setup_policy(
     )
 
 
-def should_validate(val_period, step):
-    return val_period > 0 and (step + 1) % val_period == 0
-
-
-def should_checkpoint(checkpointer_config, step):
-    return (
-        checkpointer_config["enabled"]
-        and (step + 1) % checkpointer_config["save_period"] == 0
-    )
-
-
 def save_checkpoint(
     checkpointer,
     master_config,

@@ -32,8 +32,6 @@ from nemo_reinforcer.algorithms.utils import (
     setup_checkpointer,
     setup_dataloaders,
     setup_policy,
-    should_checkpoint,
-    should_validate,
     validate_checkpointing_config,
 )
 
@@ -443,7 +441,7 @@ def grpo_train(
                 train_results = policy.train(train_data, loss_fn)
 
             # Run validation if it's a validation step
-            if should_validate(val_period, step):
+            if val_period > 0 and (step + 1) % val_period == 0:
                 if NEED_REFIT and POLICY_GENERATION_STALE:
                     refit_policy_generation(policy, policy_generation)
                     POLICY_GENERATION_STALE = False
@@ -469,7 +467,10 @@ def grpo_train(
                 )
 
             ## Checkpointing
-            if should_checkpoint(master_config["checkpointing"], step):
+            if (
+                checkpointer_config["enabled"]
+                and (step + 1) % checkpointer_config["save_period"] == 0
+            ):
                 policy.prepare_for_training()
 
                 grpo_save_state["step"] = step + 1
