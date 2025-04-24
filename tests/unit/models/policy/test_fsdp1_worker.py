@@ -749,7 +749,6 @@ def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
     )
 
     config = basic_llama_test_config
-    config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating training HfPolicy...")
     policy_mbs1 = HfPolicy(
@@ -766,6 +765,8 @@ def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
             "ratio_eps_max": 0.2,
             "reference_policy_kl_penalty": 0.1,
             "disable_ppo_ratio": False,
+            "use_on_policy_kl_approximation": False,
+            "use_importance_sampling_correction": False,
         }
     )
 
@@ -782,7 +783,6 @@ def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
     # Compute loss with mbs2
     config = basic_llama_test_config
     config["train_micro_batch_size"] = 2
-    config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating training HfPolicy...")
     policy_mbs2 = HfPolicy(

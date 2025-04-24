@@ -454,7 +454,7 @@ def test_dtensor_fails_with_tp_and_tied_model(mock_2gpu_distributed_env):
 
 @pytest.mark.timeout(180)
 @pytest.mark.parametrize("num_gpus", [2], ids=["2gpu"])
-def test_dtensor_loss_independent_of_microbatch_size(num_gpus, tokenizer):
+def test_dtensor_loss_independent_of_microbatch_size(num_gpus):
     """Tests that changing microbatch size while keeping global batch size constant does not affect loss values in DTensor."""
     # Create test batch with global batch size of 8
     global_batch_size = 8
@@ -496,9 +496,9 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus, tokenizer):
         max_colocated_worker_groups=1,
     )
 
-    # Test with mbs=1, 4 microbatches per GPU
-    config = create_test_config(tp=2)
-    config["generation"] = configure_generation_config(config["generation"], tokenizer)
+    # Test with mbs=1, 2 microbatches per GPU
+    config = create_test_config()
+    tokenizer = get_tokenizer(config["tokenizer"])
 
     print("Creating training HfPolicy with mbs=1...")
     policy_mbs1 = HfPolicy(
@@ -516,6 +516,8 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus, tokenizer):
             "ratio_eps_max": 0.2,
             "reference_policy_kl_penalty": 0.1,
             "disable_ppo_ratio": False,
+            "use_on_policy_kl_approximation": False,
+            "use_importance_sampling_correction": False,
         }
     )
 
@@ -529,7 +531,7 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus, tokenizer):
     policy_mbs1.worker_group.shutdown()
 
     # Test with mbs=2, 1 microbatch per GPU
-    config = create_test_config(tp=1)
+    config = create_test_config()
     config["train_micro_batch_size"] = 2
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
