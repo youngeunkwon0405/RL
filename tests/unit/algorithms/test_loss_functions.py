@@ -23,7 +23,7 @@ from nemo_reinforcer.algorithms.loss_functions import (
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
-    masked_mean,
+    masked_global_mean,
 )
 
 
@@ -56,7 +56,7 @@ def test_nll_loss():
         .to(torch.int64)
         .to("cuda"),
         "token_mask": torch.tensor([[0, 0, 1, 1]]).to("cuda"),
-        "sample_mask": torch.tensor([[1]]).to("cuda"),
+        "sample_mask": torch.tensor([1]).to("cuda"),
         "num_valid_tokens_in_batch": torch.tensor([2]),
     }
 
@@ -73,7 +73,13 @@ def test_nll_loss():
         .unsqueeze(0)
         .to("cuda")
     )
-    loss, metrics_dict = loss_fn(next_token_logits, data)
+    loss, metrics_dict = loss_fn(
+        next_token_logits,
+        data,
+        normalization_factor=torch.sum(
+            data["token_mask"] * data["sample_mask"].unsqueeze(-1)
+        ),
+    )
     torch.testing.assert_close(loss.cpu(), torch.tensor(0.0))
     # Check the metrics dictionary contains the expected values
     assert metrics_dict["num_unmasked_tokens"] == 2
@@ -92,7 +98,13 @@ def test_nll_loss():
         .unsqueeze(0)
         .to("cuda")
     )
-    loss, metrics_dict = loss_fn(next_token_logits, data)
+    loss, metrics_dict = loss_fn(
+        next_token_logits,
+        data,
+        normalization_factor=torch.sum(
+            data["token_mask"] * data["sample_mask"].unsqueeze(0)
+        ),
+    )
     ## loss per token is 999, and we have two unmasked tokens
     ## NLLLoss averages the loss over unmasked tokens
     torch.testing.assert_close(loss.cpu(), torch.tensor(999.0))
@@ -122,8 +134,7 @@ def test_dpo_loss():
     )
 
     loss, metrics_dict = loss_fn(
-        next_token_logits,
-        data,
+        next_token_logits, data, normalization_factor=torch.sum(data["sample_mask"])
     )
 
     ## chosen and rejected errors are the same, so difference between them is 0
@@ -150,7 +161,9 @@ def test_dpo_loss():
     )
     expected_preference_loss = -torch.nn.functional.logsigmoid(torch.tensor(0.0))
     assert torch.isclose(
-        loss_fn_with_sft(next_token_logits, data)[0].cpu(),
+        loss_fn_with_sft(next_token_logits, data, torch.sum(data["sample_mask"]))[
+            0
+        ].cpu(),
         0.5 * expected_sft_loss + expected_preference_loss,
     )
 
@@ -221,8 +234,10 @@ def test_dpo_loss_varying_sequence_lengths():
     )
 
     # Compute loss
-    loss, metrics = dpo_loss_fn_no_avg(next_token_logits, data)
-    loss_avg, metrics_avg = dpo_loss_fn_avg(next_token_logits, data)
+    loss, metrics = dpo_loss_fn_no_avg(next_token_logits, data, torch.sum(sample_mask))
+    loss_avg, metrics_avg = dpo_loss_fn_avg(
+        next_token_logits, data, torch.sum(sample_mask)
+    )
 
     num_unmasked_tokens = token_mask[:, 1:][::2].sum().item()
     logprobs = torch.nn.functional.log_softmax(next_token_logits[:, 1:], dim=-1)
@@ -271,7 +286,13 @@ def test_dpo_sft_matches_nll_loss():
 
     # Compute NLL loss
     nll_loss_fn = NLLLoss()
-    nll_loss, nll_metrics = nll_loss_fn(next_token_logits[::2], sft_data)
+    nll_loss, nll_metrics = nll_loss_fn(
+        next_token_logits[::2],
+        sft_data,
+        torch.sum(
+            sft_data["sample_mask"].unsqueeze(-1) * torch.sum(sft_data["token_mask"])
+        ),
+    )
 
     # Compute DPO loss with preference_loss_weight=0
     dpo_loss_fn = DPOLossFn(
@@ -283,15 +304,22 @@ def test_dpo_sft_matches_nll_loss():
             "sft_average_log_probs": False,
         }
     )
-    dpo_loss, dpo_metrics = dpo_loss_fn(next_token_logits, dpo_data)
+    dpo_loss, dpo_metrics = dpo_loss_fn(
+        next_token_logits, dpo_data, torch.sum(dpo_data["sample_mask"])
+    )
 
     # Verify losses match
     ## since DPO SFT loss just sums across tokens in a batch and then averages over the batch,
     ## we need to re-normalize by multiplying by the batch size and dividing by the total number
     ## of unmasked chosen tokens
-    torch.testing.assert_close(
-        dpo_loss / torch.sum(dpo_data["token_mask"][::2]) * batch_size, nll_loss
+    scaled_dpo_loss = (
+        dpo_loss
+        * (torch.sum(sft_data["sample_mask"]))
+        / torch.sum(
+            sft_data["sample_mask"].unsqueeze(-1) * torch.sum(sft_data["token_mask"])
+        )
     )
+    torch.testing.assert_close(scaled_dpo_loss, nll_loss)
 
 
 def _setup_clipped_pg_test_data(batch_size=1, seq_len=4, vocab_size=8, device="cuda"):
@@ -320,9 +348,6 @@ def _setup_clipped_pg_test_data(batch_size=1, seq_len=4, vocab_size=8, device="c
             "prev_logprobs": prev_logprobs,
             "reference_policy_logprobs": reference_policy_logprobs,
             "generation_logprobs": generation_logprobs,
-            "num_valid_tokens_in_batch": torch.tensor(
-                [batch_size * (seq_len - 1)] * batch_size
-            ),
         }
     )
     # Return seq_len and vocab_size needed by tests
@@ -442,7 +467,11 @@ def test_clipped_pg_loss_ppo_clipping():
         curr_lp_masked, input_ids, seq_len, vocab_size, device
     )
 
-    actual_loss, _ = loss_fn(dummy_logits, data)
+    actual_loss, _ = loss_fn(
+        dummy_logits,
+        data,
+        torch.sum(data["sample_mask"].unsqueeze(-1) * data["token_mask"]),
+    )
     torch.testing.assert_close(actual_loss, expected_loss)
 
 
@@ -488,7 +517,11 @@ def test_clipped_pg_loss_reinforce_mode():
         curr_lp_masked, input_ids, seq_len, vocab_size, device
     )
 
-    actual_loss, _ = loss_fn(dummy_logits, data)
+    actual_loss, _ = loss_fn(
+        dummy_logits,
+        data,
+        torch.sum(data["sample_mask"].unsqueeze(-1) * data["token_mask"]),
+    )
     torch.testing.assert_close(actual_loss, expected_loss)
 
 
@@ -547,7 +580,11 @@ def test_clipped_pg_loss_kl_penalty():
         curr_lp_masked, input_ids, seq_len, vocab_size, device
     )
 
-    actual_loss, _ = loss_fn(dummy_logits, data)
+    actual_loss, _ = loss_fn(
+        dummy_logits,
+        data,
+        torch.sum(data["sample_mask"].unsqueeze(-1) * data["token_mask"]),
+    )
     torch.testing.assert_close(actual_loss, expected_loss)
 
 
@@ -587,7 +624,11 @@ def test_clipped_pg_loss_masking():
 
     # --- Test 1: Token Mask ---
     # Default mask: [[0, 1, 1, 1], [0, 1, 1, 1]] -> 3 tokens per sample
-    loss_default, _ = loss_fn(dummy_logits, data)
+    loss_default, _ = loss_fn(
+        dummy_logits,
+        data,
+        torch.sum(data["sample_mask"].unsqueeze(-1) * data["token_mask"]),
+    )
 
     # Modify token_mask for batch item 0 to mask one more token (pos 1)
     data_mod_token = data.copy()
@@ -596,7 +637,13 @@ def test_clipped_pg_loss_masking():
         0  # New mask: [[0, 0, 1, 1], [0, 1, 1, 1]] -> 2 tokens sample 0, 3 tokens sample 1
     )
 
-    loss_token_masked, _ = loss_fn(dummy_logits, data_mod_token)
+    loss_token_masked, _ = loss_fn(
+        dummy_logits,
+        data_mod_token,
+        torch.sum(
+            data_mod_token["sample_mask"].unsqueeze(-1) * data_mod_token["token_mask"]
+        ),
+    )
     # Loss should change if a potentially contributing token is masked
     assert not torch.isclose(loss_default, loss_token_masked, atol=1e-4), (
         "Token mask did not change loss as expected"
@@ -608,7 +655,13 @@ def test_clipped_pg_loss_masking():
         [1, 0], dtype=torch.int64, device=device
     )  # Ignore item 1
 
-    loss_sample_masked, _ = loss_fn(dummy_logits, data_mod_sample)
+    loss_sample_masked, _ = loss_fn(
+        dummy_logits,
+        data_mod_sample,
+        torch.sum(
+            data_mod_sample["sample_mask"].unsqueeze(-1) * data_mod_sample["token_mask"]
+        ),
+    )
 
     # Manually create data dict for only batch 0
     data_only_b0_dict = {}
@@ -623,7 +676,13 @@ def test_clipped_pg_loss_masking():
     data_only_b0 = BatchedDataDict(data_only_b0_dict)
 
     logits_only_b0 = dummy_logits[0:1]
-    loss_only_b0, _ = loss_fn(logits_only_b0, data_only_b0)
+    loss_only_b0, _ = loss_fn(
+        logits_only_b0,
+        data_only_b0,
+        torch.sum(
+            data_only_b0["sample_mask"].unsqueeze(-1) * data_only_b0["token_mask"]
+        ),
+    )
 
     torch.testing.assert_close(loss_sample_masked, loss_only_b0)
 
@@ -651,7 +710,7 @@ def test_clipped_pg_loss_zero_mask():
     # Set token mask to all zeros
     data["token_mask"] = torch.zeros_like(data["token_mask"])
 
-    loss, _ = loss_fn(dummy_logits, data)
+    loss, _ = loss_fn(dummy_logits, data, torch.sum(data["token_mask"]))
 
     # Loss should be exactly zero
     torch.testing.assert_close(loss, torch.tensor(0.0, device=device))
@@ -797,27 +856,29 @@ def test_clipped_pg_loss_on_policy_kl_importance_sampling():
         curr_lp_masked, input_ids, seq_len, vocab_size, device
     )
 
-    actual_loss, _ = loss_fn(dummy_logits, data)
+    actual_loss, _ = loss_fn(
+        dummy_logits, data, torch.sum(data["sample_mask"] * data["token_mask"])
+    )
     torch.testing.assert_close(actual_loss, expected_total_loss, atol=1e-4, rtol=1e-3)
 
 
-def test_masked_mean_all_zeros():
-    """Test masked_mean function with all zeros mask."""
+def test_masked_global_mean_all_zeros():
+    """Test masked_global_mean function with all zeros mask."""
     values = torch.tensor([1.0, 2.0, 3.0, 4.0])
     mask = torch.zeros_like(values)
 
     # All zeros mask should return 0
-    result = masked_mean(values, mask)
+    result = masked_global_mean(values, mask, torch.sum(mask))
     print(result)
     torch.testing.assert_allclose(result, torch.tensor(0.0))
 
     # With check_zero_mask=False
     mask[0] = 1
-    result = masked_mean(values, mask)
+    result = masked_global_mean(values, mask, torch.sum(mask))
     torch.testing.assert_allclose(result, torch.tensor(1.0))
 
     # Case 2: dim is not None
     values = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     mask = torch.zeros_like(values)
-    result = masked_mean(values, mask, dim=1)
-    torch.testing.assert_allclose(result, torch.tensor([0.0, 0.0]))
+    result = masked_global_mean(values, mask, torch.sum(mask))
+    torch.testing.assert_allclose(result, torch.tensor((0.0)))

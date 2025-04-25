@@ -27,7 +27,7 @@ from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
 from nemo_reinforcer.models.generation.interfaces import configure_generation_config
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
-from tests.unit.test_utils import simple_loss, nll_loss
+from tests.unit.test_utils import SimpleLoss, SimpleNLLLoss
 
 
 basic_llama_test_config: PolicyConfig = {
@@ -342,11 +342,12 @@ def training_setup(tokenizer, request, num_gpus):
                 "input_lengths": input_lengths,
                 "attention_mask": attention_mask,  # Keep for compatibility with loss functions
                 "labels": torch.randint(0, 32000, (8, 128)),
+                "sample_mask": torch.ones(8),
             }
         )
 
         # Create loss function
-        loss_fn: LossFunction = simple_loss
+        loss_fn: LossFunction = SimpleLoss()
 
         # Provide the resources to the test
         yield policy, cluster, data, loss_fn
@@ -650,12 +651,13 @@ def test_all_hf_policy_generation_lps_ref_training(generation_setup):
             "input_ids": ref_results["output_ids"],
             "input_lengths": ref_results["unpadded_sequence_lengths"],
             "token_loss_mask": token_loss_mask,
+            "sample_mask": torch.ones(data.get("input_ids").size(0)),
         }
     )
 
     fprop_logprobs = policy.get_logprobs(train_data)["logprobs"]
 
-    loss_fn: LossFunction = nll_loss
+    loss_fn: LossFunction = SimpleNLLLoss()
 
     # Train for a few steps
     policy.prepare_for_training()

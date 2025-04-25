@@ -29,7 +29,7 @@ from nemo_reinforcer.models.generation.interfaces import configure_generation_co
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
-from tests.unit.test_utils import simple_loss
+from tests.unit.test_utils import SimpleLoss
 from tests.unit.conftest import TEST_ASSETS
 from transformers import AutoModelForCausalLM
 
@@ -261,11 +261,12 @@ def training_setup(request, two_gpu_virtual_cluster):
                 "input_lengths": input_lengths,
                 "attention_mask": attention_mask,  # Keep for compatibility with loss functions
                 "labels": torch.randint(0, 32000, (8, 128)),
+                "sample_mask": torch.ones(8),
             }
         )
 
         # Create loss function
-        loss_fn: LossFunction = simple_loss
+        loss_fn: LossFunction = SimpleLoss()
 
         # Provide the resources to the test
         yield policy, data, loss_fn

@@ -298,16 +298,20 @@ class DTensorPolicyWorker:
                     )
                     ## get number of tokens in the global batch
                     normalization_factor = torch.sum(
-                        data["token_mask"] * data["sample_mask"].unsqueeze(-1)
+                        data["token_mask"][:, 1:] * data["sample_mask"].unsqueeze(-1)
                     )
-                    torch.distributed.all_reduce(normalization_factor)
+                    torch.distributed.all_reduce(
+                        normalization_factor, group=self.dp_mesh.get_group()
+                    )
                 elif loss_fn.loss_type == LossType.SAMPLE_LEVEL:
                     ## get number of valid samples in the global batch
                     assert "sample_mask" in data, (
                         "sample_mask must be present in the data when using sample-level loss"
                     )
                     normalization_factor = torch.sum(data["sample_mask"])
-                    torch.distributed.all_reduce(normalization_factor)
+                    torch.distributed.all_reduce(
+                        normalization_factor, group=self.dp_mesh.get_group()
+                    )
                 else:
                     raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
 

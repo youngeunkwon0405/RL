@@ -423,13 +423,13 @@ class DPOLossFn(LossFunction):
             sft_loss, _ = self.sft_loss(
                 next_token_logits,
                 data,
-                normalization_factor=None,  ## unused because sft loss returned is at the sample level
+                normalization_factor=normalization_factor,  ## unused because sft loss returned is at the sample level
                 dpo_loss=True,
                 dpo_average_log_probs=self.sft_average_log_probs,
             )
             sft_loss_chosen, sft_loss_rejected = self.split_output_tensor(sft_loss)
             sft_loss_chosen = masked_global_mean(
-                sft_loss_chosen, data["sample_mask"][::2], normalization_factor
+                sft_loss_chosen, data["sample_mask"][::2], normalization_factor / 2
             )
 
         (
