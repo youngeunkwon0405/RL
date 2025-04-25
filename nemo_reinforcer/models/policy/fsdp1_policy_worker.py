@@ -40,6 +40,7 @@ from nemo_reinforcer.models.generation.interfaces import (
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers.integrations.accelerate import find_tied_parameters
+from nemo_reinforcer.algorithms.loss_functions import LossType
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
@@ -258,6 +259,27 @@ class FSDP1PolicyWorker:
             losses = []
             all_mb_metrics = []
             for gb_start in range(0, dataset_size, local_gbs):
+                assert "sample_mask" in data, "sample_mask must be present in the data!"
+                ## get the normalization factor for the loss
+                if loss_fn.loss_type == LossType.TOKEN_LEVEL:
+                    assert "token_mask" in data, (
+                        "token_mask must be present in the data when using token-level loss"
+                    )
+                    ## get number of tokens in the global batch
+                    normalization_factor = torch.sum(
+                        data["token_mask"][:, 1:] * data["sample_mask"].unsqueeze(-1)
+                    )
+                    torch.distributed.all_reduce(normalization_factor)
+                elif loss_fn.loss_type == LossType.SAMPLE_LEVEL:
+                    ## get number of valid samples in the global batch
+                    assert "sample_mask" in data, (
+                        "sample_mask must be present in the data when using sample-level loss"
+                    )
+                    normalization_factor = torch.sum(data["sample_mask"])
+                    torch.distributed.all_reduce(normalization_factor)
+                else:
+                    raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
+
                 self.optimizer.zero_grad()
                 mb_losses = []
 
@@ -292,22 +314,11 @@ class FSDP1PolicyWorker:
                         else:
                             logits = outputs.logits
 
-                    ## we scale by the total number of microbatches here because any token-level loss functions
-                    ## will already be normalized by the number of tokens in the global batch.
-                    ## we don't need to additionally divide loss by the number of microbatches, but this happens automatically
-                    ## in the policy, so we cancel that scaling out here.
-                    if "num_valid_tokens_in_batch" in mb:
-                        mb["num_valid_tokens_in_batch"] /= (
-                            num_microbatches * torch.distributed.get_world_size()
-                        )
-                    loss, loss_metrics = loss_fn(logits, mb)
+                    loss, loss_metrics = loss_fn(logits, mb, normalization_factor)
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
 
                     # Backward pass
-
-                    # Loss is accumulated across microbatches, so we need to scale by the number of microbatches
-                    loss = loss / num_microbatches
                     if not eval_mode:
                         ## NOTE: invalid samples should be multiplied
                         ## by zero in the loss function to prevent them
@@ -330,10 +341,11 @@ class FSDP1PolicyWorker:
 
             # Compute global loss across all ranks
             with torch.no_grad():
+                ## TODO: clan up!
                 local_loss = torch.tensor(losses, device="cuda")
                 global_loss = torch.zeros_like(local_loss)
                 torch.distributed.all_reduce(local_loss)
-                global_loss = local_loss / torch.distributed.get_world_size()
+                global_loss = local_loss  # / torch.distributed.get_world_size()
 
             # Aggregate metrics across all microbatches
             mb_metrics = defaultdict(list)

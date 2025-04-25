@@ -462,7 +462,6 @@ def grpo_train(
                     make_sequence_length_divisible_by=master_config["policy"][
                         "make_sequence_length_divisible_by"
                     ],
-                    loss_multiplier=repeated_batch["loss_multiplier"],
                 )
 
                 # Create training data from flattened messages
@@ -474,7 +473,6 @@ def grpo_train(
                         "generation_logprobs": flat_messages["generation_logprobs"],
                         "token_mask": flat_messages["token_loss_mask"],
                         "sample_mask": repeated_batch["loss_multiplier"],
-                        "num_valid_tokens_in_batch": flat_messages["num_valid_tokens"],
                     }
                 )
                 train_data.to("cpu")
@@ -581,7 +579,7 @@ def grpo_train(
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k == "num_valid_samples":
+            if k in {"loss", "num_valid_samples"}:
                 metrics[k] = np.sum(v).item()
             else:
                 metrics[k] = np.mean(v).item()

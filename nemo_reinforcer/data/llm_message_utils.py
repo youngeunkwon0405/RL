@@ -198,7 +198,6 @@ def batched_message_log_to_flat_message(
     message_log_batch: List[LLMMessageLogType],
     pad_value_dict: Dict[str, int] = None,
     make_sequence_length_divisible_by: int = 1,
-    loss_multiplier: torch.Tensor = torch.ones((1,)),
 ) -> tuple[BatchedDataDict[FlatMessagesType], torch.Tensor]:
     """Process and pad a batch of message logs for model input.
 
@@ -325,16 +324,6 @@ def batched_message_log_to_flat_message(
         pad_value = pad_value_dict.get(key, 0) if pad_value_dict else 0
         padded = [_pad_tensor(t, max_len, "right", pad_value) for t in values]
         result[key] = torch.stack(padded)
-
-    ## sum the number of unmasked tokens, taking into account any masked sequences (loss_multiplier=0)
-    num_valid_tokens = torch.sum(
-        result.get("token_loss_mask", torch.zeros((1,)))[:, 1:]
-        * loss_multiplier.unsqueeze(-1),
-        dtype=torch.float32,
-    )
-    result["num_valid_tokens"] = torch.tensor(
-        [num_valid_tokens] * result["token_ids"].size(0)
-    )
 
     return result, input_lengths_tensor
 

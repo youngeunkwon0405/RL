@@ -303,7 +303,10 @@ def validate(
 
             else:
                 for k, v in val_results["all_mb_metrics"].items():
-                    val_metrics[k] += np.mean(v).item()
+                    if k in {"loss", "num_valid_samples", "num_unmasked_tokens"}:
+                        val_metrics[k] += np.sum(v).item()
+                    else:
+                        val_metrics[k] += np.mean(v).item()
                 num_valid_batches += 1
 
             if val_batches > 0 and batch_idx >= val_batches - 1:
@@ -485,7 +488,7 @@ def dpo_train(
             }
             metrics.update(train_results["all_mb_metrics"])
             for k, v in metrics.items():
-                if k == "num_valid_samples":
+                if k in {"loss", "num_valid_samples"}:
                     metrics[k] = np.sum(v).item()
                 else:
                     metrics[k] = np.mean(v).item()

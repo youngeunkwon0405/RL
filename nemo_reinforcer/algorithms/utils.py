@@ -119,13 +119,6 @@ def surpress_user_warnings(f):
     return wrapper
 
 
-# need to surpress the masked tensor warnings from pytorch
-@surpress_user_warnings
-def masked_mean(values, mask, dim=None):
-    """Masks values with mask, and computes the mean of the values using the masked values."""
-    return (values * mask).sum(dim=dim) / (mask.sum(dim=dim) + 1e-8)
-
-
 def set_seed(seed: int):
     """Sets the seed for python, numpy, and pytorch."""
     random.seed(seed)
@@ -211,5 +204,5 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
 
 
 def masked_global_mean(values, mask, normalization_factor):
-    """Computes the global mean of values, ignoring masked values."""
+    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
     return torch.sum(values * mask) / (normalization_factor + 1e-8)
