@@ -1,12 +1,12 @@
 # Loss functions in NeMo-RL
 
 Loss functions in NeMo-RL are specially designed to ensure that full batch training is equivalent to training with gradient accumulation. To understand
-why special care needs to be taken here, consider the following example of a simple loss function that takes the average of some loss over all tokens in a microbatch, and then averages loss of all microbatches.
+why special care needs to be taken here, consider the following example of a simple loss function that takes the average of some loss over all tokens in a microbatch, and then averages loss over the microbatches.
 
-Suppose we have a global batch with 16 unmasked tokens. The first 10 unmasked tokens come from he first half of the samples in the batch, and the last 6 come from the second half. If training with one global batch,
+Suppose we have a global batch with 16 unmasked tokens. The first 10 unmasked tokens come from the first half of the samples in the batch, and the last 6 come from the second half. If training with one global batch,
 
 $$
-L = \frac{\sum_{s=t}^16 L_t}{16}.
+L = \frac{\sum_{t=1}^{16} L_t}{16}.
 $$
 
 But if we train with two microbatches, 
@@ -17,7 +17,7 @@ $$
 
 which is, in general, not equivalent to the full-batch loss. To fix this, we need each microbatch to have information about how many tokens are in the other microbatches in the global batch.
 
-In NeMo-RL, this information is passed to the loss function directly. Each loss function is expected to fall into one of two categories, token-level or sample-level, which is an attribute of the loss function itself (see [loss_functions.py](../../nemo_reinforcer/algorithms/loss_functions.py) for some examples). The policy then uses this information to compute the global normalization factor using th full batch (for token-level losses, this is the total number of tokens in the batch. For sample-level losses, this is the number of valid samples in the batch). The normalization factor is then passed to the loss function, which uses it to normalize the microbatch loss. To get the loss for the global batch, the policy simply sums across all microbatch losses.
+In NeMo-RL, this information is passed to the loss function directly. Each loss function is expected to fall into one of two categories, token-level or sample-level, which is an attribute of the loss function itself (see [loss_functions.py](../../nemo_reinforcer/algorithms/loss_functions.py) for some examples). The policy then uses this information to compute the global normalization factor using the full batch (for token-level losses, this is the total number of tokens in the batch. For sample-level losses, this is the number of valid samples in the batch). The normalization factor is then passed to the loss function, which uses it to normalize the microbatch loss. To get the loss for the global batch, the policy simply sums across all microbatch losses.
 
 For our simple example above, this would look like:
 
@@ -46,10 +46,10 @@ class SimpleAverageLoss(LossFunction):
         normalization_factor: torch.Tensor,
     ) -> Tuple[torch.Tensor, dict]:
         """Compute the simple average loss with proper microbatch handling."""
-        token_mask = data["token_mask"][:, 1:] ## token mask for this microbatch
+        token_mask = data["token_mask"] ## token mask for this microbatch
         sample_mask = data["sample_mask"] ## sample mask for this microbatch
 
-        # mask will be 10 for microbatch 1, 6 for microbatch 2
+        # mask.sum() will be 10 for microbatch 1, 6 for microbatch 2
         mask = token_mask * sample_mask.unsqueeze(-1)
 
         # normalization_factor will be 16 in our example since there are 16 tokens in the global batch
