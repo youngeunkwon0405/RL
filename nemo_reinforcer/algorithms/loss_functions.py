@@ -259,8 +259,7 @@ class NLLLoss(LossFunction):
 
         return loss, {
             "loss": loss.item() if loss.ndim == 0 else loss,
-            "total_tokens_per_mb": mask.numel(),
-            "num_unmasked_tokens": normalization_factor.item(),
+            "num_unmasked_tokens": mask.sum().item(),
             "num_valid_samples": sample_mask.sum().item(),
         }
 
@@ -274,7 +273,7 @@ class DPOLossConfig(TypedDict):
 
 
 class DPOLossDataDict(TypedDict):
-    """Required keys for the Clipped Policy Gradient loss function."""
+    """Required keys for the DPO loss function."""
 
     input_ids: torch.Tensor
     reference_policy_logprobs: torch.Tensor

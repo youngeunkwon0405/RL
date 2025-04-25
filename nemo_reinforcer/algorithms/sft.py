@@ -489,10 +489,10 @@ def sft_train(
             }
             metrics.update(train_results["all_mb_metrics"])
             for k, v in metrics.items():
-                if k in {"loss", "num_valid_samples"}:
-                    metrics[k] = np.sum(v).item()
-                else:
+                if k == "lr":
                     metrics[k] = np.mean(v).item()
+                else:
+                    metrics[k] = np.sum(v).item()
             timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
             print("\n📊 Training Results:")
