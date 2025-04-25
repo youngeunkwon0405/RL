@@ -18,13 +18,11 @@ import torch
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
+    gather_logprobs,
     masked_mean,
 )
 
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.models.dtensor.parallelize import (
-    get_logprobs_from_vocab_parallel_logits,
-)
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -110,21 +108,7 @@ class ClippedPGLossFn(LossFunction):
 
         next_token_logits = next_token_logits.to(torch.float32)
 
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
-            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"]
-            )
-        else:
-            next_token_logits = next_token_logits[
-                :, :-1
-            ]  # Remove last position's logits
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits, dim=-1
-            )
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
-            curr_logprobs = next_token_logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        curr_logprobs = gather_logprobs(data, next_token_logits)
 
         # Calculate KL regularization.
         if self.reference_policy_kl_penalty != 0:
@@ -211,19 +195,7 @@ class NLLLoss(LossFunction):
         next_token_logits = next_token_logits.to(torch.float32)
 
         # Gather the logprobs for the actual next tokens
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
-            token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"]
-            )
-        else:
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits, dim=-1
-            )
-            logprobs = next_token_logprobs[:, :-1]  # Remove last position's logits
-            token_logprobs = logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        token_logprobs = gather_logprobs(data, next_token_logits)
 
         if dpo_loss:
             ## shape: [batch_size]
@@ -343,19 +315,7 @@ class DPOLossFn(LossFunction):
         sample_mask = data["sample_mask"]
 
         next_token_logits = next_token_logits.to(torch.float32)
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
-            token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"]
-            )
-        else:
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits, dim=-1
-            )
-            logprobs = next_token_logprobs[:, :-1]  # Remove last position's logits
-            token_logprobs = logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        token_logprobs = gather_logprobs(data, next_token_logits)
 
         ref_logprobs = data["reference_policy_logprobs"][:, :-1]
 

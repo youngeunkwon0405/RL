@@ -25,6 +25,9 @@ from transformers import AutoTokenizer
 from nemo_reinforcer.data import hf_datasets
 from nemo_reinforcer.data.datasets import AllTaskProcessedDataset
 from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
+from nemo_reinforcer.models.dtensor.parallelize import (
+    get_logprobs_from_vocab_parallel_logits,
+)
 from nemo_reinforcer.models.policy import PolicyConfig, TokenizerConfig
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
 from nemo_reinforcer.utils.checkpoint import CheckpointingConfig, CheckpointManager
@@ -131,6 +134,23 @@ def surpress_user_warnings(f):
 def masked_mean(values, mask, dim=None):
     """Masks values with mask, and computes the mean of the values using the masked values."""
     return (values * mask).sum(dim=dim) / (mask.sum(dim=dim) + 1e-8)
+
+
+def gather_logprobs(data, next_token_logits):
+    # Gather the logprobs for the actual next tokens
+    if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+        token_logprobs = get_logprobs_from_vocab_parallel_logits(
+            next_token_logits, data["input_ids"]
+        )
+    else:
+        next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
+        next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
+        next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
+        token_logprobs = next_token_logprobs.gather(
+            dim=-1, index=next_tokens.unsqueeze(-1)
+        ).squeeze(-1)
+
+    return token_logprobs
 
 
 def set_seed(seed: int):
@@ -349,30 +369,21 @@ def save_checkpoint(
     train_dataloader,
     policy,
     timer,
+    save_torch_dist=True,
+    save_hf=False,
 ):
-    ## TODO: save HF at the end of training!!
-    ## don't add this logic here because it's verbose
-    ## and we should always be saving a checkpoint at the end of training anyway
-    # is_last_checkpoint = (
-    #     min(
-    #         len(train_dataloader) * max_num_epochs,
-    #         master_config["sft"]["max_num_steps"],
-    #     )
-    #     - (total_steps + 1)
-    #     < master_config["checkpointing"]["save_period"]
-    # )
-
     with timer.time("checkpointing"):
-        print(f"Saving checkpoint for step {total_steps + 1}...")
+        print(f"Saving checkpoint for step {total_steps}...")
         checkpoint_path = checkpointer.init_tmp_checkpoint(
-            total_steps + 1, save_state, master_config
+            total_steps, save_state, master_config
         )
 
         policy.save_checkpoint(
             weights_path=os.path.join(checkpoint_path, "policy", "weights"),
             optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
             tokenizer_path=os.path.join(checkpoint_path, "policy", "tokenizer"),
-            save_hf=False,  # is_last_checkpoint,
+            save_torch_dist=save_torch_dist,
+            save_hf=save_hf,  # is_last_checkpoint,
         )
         torch.save(
             train_dataloader.state_dict(),

@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import math
 import warnings
 from transformers import AutoTokenizer
 from pathlib import Path
@@ -193,6 +194,18 @@ def setup(
     )
 
 
+def get_sft_save_state(
+    current_epoch, current_step, total_steps, val_metrics, train_dataloader
+):
+    sft_save_state = {
+        "step": current_step % len(train_dataloader),
+        "total_steps": total_steps,
+        "epoch": current_epoch,
+        "val_loss": val_metrics["val_loss"],
+    }
+    return sft_save_state
+
+
 # =======================================================
 # Training & Validation
 # =======================================================
@@ -345,15 +358,30 @@ def sft_train(
 
     policy.prepare_for_training()
 
+    saved_final_checkpoint = False
+    total_num_epochs = min(
+        max_num_epochs,
+        math.ceil(master_config["sft"]["max_num_steps"] / len(train_dataloader)),
+    )
+
     while (
-        current_epoch < max_num_epochs
+        current_epoch < total_num_epochs
         and total_steps < master_config["sft"]["max_num_steps"]
     ):
-        print(f"\n{'=' * 25} Epoch {current_epoch + 1}/{max_num_epochs} {'=' * 25}")
+        print(f"\n{'=' * 25} Epoch {current_epoch + 1}/{total_num_epochs} {'=' * 25}")
+
+        remaining_num_steps = master_config["sft"]["max_num_steps"] % len(
+            train_dataloader
+        )
+        num_steps_in_this_epoch = (
+            remaining_num_steps
+            if current_epoch == total_num_epochs - 1
+            else len(train_dataloader)
+        )
 
         for batch in train_dataloader:
             print(
-                f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['sft']['max_num_steps'])} {'=' * 25}"
+                f"\n{'=' * 25} Step {current_step + 1}/{num_steps_in_this_epoch} {'=' * 25}"
             )
 
             with timer.time("total_step_time"):
@@ -416,19 +444,31 @@ def sft_train(
                     % master_config["checkpointing"]["save_period"]
                     == 0
                 ):
-                    sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
-                    sft_save_state["total_steps"] = total_steps + 1
-                    sft_save_state["epoch"] = current_epoch
-                    sft_save_state["val_loss"] = val_metrics["val_loss"]
+                    is_last_checkpoint = (total_steps + 1) >= master_config["sft"][
+                        "max_num_steps"
+                    ] or (
+                        current_epoch == (max_num_epochs - 1)
+                        and current_step == (len(train_dataloader) - 1)
+                    )
+                    sft_save_state = get_sft_save_state(
+                        current_epoch,
+                        current_step + 1,
+                        total_steps + 1,
+                        val_metrics,
+                        train_dataloader,
+                    )
                     save_checkpoint(
                         checkpointer,
                         master_config,
                         sft_save_state,
-                        total_steps,
+                        total_steps + 1,
                         train_dataloader,
                         policy,
                         timer,
+                        save_torch_dist=True,
+                        save_hf=is_last_checkpoint,
                     )
+                    saved_final_checkpoint = is_last_checkpoint
 
             losses = train_results["loss"]
             metrics = {
@@ -450,7 +490,49 @@ def sft_train(
             total_steps += 1
 
             if total_steps >= master_config["sft"]["max_num_steps"]:
-                return
+                break
 
         current_epoch += 1
         current_step = 0  # Reset step counter for new epoch
+
+        if total_steps >= master_config["sft"]["max_num_steps"]:
+            break
+
+    ## save a final checkpoint in hf format
+    if master_config["checkpointing"]["enabled"] and not saved_final_checkpoint:
+        ## check whether we need to run final validation
+        if total_steps % val_period != 0:
+            val_metrics, log_to_console = validate(
+                policy,
+                val_dataloader,
+                tokenizer,
+                loss_fn,
+                step=total_steps,
+                master_config=master_config,
+                sft_task_spec=sft_task_spec,
+                val_batches=sft_config["val_batches"],
+                val_batch_size=sft_config["val_global_batch_size"],
+                val_mbs=sft_config["val_micro_batch_size"],
+            )
+            log_metrics(
+                log_to_console,
+                val_metrics,
+                timer,
+                total_steps,
+                logger,
+                is_val=True,
+            )
+        sft_save_state = get_sft_save_state(
+            current_epoch, current_step, total_steps, val_metrics, train_dataloader
+        )
+        save_checkpoint(
+            checkpointer,
+            master_config,
+            sft_save_state,
+            total_steps,
+            train_dataloader,
+            policy,
+            timer,
+            save_torch_dist=False,
+            save_hf=True,
+        )

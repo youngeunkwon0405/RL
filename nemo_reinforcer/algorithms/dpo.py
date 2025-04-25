@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import math
 import warnings
 from collections import defaultdict
 from functools import partial
@@ -218,6 +219,18 @@ def add_ref_logprobs_to_data(dataloader, policy, master_config):
             break
 
 
+def get_dpo_save_state(
+    current_epoch, current_step, total_steps, val_metrics, train_dataloader
+):
+    dpo_save_state = {
+        "step": current_step % len(train_dataloader),
+        "total_steps": total_steps,
+        "epoch": current_epoch,
+        "val_loss": val_metrics["loss"],
+    }
+    return dpo_save_state
+
+
 # =======================================================
 # Training & Validation
 # =======================================================
@@ -351,15 +364,30 @@ def dpo_train(
 
     policy.prepare_for_training()
 
+    saved_final_checkpoint = False
+    total_num_epochs = min(
+        max_num_epochs,
+        math.ceil(master_config["dpo"]["max_num_steps"] / len(train_dataloader)),
+    )
+
     while (
         current_epoch < max_num_epochs
         and total_steps < master_config["dpo"]["max_num_steps"]
     ):
-        print(f"\n{'=' * 25} Epoch {current_epoch + 1}/{max_num_epochs} {'=' * 25}")
+        print(f"\n{'=' * 25} Epoch {current_epoch + 1}/{total_num_epochs} {'=' * 25}")
+
+        remaining_num_steps = master_config["dpo"]["max_num_steps"] % len(
+            train_dataloader
+        )
+        num_steps_in_this_epoch = (
+            remaining_num_steps
+            if current_epoch == total_num_epochs - 1
+            else len(train_dataloader)
+        )
 
         for batch in add_ref_logprobs_to_data(train_dataloader, policy, master_config):
             print(
-                f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['dpo']['max_num_steps'])} {'=' * 25}"
+                f"\n{'=' * 25} Step {current_step + 1}/{num_steps_in_this_epoch} {'=' * 25}"
             )
 
             with timer.time("total_step_time"):
@@ -403,19 +431,30 @@ def dpo_train(
                     % master_config["checkpointing"]["save_period"]
                     == 0
                 ):
-                    dpo_save_state["step"] = (current_step + 1) % len(train_dataloader)
-                    dpo_save_state["total_steps"] = total_steps + 1
-                    dpo_save_state["epoch"] = current_epoch
-                    dpo_save_state["val_loss"] = val_metrics["loss"]
+                    is_last_checkpoint = (total_steps + 1) >= master_config["dpo"][
+                        "max_num_steps"
+                    ] or (
+                        current_epoch == (total_num_epochs - 1)
+                        and current_step == (num_steps_in_this_epoch - 1)
+                    )
+                    dpo_save_state = get_dpo_save_state(
+                        current_epoch,
+                        current_step + 1,
+                        total_steps + 1,
+                        val_metrics,
+                        train_dataloader,
+                    )
                     save_checkpoint(
                         checkpointer,
                         master_config,
                         dpo_save_state,
-                        total_steps,
+                        total_steps + 1,
                         train_dataloader,
                         policy,
                         timer,
+                        save_hf=is_last_checkpoint,
                     )
+                    saved_final_checkpoint = is_last_checkpoint
 
             losses = train_results["loss"]
             metrics = {
@@ -434,7 +473,49 @@ def dpo_train(
             total_steps += 1
 
             if total_steps >= master_config["dpo"]["max_num_steps"]:
-                return
+                break
 
         current_epoch += 1
         current_step = 0  # Reset step counter for new epoch
+
+        if current_epoch >= total_num_epochs:
+            break
+
+    ## save a final checkpoint in hf format
+    if master_config["checkpointing"]["enabled"] and not saved_final_checkpoint:
+        ## check whether we need to run final validation
+        if total_steps % val_period != 0:
+            val_metrics, log_to_console = validate(
+                policy,
+                val_dataloader,
+                tokenizer,
+                loss_fn,
+                step=total_steps,
+                master_config=master_config,
+                val_batches=dpo_config["val_batches"],
+                val_batch_size=dpo_config["val_global_batch_size"],
+                val_mbs=dpo_config["val_micro_batch_size"],
+            )
+            log_metrics(
+                log_to_console,
+                val_metrics,
+                timer,
+                total_steps,
+                logger,
+                is_val=True,
+            )
+
+        dpo_save_state = get_dpo_save_state(
+            current_epoch, current_step, total_steps, val_metrics, train_dataloader
+        )
+        save_checkpoint(
+            checkpointer,
+            master_config,
+            dpo_save_state,
+            total_steps,
+            train_dataloader,
+            policy,
+            timer,
+            save_torch_dist=False,
+            save_hf=True,
+        )

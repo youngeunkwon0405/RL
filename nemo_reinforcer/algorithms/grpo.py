@@ -232,6 +232,14 @@ def setup(
     )
 
 
+def get_grpo_save_state(step, val_metrics):
+    grpo_save_state = {
+        "step": step,
+        "val_reward": val_metrics["accuracy"],
+    }
+    return grpo_save_state
+
+
 # ===============================================================================
 # Core Algorithm Functions
 # ===============================================================================
@@ -330,6 +338,8 @@ def grpo_train(
             logger,
             is_val=True,
         )
+
+    saved_final_checkpoint = False
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
@@ -503,8 +513,11 @@ def grpo_train(
             ):
                 policy.prepare_for_training()
 
-                grpo_save_state["step"] = step + 1
-                grpo_save_state["val_reward"] = val_metrics["accuracy"]
+                is_last_checkpoint = step + 1 == min(
+                    master_config["grpo"]["max_num_steps"], len(dataloader)
+                )
+
+                grpo_save_state = get_grpo_save_state(step + 1, val_metrics)
                 save_checkpoint(
                     checkpointer,
                     master_config,
@@ -513,7 +526,10 @@ def grpo_train(
                     dataloader,
                     policy,
                     timer,
+                    save_torch_dist=True,
+                    save_hf=is_last_checkpoint,
                 )
+                saved_final_checkpoint = is_last_checkpoint
                 policy.offload_after_refit()
 
         # Logging
@@ -546,6 +562,39 @@ def grpo_train(
         step += 1
         if step >= master_config["grpo"]["max_num_steps"]:
             break
+
+    ## save a final checkpoint in hf format
+    if master_config["checkpointing"]["enabled"] and not saved_final_checkpoint:
+        ## check whether we need to run final validation
+        if step % val_period != 0:
+            val_metrics, log_to_console = validate(
+                policy_generation,
+                val_dataloader,
+                tokenizer,
+                val_task_to_env,
+                step=step,
+                master_config=master_config,
+            )
+            log_metrics(
+                log_to_console,
+                val_metrics,
+                timer,
+                step,
+                logger,
+                is_val=True,
+            )
+        grpo_save_state = get_grpo_save_state(step, val_metrics)
+        save_checkpoint(
+            checkpointer,
+            master_config,
+            grpo_save_state,
+            step,
+            dataloader,
+            policy,
+            timer,
+            save_torch_dist=False,
+            save_hf=True,
+        )
 
 
 def validate(
