@@ -32,12 +32,14 @@ from tests.unit.test_envs import (
     MultiStepCalculatorEnv,
     _MultiStepCalculatorLogic,
     MultiStepCalcMetadata,
-    SlidingPuzzleEnv,
-    SlidingPuzzleMetadata,
 )
 
-# Import the game logic for generating initial state from its new location
-from tests.unit.environments.sliding_puzzle_game import SlidingPuzzleGame
+from nemo_reinforcer.environments.games.sliding_puzzle import (
+    SlidingPuzzleGameLogic,
+    SlidingPuzzleEnv,
+    SlidingPuzzleConfig,
+    SlidingPuzzleMetadata,
+)
 
 from nemo_reinforcer.models.generation.vllm import VllmConfig, VllmGeneration
 
@@ -463,16 +465,16 @@ def sliding_puzzle_environment(rollout_cluster):
 def initial_sliding_puzzle_batch(rollout_tokenizer):
     print("Creating initial sliding puzzle test batch...")
     batch_size = 1
-    game_config = {
+    game_config: SlidingPuzzleConfig = {
         "size": 2,
         "shuffle_moves": 1,
     }
     max_moves = 10  # Set a limit for the test
 
     # Generate initial game state
-    initial_game_state = SlidingPuzzleGame.generate(game_config)
-    initial_render = SlidingPuzzleGame.render(initial_game_state)
-    welcome_message = SlidingPuzzleGame.init(initial_game_state)
+    initial_game_state = SlidingPuzzleGameLogic.generate(game_config)
+    initial_render = SlidingPuzzleGameLogic.render(initial_game_state)
+    welcome_message = SlidingPuzzleGameLogic.init(initial_game_state)
 
     prompt_instructions = (
         f"{welcome_message}\n\n"

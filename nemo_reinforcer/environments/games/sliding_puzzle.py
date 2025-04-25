@@ -12,13 +12,33 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import ray
+import torch
+from typing import Dict, List, Tuple, Optional, TypedDict, Any
 import random
 import copy
-from typing import List, Tuple, Dict, Any, Optional
-from .game_interface import GameInterface
+
+from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
+from nemo_reinforcer.data.interfaces import LLMMessageLogType
+from nemo_reinforcer.environments.interfaces import (
+    EnvironmentInterface,
+    EnvironmentReturn,
+)
+from nemo_reinforcer.distributed.virtual_cluster import PY_EXECUTABLES
 
 
-class SlidingPuzzleGame(GameInterface):
+class SlidingPuzzleConfig(TypedDict):
+    size: int
+    shuffle_moves: int
+
+
+class SlidingPuzzleMetadata(TypedDict):
+    game_state: Dict[str, Any]  # Stores the dict returned by SlidingPuzzleGame methods
+    num_moves: int
+    max_moves: int
+
+
+class SlidingPuzzleGameLogic:
     @staticmethod
     def generate(config: Dict[str, Any]) -> Dict[str, Any]:
         """Generate a new Sliding Puzzle."""
@@ -62,11 +82,11 @@ class SlidingPuzzleGame(GameInterface):
             "solution": solution,
             "empty_pos": empty_pos,
             "commands": {
-                "slide r c": "Slide tile at row r, column c into the empty space",
                 "up": "Slide tile below empty space up",
                 "down": "Slide tile above empty space down",
                 "left": "Slide tile to the right of empty space left",
                 "right": "Slide tile to the left of empty space right",
+                "view": "View the current state of the board",
             },
         }
 
@@ -79,8 +99,8 @@ class SlidingPuzzleGame(GameInterface):
             f"\n===== SLIDING PUZZLE =====\n"
             f"Arrange the {size}x{size} grid by sliding tiles into the empty space.\n"
             f"- The goal is to arrange numbers from 1 to {size * size - 1} in order\n"
-            f"- Use 'slide r c' to slide a specific tile\n"
-            f"- Or use 'up', 'down', 'left', 'right' to slide in that direction"
+            f"- Use 'up', 'down', 'left', 'right' to slide in that direction\n"
+            f"- Use 'view' to see the current state of the board"
         )
 
     @staticmethod
@@ -94,7 +114,7 @@ class SlidingPuzzleGame(GameInterface):
 
         # Default return values
         response = "Unknown command. Type 'help' to see available commands."
-        reward = -0.05  # Small penalty for invalid actions
+        reward = 0.0  # No penalty for invalid actions
         is_terminated = False
 
         # Deep copy game state to avoid modifying the original
@@ -218,39 +238,167 @@ class SlidingPuzzleGame(GameInterface):
         return "\n".join(output)
 
 
-def is_solvable(grid: List[List[int]], size: int) -> bool:
-    """Check if a sliding puzzle is solvable."""
-    # Flatten the grid
-    flat = [num for row in grid for num in row if num != 0]
+class SlidingPuzzleRunner:
+    def __init__(self):
+        pass  # No initialization needed as game methods are static
 
-    # Count inversions
-    inversions = 0
-    for i in range(len(flat)):
-        for j in range(i + 1, len(flat)):
-            if flat[i] > flat[j]:
-                inversions += 1
+    def _parse_action(self, text: str) -> Optional[str]:
+        """Parses the action from '<action></action>'."""
+        prefix = "<action>"
+        suffix = "</action>"
+        # Find the prefix, case-insensitive, and potentially after some thought process
+        text_lower = text.lower()
+        prefix_lower = prefix.lower()
+        suffix_lower = suffix.lower()
 
-    # Find row of the empty tile (0) from the bottom
-    empty_row = 0
-    for i in range(size - 1, -1, -1):
-        for j in range(size):
-            if grid[i][j] == 0:
-                empty_row = size - i
-                break
+        start_idx = text_lower.rfind(prefix_lower)  # Find the last occurrence
 
-    # For odd-sized grids, the puzzle is solvable if the number of inversions is even
-    if size % 2 == 1:
-        return inversions % 2 == 0
-    # For even-sized grids, the puzzle is solvable if:
-    # (inversions odd and empty on even row from bottom) or (inversions even and empty on odd row from bottom)
-    else:
-        return (inversions % 2 == 1 and empty_row % 2 == 0) or (
-            inversions % 2 == 0 and empty_row % 2 == 1
+        if start_idx != -1:
+            # Find the end tag after the start tag
+            end_idx = text_lower.find(suffix_lower, start_idx + len(prefix_lower))
+            if end_idx != -1:
+                # Extract content between tags
+                action_content = text[start_idx + len(prefix) : end_idx].strip()
+                return action_content
+        return None
+
+    def process_turn(
+        self,
+        message_log: LLMMessageLogType,
+        metadata: SlidingPuzzleMetadata,
+    ) -> Tuple[
+        Dict[str, str],
+        float,
+        bool,
+        Optional[List[str]],
+        Optional[SlidingPuzzleMetadata],
+    ]:
+        """Processes a single turn for the sliding puzzle task."""
+        game_state = metadata["game_state"]
+        current_moves = metadata["num_moves"]
+        max_moves = metadata["max_moves"]
+
+        turn_reward = 0.0
+        is_terminated = False
+        next_stop_strings = ["</action>"]
+        next_metadata = metadata.copy()
+        next_observation_content = ""
+
+        # Check if max moves reached
+        if current_moves >= max_moves:
+            is_terminated = True
+            next_observation_content = (
+                f"<error>Maximum moves ({max_moves}) reached.</error>"
+            )
+            next_metadata = None
+            return (
+                {"role": "environment", "content": next_observation_content},
+                0.0,
+                is_terminated,
+                None,
+                next_metadata,
+            )
+
+        # Get last assistant message and parse action
+        last_assistant_msg_content = ""
+        if message_log and message_log[-1]["role"] == "assistant":
+            last_assistant_msg_content = message_log[-1]["content"].strip()
+
+        parsed_action = self._parse_action(last_assistant_msg_content)
+
+        if parsed_action is None:
+            rendered_board = SlidingPuzzleGameLogic.render(game_state)
+            next_observation_content = f"<environment>\n{rendered_board}\n\nInvalid response format no move made. Try <action></action> like this: <action>your_action</action></environment>"
+            next_metadata = None
+        elif parsed_action == "view":
+            rendered_board = SlidingPuzzleGameLogic.render(game_state)
+            next_observation_content = f"<environment>\n{rendered_board}\n\nViewing the board. No move made.</environment>"
+        else:
+            # Execute the game step
+            step_response, reward, game_over, next_game_state = (
+                SlidingPuzzleGameLogic.step(parsed_action, game_state)
+            )
+
+            turn_reward = reward
+            is_terminated = game_over
+            next_metadata["game_state"] = next_game_state
+            next_metadata["num_moves"] = current_moves + 1
+
+            next_observation_content = f"<environment>\n{step_response}\n</environment>"
+
+            if is_terminated:
+                next_metadata = None  # Clear metadata on termination
+
+        return (
+            {"role": "environment", "content": next_observation_content + "\n"},
+            turn_reward,
+            is_terminated,
+            next_stop_strings,
+            next_metadata,
         )
 
 
-def play_sliding_puzzle(config=None):
-    """Wrapper function for backward compatibility."""
-    from play_game import play_game
+@ray.remote
+class SlidingPuzzleEnv(EnvironmentInterface):
+    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
+    """Sliding Puzzle environment (Ray Actor)."""
 
-    play_game(SlidingPuzzleGame, config)
+    def __init__(self, cfg: Optional[SlidingPuzzleConfig] = None):
+        # cfg could contain game generation config like {'size': 3, 'shuffle_moves': 50}
+        self.game_config = cfg.get("game_config", {}) if cfg else {}
+        self.runner = SlidingPuzzleRunner()
+
+    def step(
+        self,
+        message_log_batch: List[LLMMessageLogType],
+        metadata_batch: List[SlidingPuzzleMetadata],
+    ) -> EnvironmentReturn:
+        """Processes a batch of sliding puzzle interactions."""
+        # Since logic is synchronous, process sequentially (can parallelize if logic becomes heavy)
+        results = [
+            self.runner.process_turn(log, meta)
+            for log, meta in zip(message_log_batch, metadata_batch)
+        ]
+
+        # Unpack results and format according to EnvironmentReturn NamedTuple
+        observations = []
+        rewards = []
+        terminateds = []
+        all_stop_strings = []
+        all_next_metadata = []
+
+        for obs, rew, term, stops, meta in results:
+            observations.append(obs)
+            rewards.append(rew)
+            terminateds.append(term)
+            all_stop_strings.append(stops)
+            all_next_metadata.append(meta)
+
+        rewards_tensor = torch.tensor(rewards, dtype=torch.float32)
+        terminated_tensor = torch.tensor(terminateds, dtype=torch.bool)
+
+        return EnvironmentReturn(
+            observations=observations,
+            metadata=all_next_metadata,
+            next_stop_strings=all_stop_strings,
+            rewards=rewards_tensor,
+            terminateds=terminated_tensor,
+        )
+
+    def shutdown(self):
+        pass
+
+    def global_post_process_and_metrics(
+        self, batch: BatchedDataDict
+    ) -> Tuple[BatchedDataDict, dict]:
+        # Calculate success rate based on final reward == 1.0
+        final_rewards = batch.get(
+            "total_reward", torch.tensor([0.0] * len(batch["idx"]))
+        )
+        success_rate = (
+            (final_rewards == 1.0).float().mean().item()
+            if len(final_rewards) > 0
+            else 0.0
+        )
+        # Could also calculate average number of moves for successful episodes, etc.
+        return batch, {"sliding_puzzle_success_rate": success_rate}

@@ -32,17 +32,17 @@ What you can expect:
 ✅ _Available now_ | 🔜 _Coming in v0.3_
 
 - ✅ **Fast Generation** - vLLM backend for optimized inference
-- ✅ **HuggingFace Integration** - Works with 1-8B models (Qwen1.5, Llama)
+- ✅ **HuggingFace Integration** - Works with 1-32B models (Qwen2.5, Llama)
 - ✅ **Distributed Training** - FSDP support and Ray-based infrastructure
 - ✅ **Environment Support** - Support for multi-environment training.
-- ✅ **Learning Algorithms** - GRPO (Group Relative Policy Optimization) and SFT (Supervised Fine-Tuning)
+- ✅ **Learning Algorithms** - GRPO (Group Relative Policy Optimization), SFT (Supervised Fine-Tuning), and DPO (Direct Preference Optimization)
+- ✅ **Multi-Turn RL** - multi-turn generation and training for RL with tool use, games, etc. 
+- ✅ **Large Model Support** - Native PyTorch support for models up to 32B parameters
+- ✅ **Advanced Parallelism** - FSDP2, TP, and SP for efficient training
 - ✅ **Worker Isolation** - Process isolation between RL Actors (no worries about global state)
-
-- ✅ **DPO Algorithm** - Direct Preference Optimization for alignment
-- ✅ **Larger Model Support** - Native PyTorch support for models up to 32B parameters
-- ✅ **Advanced Parallelism** - FSDP2, TP, SP, and sequence packing for efficient training
 - ✅ **Environment Isolation** - Dependency isolation between components
 
+- 🔜 **(Even) Larger Model Support** - Native PyTorch & Megatron
 - 🔜 **Improved Native Performance** - Improve training time for Native Pytorch Models
 - 🔜 **Megatron Policy** - Support advanced parallelism in training with Megatron Core
 - 🔜 **Megatron Inference** - Support Megatron Inference for day-0 support for new megatron models
@@ -143,6 +143,12 @@ sbatch \
     --time=4:0:0 \
     --gres=gpu:8 \
     ray.sub
+```
+
+We also support multi-turn generation and training (tool use, games, etc.).
+Reference example for training to play a Sliding Puzzle Game:
+```sh
+uv run python examples/run_grpo_sliding_puzzle.py 
 ```
 
 ### SFT
