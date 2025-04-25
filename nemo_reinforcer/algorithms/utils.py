@@ -383,7 +383,7 @@ def save_checkpoint(
             optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
             tokenizer_path=os.path.join(checkpoint_path, "policy", "tokenizer"),
             save_torch_dist=save_torch_dist,
-            save_hf=save_hf,  # is_last_checkpoint,
+            save_hf=save_hf,
         )
         torch.save(
             train_dataloader.state_dict(),

@@ -522,11 +522,10 @@ def grpo_train(
                     checkpointer,
                     master_config,
                     grpo_save_state,
-                    step,
+                    step + 1,
                     dataloader,
                     policy,
                     timer,
-                    save_torch_dist=True,
                     save_hf=is_last_checkpoint,
                 )
                 saved_final_checkpoint = is_last_checkpoint

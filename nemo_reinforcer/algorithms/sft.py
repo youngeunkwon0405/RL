@@ -465,7 +465,6 @@ def sft_train(
                         train_dataloader,
                         policy,
                         timer,
-                        save_torch_dist=True,
                         save_hf=is_last_checkpoint,
                     )
                     saved_final_checkpoint = is_last_checkpoint
