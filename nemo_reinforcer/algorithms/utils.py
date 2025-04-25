@@ -127,6 +127,11 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
+def masked_global_mean(values, mask, normalization_factor):
+    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
+    return torch.sum(values * mask) / (normalization_factor + 1e-8)
+
+
 def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
     """Get the tokenizer and set pad token to eos token if it is not already set.
 
@@ -201,8 +206,3 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
         print("No chat template provided, using tokenizer's default")
 
     return tokenizer
-
-
-def masked_global_mean(values, mask, normalization_factor):
-    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
-    return torch.sum(values * mask) / (normalization_factor + 1e-8)

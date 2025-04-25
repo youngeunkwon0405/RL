@@ -272,9 +272,6 @@ class FSDP1PolicyWorker:
                     torch.distributed.all_reduce(normalization_factor)
                 elif loss_fn.loss_type == LossType.SAMPLE_LEVEL:
                     ## get number of valid samples in the global batch
-                    assert "sample_mask" in data, (
-                        "sample_mask must be present in the data when using sample-level loss"
-                    )
                     normalization_factor = torch.sum(data["sample_mask"])
                     torch.distributed.all_reduce(normalization_factor)
                 else:
