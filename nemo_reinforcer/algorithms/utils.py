@@ -119,17 +119,17 @@ def surpress_user_warnings(f):
     return wrapper
 
 
+def masked_global_mean(values, mask, normalization_factor):
+    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
+    return torch.sum(values * mask) / (normalization_factor + 1e-8)
+
+
 def set_seed(seed: int):
     """Sets the seed for python, numpy, and pytorch."""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-
-
-def masked_global_mean(values, mask, normalization_factor):
-    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
-    return torch.sum(values * mask) / (normalization_factor + 1e-8)
 
 
 def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
