@@ -12,6 +12,8 @@ description = "Nemo-Reinforcer: A Scalable and Efficient Post-Training Library f
 requires-python = ">=3.10"
 license = {text = "Apache 2.0"}
 dependencies = [
+    # setuptools is here just so we can install TE
+    "setuptools",
     "torch==2.6.0",
     "colored==2.2.3",
     "ray[default]==2.43.0",
@@ -39,21 +41,22 @@ readme = {file = "README.md", content-type = "text/markdown"}
 [tool.uv.sources]
 megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
 #transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", tag = "v1.13"}
-transformer-engine = { path = "3rdparty/TransformerEngine" }
+#transformer-engine = { path = "3rdparty/TransformerEngine" }
 
 
 
 [tool.uv]
 #default-groups = ["build"] # (maybe don't need?)
-#no-build-isolation-package = ["transformer-engine"]
+no-build-isolation-package = ["transformer-engine"]
 
 [project.optional-dependencies]
 vllm = [
     "vllm==0.8.4",
 ]
 mcore = [
-    "megatron-core",
-    # For TE, need to build with --no-build-isolation
+    #"megatron-core",
+    
+
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
     # wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
     # sudo dpkg -i cuda-keyring_1.1-1_all.deb
@@ -67,9 +70,7 @@ mcore = [
     #    i guess 2.1.0 is too new...
     # 2. uv pip install transformer-engine[pytorch]==1.13.0 --no-build-isolation
     #    so this works. but not sure about the below
-    #"transformer-engine[pytorch]==1.13.0",
-    # 3. trying from git to trigger the build
-    "transformer-engine[pytorch]",
+    "transformer-engine[pytorch]==1.13.0",
 ]
 
 # https://docs.astral.sh/uv/concepts/projects/config/#build-isolation
