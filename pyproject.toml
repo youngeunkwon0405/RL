@@ -38,21 +38,47 @@ readme = {file = "README.md", content-type = "text/markdown"}
 
 [tool.uv.sources]
 megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
+transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", tag = "v1.13"}
 
 [tool.uv]
-default-groups = ["build"]
-no-build-isolation-package = ["transformer-engine"]
+#default-groups = ["build"] # (maybe don't need?)
+#no-build-isolation-package = ["transformer-engine"]
 
 [project.optional-dependencies]
 vllm = [
     "vllm==0.8.4",
 ]
-
-[dependency-groups]
+torch = ["torch==2.6.0"]
 mcore = [
     "megatron-core",
-    "transformer-engine",
+    # For TE, need to build with --no-build-isolation
+    # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
+    # wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
+    # sudo dpkg -i cuda-keyring_1.1-1_all.deb
+    # sudo apt-get update
+    # sudo apt-get install cudnn-cuda-12
+    #
+    # 1. uv pip install transformer-engine[pytorch] --no-build-isolation
+    #    works, but get: RuntimeError: /TransformerEngine/transformer_engine/common/gemm/cublaslt_gemm.cu:287 in function cublas_gemm: cuBLAS Error: an unsupported value or parameter was passed to the function
+    #    related: https://github.com/NVIDIA/TransformerEngine/issues/1585
+    #    i guess 2.2.0 is too new?
+    #    i guess 2.1.0 is too new...
+    # 2. uv pip install transformer-engine[pytorch]==1.13.0 --no-build-isolation
+    #    so this works. but not sure about the below
+    #"transformer-engine[pytorch]==1.13.0",
+    # 3. trying from git to trigger the build
+    "transformer-engine[pytorch]",
 ]
+
+# https://docs.astral.sh/uv/concepts/projects/config/#build-isolation
+# NOTE: this doesn't seem to recognize the extra for pytorch
+[[tool.uv.dependency-metadata]]
+name = "transformer-engine"
+#version = "1.13.0"
+requires-dist = ["setuptools", "torch", "einops"]
+provides-extras = ["pytorch"]
+
+[dependency-groups]
 
 build = [
     "torch==2.6.0",
