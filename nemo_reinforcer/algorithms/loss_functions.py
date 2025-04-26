@@ -339,7 +339,7 @@ class DPOLossFn(LossFunction):
     def split_output_tensor(self, tensor: torch.Tensor):
         return tensor[::2], tensor[1::2]
 
-    def preference_loss(
+    def preference_loss_fn(
         self, next_token_logits: torch.Tensor, data: BatchedDataDict[DPOLossDataDict]
     ) -> torch.Tensor:
         ## TODO(@ashors): there's some duplicate code here with the NLLLoss function. We should refactor
@@ -379,11 +379,12 @@ class DPOLossFn(LossFunction):
         elif (
             self.preference_loss == "rpo_bwd_kl" or self.preference_loss == "rpo_fwd_kl"
         ):
+            gt_rewards = data["rewards"]
             logbeta_hat_chosen = torch.nn.functional.logsigmoid(
-                self.ref_policy_kl_penalty * rewards_delta
+                self.reference_policy_kl_penalty * rewards_delta
             )
             logbeta_hat_rejected = torch.nn.functional.logsigmoid(
-                -self.ref_policy_kl_penalty * rewards_delta
+                -self.reference_policy_kl_penalty * rewards_delta
             )
 
             chosen_gt_rewards, reject_gt_rewards = self.split_output_tensor(gt_rewards)
@@ -408,19 +409,20 @@ class DPOLossFn(LossFunction):
                 )
 
         elif self.preference_loss == "rpo_sq":
+            gt_rewards = data["rewards"]
             chosen_gt_rewards, reject_gt_rewards = self.split_output_tensor(gt_rewards)
             gt_rewards_delta = self.gt_reward_scale * (
                 chosen_gt_rewards - reject_gt_rewards
             )
 
             per_sample_loss = (
-                self.ref_policy_kl_penalty * rewards_delta - gt_rewards_delta
+                self.reference_policy_kl_penalty * rewards_delta - gt_rewards_delta
             ) ** 2
         elif self.preference_loss == "ipo":
             per_sample_loss = (
                 rewards_chosen
                 - rewards_rejected
-                - 1.0 / (2.0 * self.ref_policy_kl_penalty)
+                - 1.0 / (2.0 * self.reference_policy_kl_penalty)
             ) ** 2
         else:
             raise NotImplementedError(
@@ -453,7 +455,7 @@ class DPOLossFn(LossFunction):
             accuracy,
             rewards_chosen_mean,
             rewards_rejected_mean,
-        ) = self.preference_loss(next_token_logits, data)
+        ) = self.preference_loss_fn(next_token_logits, data)
 
         dpo_loss = (
             self.sft_loss_weight * sft_loss_chosen

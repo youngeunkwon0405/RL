@@ -168,6 +168,8 @@ def dpo_preprocessor(
         "extra_env_info": None,
         "loss_multiplier": loss_multiplier,
         "idx": idx,
+        "chosen_reward": datum_dict["chosen_reward"],
+        "rejected_reward": datum_dict["rejected_reward"],
     }
     return output
 

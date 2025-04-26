@@ -205,6 +205,7 @@ def dpo_collate_fn(
     loss_multiplier = []
     idx = []
     task_names = []
+    rewards = []
     for datum_spec in data_batch:
         ## interleave chosen and rejected examples
         message_log.append(datum_spec["message_log_chosen"])
@@ -214,6 +215,7 @@ def dpo_collate_fn(
         loss_multiplier.extend([datum_spec["loss_multiplier"]] * 2)
         idx.extend([datum_spec["idx"]] * 2)
         task_names.extend([datum_spec.get("task_name", None)] * 2)
+        rewards.extend([datum_spec["chosen_reward"], datum_spec["rejected_reward"]])
     length = torch.tensor(length)
     loss_multiplier = torch.tensor(loss_multiplier)
 
@@ -226,6 +228,7 @@ def dpo_collate_fn(
         task_name=task_names,
         idx=idx,
         batch_max_length=batch_max_length,
+        rewards=rewards,
     )
 
     ## add loss mask based on role to every message
@@ -246,6 +249,7 @@ def dpo_collate_fn(
             "input_lengths": input_lengths,
             "token_mask": cat_and_padded["token_loss_mask"],
             "sample_mask": loss_multiplier,
+            "rewards": torch.tensor(rewards),
         }
     )
 
