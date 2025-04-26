@@ -39,7 +39,7 @@ from nemo_reinforcer.models.generation.interfaces import (
 )
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.modeling_utils import _get_tied_weight_keys
+from transformers.integrations.accelerate import find_tied_parameters
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
@@ -229,7 +229,7 @@ class FSDP1PolicyWorker:
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
-        num_tied_weights = len(_get_tied_weight_keys(self.model))
+        num_tied_weights = len(find_tied_parameters(self.model))
         skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
         if num_tied_weights != 0 and not skip_tie_check:
             raise ValueError(
@@ -312,9 +312,18 @@ class FSDP1PolicyWorker:
                 # Clip gradients
                 grad_norm = None
                 if not eval_mode:
-                    grad_norm = torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), max_norm=self.cfg["max_grad_norm"]
-                    )
+                    if isinstance(self.model, FullyShardedDataParallel):
+                        # when using FSDP1, use FSDP's clip_grad_norm_
+                        # to ensure grad norm is being computed over all parameters
+                        # see https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.FullyShardedDataParallel.clip_grad_norm_
+                        grad_norm = self.model.clip_grad_norm_(
+                            max_norm=self.cfg["max_grad_norm"]
+                        )
+                    else:
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), max_norm=self.cfg["max_grad_norm"]
+                        )
+                    grad_norm = grad_norm.cpu()
 
                     # Update parameters
                     self.optimizer.step()
