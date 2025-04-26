@@ -38,7 +38,10 @@ readme = {file = "README.md", content-type = "text/markdown"}
 
 [tool.uv.sources]
 megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
-transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", tag = "v1.13"}
+#transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", tag = "v1.13"}
+transformer-engine = { path = "3rdparty/TransformerEngine" }
+
+
 
 [tool.uv]
 #default-groups = ["build"] # (maybe don't need?)
@@ -48,7 +51,6 @@ transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", 
 vllm = [
     "vllm==0.8.4",
 ]
-torch = ["torch==2.6.0"]
 mcore = [
     "megatron-core",
     # For TE, need to build with --no-build-isolation
@@ -72,11 +74,11 @@ mcore = [
 
 # https://docs.astral.sh/uv/concepts/projects/config/#build-isolation
 # NOTE: this doesn't seem to recognize the extra for pytorch
-[[tool.uv.dependency-metadata]]
-name = "transformer-engine"
-#version = "1.13.0"
-requires-dist = ["setuptools", "torch", "einops"]
-provides-extras = ["pytorch"]
+#[[tool.uv.dependency-metadata]]
+#name = "transformer-engine"
+##version = "1.13.0"
+#requires-dist = ["setuptools", "torch", "einops"]
+#provides-extras = ["pytorch"]
 
 [dependency-groups]
 

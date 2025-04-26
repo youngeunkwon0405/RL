@@ -1,5 +1,5 @@
 export PATH=/usr/bin:$PATH
-set -x
+set -xeu
 
 rm -rf .venv
 uv sync
