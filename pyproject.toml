@@ -36,12 +36,24 @@ packages = ["nemo_reinforcer"]
 version = {attr = "nemo_reinforcer.__version__"}  # any module attribute compatible with ast.literal_eval
 readme = {file = "README.md", content-type = "text/markdown"}
 
+[tool.uv.sources]
+megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
+
+[tool.uv]
+default-groups = ["build"]
+no-build-isolation-package = ["transformer-engine"]
+
 [project.optional-dependencies]
 vllm = [
     "vllm==0.8.4",
 ]
 
 [dependency-groups]
+mcore = [
+    "megatron-core",
+    "transformer-engine",
+]
+
 build = [
     "torch==2.6.0",
     "setuptools",
@@ -103,7 +115,7 @@ convention = "google"
 # Ignore all files that end in `_test.py`.
 "*_test.py" = ["D"]
 
-[tool.uv]
+#[tool.uv]
 # Users may use different link-modes depending on their scenario:
 #  --link-mode=hardlink (default on linux; may get warnings about switching to --link-mode copy if uv cache and venv on different file-systems)
 #  --link-mode=copy (slower but more reliable; supresses warning)
