@@ -208,7 +208,7 @@ def setup_megatron_model(
 
 @ray.remote
 class MegatronPolicyWorker:
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
+    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.MCORE
 
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
@@ -245,7 +245,7 @@ class MegatronPolicyWorker:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
         # Check if the checkpoint already exists
-        output_path = f"/opt/checkpoints/tron/{hf_model_name}"
+        output_path = f"/tmp/checkpoints/tron/{hf_model_name}"
         pt_checkpoint_exists = os.path.exists(output_path) and os.path.exists(
             os.path.join(output_path, "iter_0000000")
         )
@@ -260,7 +260,7 @@ class MegatronPolicyWorker:
                     print(f"Importing model {hf_model_name} to {output_path}...")
                     importer = HFLlamaImporter(
                         hf_model_name,
-                        output_path=f"/opt/checkpoints/tron/{hf_model_name}",
+                        output_path=f"/tmp/checkpoints/tron/{hf_model_name}",
                     )
                 elif "qwen" in hf_model_name.lower():
                     from nemo.tron.converter.qwen import HFQwen2Importer
@@ -268,7 +268,7 @@ class MegatronPolicyWorker:
                     print(f"Importing model {hf_model_name} to {output_path}...")
                     importer = HFQwen2Importer(
                         hf_model_name,
-                        output_path=f"/opt/checkpoints/tron/{hf_model_name}",
+                        output_path=f"/tmp/checkpoints/tron/{hf_model_name}",
                     )
                 else:
                     raise ValueError(f"Unknown model: {hf_model_name}")
@@ -281,7 +281,7 @@ class MegatronPolicyWorker:
             pre_init_communication_queue.get()
             pre_init_communication_queue.put(True)
 
-        pretrained_ckpt = f"/opt/checkpoints/tron/{hf_model_name}"
+        pretrained_ckpt = f"/tmp/checkpoints/tron/{hf_model_name}"
         pretrained_run_config = os.path.join(
             pretrained_ckpt, "iter_0000000/run_config.yaml"
         )

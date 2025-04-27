@@ -9,14 +9,18 @@ dynamic = [
     "readme",
 ]
 description = "Nemo-Reinforcer: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
     # setuptools is here just so we can install TE
     "setuptools",
+    # for mcore (may need to uv pip install pybind11 for some reason; need to double check if needed)
+    "pybind11",
     "torch==2.6.0",
     "colored==2.2.3",
     "ray[default]==2.43.0",
+    # TODO(needed for latest vllm if bumping torch)
+    #"ray[default]==2.45.0",  # 4883bd5f66086771574a2f4f990effc505f569bc ( from docker container)
     "transformers",
     "wandb",
     "numpy",
@@ -39,24 +43,26 @@ version = {attr = "nemo_reinforcer.__version__"}  # any module attribute compati
 readme = {file = "README.md", content-type = "text/markdown"}
 
 [tool.uv.sources]
-megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
+#megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
+# Using this instead of ^ b/c pybind command doesn't use sys.executable ( but need to double check since i changed lots)
+# also had to do editable b/c make file didn't seem to get copied over
+megatron-core = { path = "3rdparty/Megatron-LM", editable = true }
+nemo-tron = { path = "3rdparty/NeMo/nemo" }  # seems to difficult to get the subpackages right
+
 #transformer-engine = { git = "https://github.com/NVIDIA/TransformerEngine.git", tag = "v1.13"}
 #transformer-engine = { path = "3rdparty/TransformerEngine" }
 
 
-
 [tool.uv]
-#default-groups = ["build"] # (maybe don't need?)
 no-build-isolation-package = ["transformer-engine"]
+# TODO(only if ray==2.45.0): For now, don't install ray b/c 2.45 is not published yet
+#override-dependencies = ["ray; sys_platform == 'never'"]
 
 [project.optional-dependencies]
 vllm = [
     "vllm==0.8.4",
 ]
 mcore = [
-    #"megatron-core",
-    
-
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
     # wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
     # sudo dpkg -i cuda-keyring_1.1-1_all.deb
@@ -70,7 +76,12 @@ mcore = [
     #    i guess 2.1.0 is too new...
     # 2. uv pip install transformer-engine[pytorch]==1.13.0 --no-build-isolation
     #    so this works. but not sure about the below
+
     "transformer-engine[pytorch]==1.13.0",
+    "megatron-core",
+    "nemo-tron",
+    
+
 ]
 
 # https://docs.astral.sh/uv/concepts/projects/config/#build-isolation
