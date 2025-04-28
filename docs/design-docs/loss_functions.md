@@ -1,7 +1,7 @@
 # Loss functions in NeMo-RL
 
 Loss functions in NeMo-RL are specially designed to ensure that full batch training is equivalent to training with gradient accumulation. To understand
-why special care needs to be taken here, consider the following example of a simple loss function that takes the average of some loss over all tokens in a microbatch, and then averages loss over the microbatches.
+why special care needs to be taken here, consider the following example of a simple loss function that takes the average of some per-token loss over all tokens in a microbatch, and then averages loss over the microbatches.
 
 Suppose we have a global batch with 16 unmasked tokens. The first 10 unmasked tokens come from the first half of the samples in the batch, and the last 6 come from the second half. If training with one global batch,
 
@@ -21,7 +21,7 @@ In NeMo-RL, this information is passed to the loss function directly. Each loss 
 
 For our simple example above, this would look like:
 
-```python
+```{testcode}
 from typing import Tuple
 
 import torch
@@ -42,7 +42,7 @@ class SimpleAverageLoss(LossFunction):
     def __call__(
         self,
         next_token_losses: torch.Tensor,
-        data: BatchedDataDict[SimpleAverageLossDataDict],
+        data: BatchedDataDict,
         normalization_factor: torch.Tensor,
     ) -> Tuple[torch.Tensor, dict]:
         """Compute the simple average loss with proper microbatch handling."""
@@ -57,4 +57,45 @@ class SimpleAverageLoss(LossFunction):
         # will give us the right normalization factor automatically.
         loss = (next_token_losses * mask).sum() / (normalization_factor + 1e-8)
         return loss
+
+## test out the loss function
+import torch
+
+## in this example, we have a batch of size 2 with a sequence length of 16
+batch_size = 2
+seq_len = 16
+next_token_losses = torch.randn((batch_size, seq_len))
+sample_data = {
+    "token_mask": torch.tensor(
+        [
+            [1] * 10 + [0] * 6,
+            [1] * 6 + [0] * 10,
+        ]
+    ),
+    "sample_mask": torch.ones(2)
+}
+normalization_factor = torch.sum(sample_data["token_mask"] * sample_data["sample_mask"].unsqueeze(-1))
+
+loss_fn = SimpleAverageLoss()
+loss_no_microbatching = loss_fn(next_token_losses, sample_data, normalization_factor)
+
+microbatch_1_data = {
+    "token_mask": sample_data["token_mask"][:1],
+    "sample_mask": sample_data["sample_mask"][:1],
+}
+microbatch_2_data = {
+    "token_mask": sample_data["token_mask"][1:],
+    "sample_mask": sample_data["sample_mask"][1:],
+}
+loss_with_microbatching = (
+    loss_fn(next_token_losses[:1], microbatch_1_data, normalization_factor)
+    + loss_fn(next_token_losses[1:], microbatch_2_data, normalization_factor)
+)
+
+assert loss_no_microbatching == loss_with_microbatching
+```
+
+<!-- This testoutput is intentionally empty-->
+```{testoutput}
+:hide:
 ```
