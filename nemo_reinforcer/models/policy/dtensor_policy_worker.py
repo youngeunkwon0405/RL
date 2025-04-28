@@ -25,7 +25,7 @@ from torch.distributed.fsdp import (
     FSDPModule,
 )
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.integrations.accelerate import find_tied_parameters
+# from transformers.integrations.accelerate import find_tied_parameters
 from nemo_reinforcer.models.dtensor.parallelize import _parallelize_model
 
 from nemo_reinforcer.algorithms.interfaces import LossFunction
@@ -256,16 +256,16 @@ class DTensorPolicyWorker:
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
-        num_tied_weights = len(find_tied_parameters(self.model))
-        skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
-        if (
-            num_tied_weights != 0
-            and self.cfg["dtensor_cfg"]["tensor_parallel_size"] > 1
-            and not skip_tie_check
-        ):
-            raise ValueError(
-                f"Using dtensor policy with tp size {self.cfg['dtensor_cfg']['tensor_parallel_size']} for model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
-            )
+        # num_tied_weights = len(find_tied_parameters(self.model))
+        # skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
+        # if (
+        #     num_tied_weights != 0
+        #     and self.cfg["dtensor_cfg"]["tensor_parallel_size"] > 1
+        #     and not skip_tie_check
+        # ):
+        #     raise ValueError(
+        #         f"Using dtensor policy with tp size {self.cfg['dtensor_cfg']['tensor_parallel_size']} for model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
+        #     )
 
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]

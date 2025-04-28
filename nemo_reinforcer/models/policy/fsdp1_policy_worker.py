@@ -39,7 +39,7 @@ from nemo_reinforcer.models.generation.interfaces import (
 )
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.integrations.accelerate import find_tied_parameters
+# from transformers.integrations.accelerate import find_tied_parameters
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (
@@ -229,12 +229,12 @@ class FSDP1PolicyWorker:
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
-        num_tied_weights = len(find_tied_parameters(self.model))
-        skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
-        if num_tied_weights != 0 and not skip_tie_check:
-            raise ValueError(
-                f"Using FSP1 with a model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
-            )
+        # num_tied_weights = len(find_tied_parameters(self.model))
+        # skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
+        # if num_tied_weights != 0 and not skip_tie_check:
+        #     raise ValueError(
+        #         f"Using FSP1 with a model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={num_tied_weights}) is not supported (https://github.com/NVIDIA/reinforcer/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
+        #     )
 
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]

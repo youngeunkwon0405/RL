@@ -270,6 +270,14 @@ class MegatronPolicyWorker:
                         hf_model_name,
                         output_path=f"/opt/checkpoints/tron/{hf_model_name}",
                     )
+                elif "deepseek" in hf_model_name.lower():
+                    from nemo.tron.converter.deepseek import HFDeepSeekImporter
+
+                    print(f"Importing model {hf_model_name} to {output_path}...")
+                    importer = HFDeepSeekImporter(
+                        hf_model_name,
+                        output_path=f"/opt/checkpoints/tron/{hf_model_name}",
+                    )
                 else:
                     raise ValueError(f"Unknown model: {hf_model_name}")
                 importer.apply()
@@ -308,6 +316,7 @@ class MegatronPolicyWorker:
         model_cfg.fp16 = self.dtype == torch.float16
         model_cfg.params_dtype = torch.bfloat16  # amp
         model_cfg.parallel_output = True
+        model_cfg.make_vocab_size_divisible_by = 128
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
@@ -712,6 +721,7 @@ class MegatronPolicyWorker:
                 - logprobs: Log probabilities for each token
                 - generation_lengths: Lengths of each response
         """
+        print("Generating 1")
         # self.model.config.flash_decode = True
         # Verify input is right padded
         assert isinstance(data, BatchedDataDict), (
@@ -723,6 +733,7 @@ class MegatronPolicyWorker:
         is_right_padded, error_msg = verify_right_padding(
             data, pad_value=self.tokenizer.pad_token_id
         )
+        print("Generating 2")
         if not is_right_padded:
             warnings.warn(
                 f"Input to Megatron Generation worker is not properly right-padded: {error_msg}"
@@ -738,18 +749,22 @@ class MegatronPolicyWorker:
             inference_max_seq_length=self.cfg["generation"]["max_new_tokens"],
             inference_max_requests=self.cfg["generation_batch_size"],
         )
+        print("Generating 3")
 
         inference_wrapped_model = ModelInferenceWrapperServer(
             self.model, inference_wrapper_config
         )
+        print("Generating 4")
         text_generation_controller = TextGenerationController(
             inference_wrapped_model=inference_wrapped_model,
             tokenizer=self.megatron_tokenizer,
         )
+        print("Generating 5")
         inference_engine = StaticInferenceEngine(
             text_generation_controller=text_generation_controller,
             max_batch_size=self.cfg["generation_batch_size"],
         )
+        print("Generating 6")
 
         # apply chat template
         out = run_mcore_engine(
@@ -759,12 +774,14 @@ class MegatronPolicyWorker:
             tokens_to_generate=self.cfg["generation"]["max_new_tokens"]
             - data.get("input_ids").size(1),
         )
+        print("Generating 7")
         # print(out)
 
         input_lengths = data.get("input_lengths")
         # pad the out "tokens" and "logprobs" and make them into tensors from lists
         batch_size = data.get("input_ids").size(0)
         max_seq_len = max([len(tokens) for tokens in out["tokens"]])
+        print("Generating 8")
 
         # Create padded tensors for tokens and logprobs
         output_ids_padded = torch.full(
@@ -773,12 +790,14 @@ class MegatronPolicyWorker:
             dtype=torch.long,
             device=data.get("input_ids").device,
         )
+        print("Generating 9")
 
         logprobs_padded = torch.zeros(
             (batch_size, max_seq_len),
             dtype=torch.float,
             device=data.get("input_ids").device,
         )
+        print("Generating 10")
 
         # Fill in the padded tensors with actual values
         for i in range(batch_size):
@@ -793,6 +812,7 @@ class MegatronPolicyWorker:
                 dtype=torch.float,
                 device=data.get("input_ids").device,
             )
+        print("Generating 11")
 
         out_dict = {
             "output_ids": output_ids_padded,
@@ -804,8 +824,10 @@ class MegatronPolicyWorker:
                 [len(o) for o in out["logprobs"]]
             ),
         }
+        print("Generating 12")
 
         self.model.config.flash_decode = False
+        print("Generating 13")
         return BatchedDataDict.from_batches([out_dict]).to("cpu")
 
     def zero_out_weights(self):
