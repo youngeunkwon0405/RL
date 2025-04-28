@@ -259,20 +259,25 @@ class FSDP1PolicyWorker:
             losses = []
             all_mb_metrics = []
             for gb_start in range(0, dataset_size, local_gbs):
-                assert "sample_mask" in data, "sample_mask must be present in the data!"
+                global_batch = data.slice(gb_start, gb_start + local_gbs)
+
+                assert "sample_mask" in global_batch, (
+                    "sample_mask must be present in the data!"
+                )
                 ## get the normalization factor for the loss
                 if loss_fn.loss_type == LossType.TOKEN_LEVEL:
-                    assert "token_mask" in data, (
+                    assert "token_mask" in global_batch, (
                         "token_mask must be present in the data when using token-level loss"
                     )
                     ## get number of tokens in the global batch
                     normalization_factor = torch.sum(
-                        data["token_mask"][:, 1:] * data["sample_mask"].unsqueeze(-1)
+                        global_batch["token_mask"][:, 1:]
+                        * global_batch["sample_mask"].unsqueeze(-1)
                     )
                     torch.distributed.all_reduce(normalization_factor)
                 elif loss_fn.loss_type == LossType.SAMPLE_LEVEL:
                     ## get number of valid samples in the global batch
-                    normalization_factor = torch.sum(data["sample_mask"])
+                    normalization_factor = torch.sum(global_batch["sample_mask"])
                     torch.distributed.all_reduce(normalization_factor)
                 else:
                     raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
@@ -285,9 +290,7 @@ class FSDP1PolicyWorker:
                 # so its safe to not check for the case where the last data slice is smaller than mbs
                 num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
 
-                for mb in data.slice(
-                    gb_start, gb_start + local_gbs
-                ).make_microbatch_iterator(mbs):
+                for mb in global_batch.make_microbatch_iterator(mbs):
                     input_ids = mb.get("input_ids")
 
                     input_lengths = mb.get("input_lengths")
