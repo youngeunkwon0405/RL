@@ -39,7 +39,8 @@ from nemo_reinforcer.models.generation.interfaces import (
 )
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from transformers.integrations.accelerate import find_tied_parameters
+
+# from transformers.integrations.accelerate import find_tied_parameters
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.models.policy.utils import import_class_from_path
 from nemo_reinforcer.distributed.virtual_cluster import (

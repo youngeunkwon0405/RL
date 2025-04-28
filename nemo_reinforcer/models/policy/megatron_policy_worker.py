@@ -227,7 +227,8 @@ class MegatronPolicyWorker:
         checkpoint_dir: str,
         worker_sharding_annotations: NamedSharding,
         pre_init_communication_queue: Queue,
-        load_reference_model: bool = True,
+        init_reference_model: bool = True,
+        init_optimizer: bool = True,
     ):
         self.cfg = config
         self.checkpoint_dir = checkpoint_dir
@@ -360,14 +361,14 @@ class MegatronPolicyWorker:
             self.optimizer,
             self.scheduler,
             self.checkpointing_context,
-        ) = setup_megatron_model(self.megatron_cfg, load_optimizer=True)
+        ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
         for name, item in self.model.state_dict().items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device="cpu", non_blocking=True, copy=True)
             self.model.state_dict()[name] = item
 
-        if load_reference_model:
+        if init_reference_model:
             ref_ckpt_context = _init_checkpointing_context(ref_checkpoint_config)
             reference_model = get_model_from_config(
                 self.megatron_cfg.model_config,
@@ -698,6 +699,7 @@ class MegatronPolicyWorker:
         return_data["reference_logprobs"] = reference_logprobs["logprobs"].cpu()
         return return_data
 
+    @torch.no_grad()
     def generate(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
@@ -712,7 +714,7 @@ class MegatronPolicyWorker:
                 - logprobs: Log probabilities for each token
                 - generation_lengths: Lengths of each response
         """
-        # self.model.config.flash_decode = True
+        self.model.config.flash_decode = True
         # Verify input is right padded
         assert isinstance(data, BatchedDataDict), (
             f"data must be a BatchedDataDict, got type: {type(data)}"
@@ -732,15 +734,22 @@ class MegatronPolicyWorker:
         inference_wrapper_config = InferenceWrapperConfig(
             hidden_size=model_cfg.hidden_size,
             inference_batch_times_seqlen_threshold=1000000,
-            fp32_residual_connection=False,
+            fp32_residual_connection=model_cfg.fp32_residual_connection,
             params_dtype=model_cfg.params_dtype,
             padded_vocab_size=self.final_padded_vocab_size,  # Use the potentially updated value
             inference_max_seq_length=self.cfg["generation"]["max_new_tokens"],
             inference_max_requests=self.cfg["generation_batch_size"],
         )
 
-        inference_wrapped_model = ModelInferenceWrapperServer(
-            self.model, inference_wrapper_config
+        from megatron.core.inference.model_inference_wrappers.gpt.gpt_inference_wrapper import (
+            GPTInferenceWrapper,
+        )
+        from megatron.core.inference.contexts import StaticInferenceContext
+
+        inference_context = StaticInferenceContext.from_config(inference_wrapper_config)
+
+        inference_wrapped_model = GPTInferenceWrapper(
+            self.model, inference_wrapper_config, inference_context
         )
         text_generation_controller = TextGenerationController(
             inference_wrapped_model=inference_wrapped_model,
@@ -751,9 +760,15 @@ class MegatronPolicyWorker:
             max_batch_size=self.cfg["generation_batch_size"],
         )
 
+        # detokenize the prompts
+        # detokenized_prompts = [
+        # self.tokenizer.decode(prompt)
+        # for prompt in data.get("input_ids")
+        # ]
         # apply chat template
         out = run_mcore_engine(
             engine=inference_engine,
+            # prompts = detokenized_prompts,
             prompt_tokens_tensor=data.get("input_ids"),
             prompt_lengths_tensor=data.get("input_lengths"),
             tokens_to_generate=self.cfg["generation"]["max_new_tokens"]
@@ -826,8 +841,34 @@ class MegatronPolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def get_weight_ipc_handles(self, offload_model=True):
-        pass
+    def get_weights_ipc_handles(self, keys):
+        from torch.distributed.tensor import DTensor
+        from torch.multiprocessing.reductions import reduce_tensor
+
+        converted_params = {}
+        for key in keys:
+            # Get full_tensor for dtensor (GPU > 1)
+            tensor = self._held_sharded_state_dict_reference[key]
+            if isinstance(tensor, DTensor):
+                full_tensor = tensor.full_tensor()
+            else:
+                full_tensor = tensor
+            # Convert parameters to the configured dtype
+            converted_params[key] = full_tensor.to(self.dtype, non_blocking=True)
+
+        # Temporary record the full tensor for cleanup
+        # It is needed for cleanup the last full_tensor in the refit process
+        self._held_streamed_param_reference = converted_params
+
+        # Get device UUID for IPC
+        device_uuid = self.report_device_id()
+        # Create handles for the tensors
+        all_handles = []
+        for key, p in converted_params.items():
+            handle = reduce_tensor(p.detach())
+            all_handles.append((key, handle))
+
+        return {device_uuid: all_handles}
 
     def prepare_for_lp_inference(self):
         self.model.to("cuda")

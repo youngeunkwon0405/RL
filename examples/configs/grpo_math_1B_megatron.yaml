@@ -26,7 +26,7 @@ checkpointing:
   save_period: 10
 
 policy:
-  model_name: "Qwen/Qwen2.5-1.5B"
+  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
   train_global_batch_size: 512
   train_micro_batch_size: 2
   generation_batch_size: 64 # Only used when generating using megatron backend

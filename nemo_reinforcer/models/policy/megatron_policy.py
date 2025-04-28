@@ -77,6 +77,8 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             checkpoint_dir=None,
             worker_sharding_annotations=self.sharding_annotations,
             pre_init_communication_queue=pre_init_queue,
+            init_optimizer=init_optimizer,
+            init_reference_model=init_reference_model,
         )
 
         self.worker_group = RayWorkerGroup(
