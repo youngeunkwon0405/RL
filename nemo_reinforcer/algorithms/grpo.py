@@ -155,7 +155,7 @@ def setup(
     grpo_config = master_config["grpo"]
     generation_config = policy_config["generation"]
 
-    logger = configure_logger(master_config)
+    logger = configure_logger(logger_config)
 
     checkpointer, last_checkpoint_path, grpo_save_state = setup_checkpointer(
         checkpointing_config, _default_grpo_save_state()

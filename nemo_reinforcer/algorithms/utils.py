@@ -238,7 +238,23 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
 
 
 ## utils for main entry point functions
-def extract_individual_configs(master_config: "MasterConfig"):
+def extract_individual_configs(
+    master_config: "MasterConfig",
+) -> Tuple[PolicyConfig, DataConfig, LoggerConfig, ClusterConfig, CheckpointingConfig]:
+    """Extract individual configuration components from a master config dictionary.
+
+    Args:
+        master_config (MasterConfig): A dictionary containing configuration sections for
+            policy, data, logging, cluster setup, and checkpointing.
+
+    Returns:
+        tuple: A 5-tuple containing:
+            - policy_config: Configuration for the policy
+            - data_config: Configuration for datasets and data loading
+            - logger_config: Configuration for logging and metrics
+            - cluster_config: Configuration for cluster setup
+            - checkpointing_config: Configuration for checkpointing
+    """
     policy_config = master_config["policy"]
     data_config = master_config["data"]
     logger_config = master_config["logger"]
@@ -253,8 +269,16 @@ def extract_individual_configs(master_config: "MasterConfig"):
     )
 
 
-def configure_logger(master_config: "MasterConfig"):
-    logger_config = master_config["logger"]
+def configure_logger(logger_config: LoggerConfig) -> Logger:
+    """Configure and initialize a Logger instance.
+
+    Args:
+        logger_config (LoggerConfig): Configuration for the logger, containing settings
+            for logging backend (e.g. wandb, tensorboard) and other logging parameters.
+
+    Returns:
+        Logger: Initialized logger instance that can be used to log metrics and hyperparameters.
+    """
     logger = Logger(logger_config)
     logger.log_hyperparams(master_config)
     return logger
@@ -262,8 +286,21 @@ def configure_logger(master_config: "MasterConfig"):
 
 def setup_checkpointer(
     checkpointer_config: CheckpointingConfig,
-    default_save_state: Optional[TypedDict] = None,
-):
+    default_save_state: TypedDict,
+) -> Tuple[CheckpointManager, Optional[str], TypedDict]:
+    """Configure and initialize a checkpoint manager.
+
+    Args:
+        checkpointer_config (CheckpointingConfig): Configuration for checkpointing.
+        default_save_state (TypedDict): Default state dictionary to use if no
+            checkpoint exists. Should contain training progress tracking variables.
+
+    Returns:
+        tuple: A 3-tuple containing:
+            - CheckpointManager: Initialized checkpoint manager
+            - Optional[str]: Path to latest checkpoint if one exists, None otherwise
+            - TypedDict: Training state dictionary, either loaded from checkpoint or default
+    """
     checkpointer = CheckpointManager(checkpointer_config)
     last_checkpoint_path = checkpointer.get_latest_checkpoint_path()
     if last_checkpoint_path is not None:
@@ -276,7 +313,20 @@ def setup_checkpointer(
 def validate_checkpointing_config(
     checkpointer_config: CheckpointingConfig,
     algorithm_config: TypedDict,
-):
+) -> None:
+    """Validate checkpointing configuration against algorithm configuration.
+
+    Ensures that checkpointing is properly configured to save at intervals that align with
+    validation periods, since validation metrics are used to determine which checkpoints to keep.
+
+    Args:
+        checkpointer_config (CheckpointingConfig): Checkpointing configuration.
+        algorithm_config (TypedDict): Algorithm configuration.
+
+    Raises:
+        AssertionError: If checkpointing is enabled but save period is not valid, or if
+            save period is not a multiple of validation period.
+    """
     # config validation checks
     if checkpointer_config["enabled"]:
         assert checkpointer_config["save_period"] > 0
@@ -295,9 +345,21 @@ def setup_dataloaders(
     collate_fn: Callable,
     algorithm_config: TypedDict,
     policy_config: PolicyConfig,
-    last_checkpoint_path: Optional[str],
-    return_train_dl_kwargs: bool = False,
-):
+    last_checkpoint_path: Optional[str] = None,
+) -> Tuple[StatefulDataLoader, Optional[StatefulDataLoader]]:
+    """Setup training and validation dataloaders.
+
+    Args:
+        train_dataset (AllTaskProcessedDataset): Training dataset.
+        val_dataset (Optional[AllTaskProcessedDataset]): Validation dataset.
+        collate_fn (Callable): Collation function for dataset.
+        algorithm_config (TypedDict): Algorithm configuration.
+        policy_config (PolicyConfig): Policy configuration.
+        last_checkpoint_path (Optional[str]): Path to latest checkpoint if one exists, None otherwise.
+
+    Returns:
+        tuple: A 2-tuple containing (train_dataloader, val_dataloader).
+    """
     train_dataloader_kwargs = {
         "dataset": train_dataset,
         "batch_size": policy_config["train_global_batch_size"],
@@ -320,7 +382,6 @@ def setup_dataloaders(
     # Load validation dataset if provided
     val_dataloader = None
     # If validation is enabled, load the validation dataloader
-    ## TODO: make val batch size configs match between grpo and dpo
     if algorithm_config["val_period"] > 0 or algorithm_config["val_at_start"]:
         val_dataloader = StatefulDataLoader(
             val_dataset,
@@ -333,10 +394,7 @@ def setup_dataloaders(
         )
         print(f"  ✓ Validation dataloader loaded with {len(val_dataset)} samples")
 
-    if return_train_dl_kwargs:
-        return train_dataloader, val_dataloader, train_dataloader_kwargs
-    else:
-        return train_dataloader, val_dataloader
+    return train_dataloader, val_dataloader
 
 
 def setup_policy(
@@ -345,7 +403,19 @@ def setup_policy(
     tokenizer: AutoTokenizer,
     last_checkpoint_path: Optional[str],
     init_reference_model: bool = True,
-):
+) -> HfPolicy:
+    """Setup and initialize the policy.
+
+    Args:
+        cluster (RayVirtualCluster): The Ray cluster
+        policy_config (PolicyConfig): Configuration for the policy
+        tokenizer (AutoTokenizer): Tokenizer to use with the model
+        last_checkpoint_path (Optional[str]): Path to latest checkpoint if one exists
+        init_reference_model (bool, optional): Whether to initialize a reference model. Defaults to True.
+
+    Returns:
+        HfPolicy: The initialized policy
+    """
     return HfPolicy(
         cluster=cluster,
         config=policy_config,
@@ -371,7 +441,20 @@ def save_checkpoint(
     timer,
     save_torch_dist=True,
     save_hf=False,
-):
+) -> None:
+    """Save a checkpoint.
+
+    Args:
+        checkpointer (CheckpointManager): The checkpoint manager to use for checkpointing
+        master_config (MasterConfig): The master configuration to dump to the checkpoint
+        save_state (TypedDict): The save state to dump to the checkpoint
+        total_steps (int): The number of training steps
+        train_dataloader (StatefulDataLoader): The training dataloader
+        policy (HfPolicy): The policy
+        timer (Timer): The timer
+        save_torch_dist (bool, optional): Whether to save the checkpoint in torch distributed format. Defaults to True.
+        save_hf (bool, optional): Whether to save the checkpoint in HuggingFace format. Defaults to False.
+    """
     with timer.time("checkpointing"):
         print(f"Saving checkpoint for step {total_steps}...")
         checkpoint_path = checkpointer.init_tmp_checkpoint(
@@ -393,6 +476,17 @@ def save_checkpoint(
 
 
 def reduce_microbatch_metrics(metrics):
+    """Reduce microbatch metrics to a single value.
+
+    For num_valid_samples, takes the sum across microbatches.
+    For all other metrics, takes the mean across microbatches.
+
+    Args:
+        metrics (dict): The metrics to reduce
+
+    Returns:
+        dict: The reduced metrics
+    """
     for k, v in metrics.items():
         if k == "num_valid_samples":
             metrics[k] = np.sum(v).item()
@@ -401,8 +495,22 @@ def reduce_microbatch_metrics(metrics):
     return metrics
 
 
-## print metrics to std out, log metrics to wandb/tensorboard
-def log_metrics(log_to_console, metrics, timer, step, logger, is_val=False):
+def log_metrics(log_to_console, metrics, timer, step, logger, is_val=False) -> None:
+    """Log training or validation metrics both to console and to logger (wandb/tensorboard).
+
+    Args:
+        log_to_console (dict): Metrics to display in console output
+        metrics (dict): Full metrics dictionary to log to logger
+        timer (Timer): Timer object containing timing information
+        step (int): Current training step
+        logger (Logger): Logger object
+        is_val (bool, optional): Whether these are validation metrics. Defaults to False.
+
+    The function:
+    1. Prints metrics and timing information to console in a formatted way
+    2. For training metrics, shows detailed timing breakdown
+    3. Logs all metrics and timing info to the logger with appropriate prefixes
+    """
     prefix = "validation" if is_val else "train"
 
     ## print metrics to std out

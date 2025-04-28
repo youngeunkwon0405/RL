@@ -124,7 +124,7 @@ def setup(
     # ==========================
     #         Logger
     # ==========================
-    logger = configure_logger(master_config)
+    logger = configure_logger(logger_config)
 
     # ==========================
     #      Checkpointing
@@ -139,14 +139,13 @@ def setup(
     # ==========================
     #           Data
     # ==========================
-    train_dataloader, val_dataloader, train_dataloader_kwargs = setup_dataloaders(
+    train_dataloader, val_dataloader = setup_dataloaders(
         train_dataset,
         val_dataset,
         rl_collate_fn,
         sft_config,
         policy_config,
         last_checkpoint_path,
-        return_train_dl_kwargs=True,
     )
 
     # ==========================

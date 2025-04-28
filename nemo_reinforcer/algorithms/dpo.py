@@ -116,7 +116,7 @@ def setup(
     """Main entry point for running DPO algorithm.
 
     Returns:
-        Tuple of policy, cluster, train_dataloader, train_dataloader_kwargs, val_dataloader, loss_fn, logger, checkpointer, dpo_save_state, master_config
+        Tuple of policy, cluster, train_dataloader, val_dataloader, loss_fn, logger, checkpointer, dpo_save_state, master_config
     """
     set_seed(master_config["dpo"]["seed"])
 
@@ -130,7 +130,7 @@ def setup(
     ) = extract_individual_configs(master_config)
     dpo_config = master_config["dpo"]
 
-    logger = configure_logger(master_config)
+    logger = configure_logger(logger_config)
 
     checkpointer, last_checkpoint_path, dpo_save_state = setup_checkpointer(
         checkpointing_config, _default_dpo_save_state()
@@ -150,14 +150,13 @@ def setup(
             "make_sequence_length_divisible_by"
         ],
     )
-    train_dataloader, val_dataloader, train_dataloader_kwargs = setup_dataloaders(
+    train_dataloader, val_dataloader = setup_dataloaders(
         train_dataset,
         val_dataset,
         dpo_collate,
         dpo_config,
         policy_config,
         last_checkpoint_path,
-        return_train_dl_kwargs=True,
     )
 
     # ==========================
