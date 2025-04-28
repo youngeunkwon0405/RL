@@ -104,9 +104,11 @@ def dpo_preprocessor(
         ```
     """
     if isinstance(datum_dict["prompt"], list):
+        ## openai format, prompt is a list of dicts with keys "role" and "content"
         messages_chosen = datum_dict["prompt"].copy()
         messages_rejected = datum_dict["prompt"].copy()
     else:
+        ## prompt is a string
         messages_chosen = [
             {
                 "role": "user",
@@ -120,19 +122,24 @@ def dpo_preprocessor(
             },
         ]
 
-    messages_chosen.append(
-        {
-            "role": "assistant",
-            "content": datum_dict["chosen_response"],
-        },
-    )
-
-    messages_rejected.append(
-        {
-            "role": "assistant",
-            "content": datum_dict["rejected_response"],
-        },
-    )
+    if isinstance(datum_dict["chosen_response"], dict):
+        ## openai format
+        messages_chosen.append(datum_dict["chosen_response"])
+        messages_rejected.append(datum_dict["rejected_response"])
+    else:
+        ## response is a string
+        messages_chosen.append(
+            {
+                "role": "assistant",
+                "content": datum_dict["chosen_response"],
+            },
+        )
+        messages_rejected.append(
+            {
+                "role": "assistant",
+                "content": datum_dict["rejected_response"],
+            },
+        )
 
     message_log_chosen = get_formatted_message_log(
         messages_chosen, tokenizer, task_data_spec
