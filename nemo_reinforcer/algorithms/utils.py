@@ -137,7 +137,17 @@ def masked_mean(values, mask, dim=None):
 
 
 def gather_logprobs(data, next_token_logits):
-    # Gather the logprobs for the actual next tokens
+    """Gather the log probabilities for the actual next tokens.
+
+    This function handles gathering log probabilities for both FSDP1 and dtensor.
+
+    Args:
+        data (Dict): Dictionary containing input_ids tensor with token indices
+        next_token_logits (torch.Tensor): Tensor of logits for next token predictions
+
+    Returns:
+        torch.Tensor: Log probabilities of the actual next tokens that occurred in the sequence
+    """
     if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
         token_logprobs = get_logprobs_from_vocab_parallel_logits(
             next_token_logits, data["input_ids"]
@@ -237,7 +247,9 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
     return tokenizer
 
 
-## utils for main entry point functions
+######## utils for main entry point functions ########
+
+
 def extract_individual_configs(
     master_config: "MasterConfig",
 ) -> Tuple[PolicyConfig, DataConfig, LoggerConfig, ClusterConfig, CheckpointingConfig]:
