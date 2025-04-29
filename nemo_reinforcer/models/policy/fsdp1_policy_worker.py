@@ -243,6 +243,7 @@ class FSDP1PolicyWorker:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // torch.distributed.get_world_size()
         dataset_size = data.get("input_ids").shape[0]
+        num_global_batches = dataset_size // local_gbs
 
         if eval_mode:
             ctx = torch.no_grad()
@@ -315,6 +316,10 @@ class FSDP1PolicyWorker:
                             logits = outputs.logits
 
                     loss, loss_metrics = loss_fn(logits, mb, normalization_factor)
+                    ## scale by the number of global batches so we get the correct
+                    ## value when summing metrics across all microbatches
+                    for k in loss_metrics.keys():
+                        loss_metrics[k] /= num_global_batches
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
 
@@ -351,11 +356,8 @@ class FSDP1PolicyWorker:
 
             # Compute global loss across all ranks
             with torch.no_grad():
-                ## TODO: clan up!
-                local_loss = torch.tensor(losses, device="cuda")
-                global_loss = torch.zeros_like(local_loss)
-                torch.distributed.all_reduce(local_loss)
-                global_loss = local_loss  # / torch.distributed.get_world_size()
+                global_loss = torch.tensor(losses, device="cuda")
+                torch.distributed.all_reduce(global_loss)
 
             # Aggregate metrics across all microbatches
             mb_metrics = defaultdict(list)
@@ -365,7 +367,6 @@ class FSDP1PolicyWorker:
 
             metrics = {
                 "global_loss": global_loss.cpu(),
-                "local_loss": local_loss.cpu(),
                 "grad_norm": grad_norm,
                 "rank": torch.distributed.get_rank(),
                 "all_mb_metrics": dict(mb_metrics),
