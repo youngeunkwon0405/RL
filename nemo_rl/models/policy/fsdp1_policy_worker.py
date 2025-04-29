@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import gc
+import logging
 import os
 import warnings
 from collections import defaultdict
@@ -52,6 +53,9 @@ from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+
+logging.basicConfig(level=logging.DEBUG)
+torch.set_printoptions(profile="full")
 
 
 @ray.remote
@@ -241,7 +245,11 @@ class FSDP1PolicyWorker:
         eval_mode: bool = False,
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
+        logging.debug("################################")
+        logging.debug("FSDP1 worker train")
+        logging.debug("################################")
+
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
         skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
@@ -413,6 +421,7 @@ class FSDP1PolicyWorker:
                 "all_mb_metrics": dict(mb_metrics),
             }
 
+            logging.debug("################################")
             return metrics
 
     def get_logprobs(

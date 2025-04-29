@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import gc
+import logging
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -52,6 +53,9 @@ from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
+
+logging.basicConfig(level=logging.DEBUG)
+torch.set_printoptions(profile="full")
 
 
 @contextmanager
@@ -279,7 +283,11 @@ class DTensorPolicyWorker:
         eval_mode: bool = False,
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
-    ) -> dict[str, Any]:
+    ) -> Dict[str, Any]:
+        logging.debug("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+        logging.debug("DTensor worker train")
+        logging.debug("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
         if (
@@ -405,12 +413,41 @@ class DTensorPolicyWorker:
                                 seq_len, device=input_ids.device
                             ).repeat(batch_size, 1)
 
+                        logging.debug("model input")
+                        logging.debug(f"{input_ids=}")
+                        logging.debug(f"{attention_mask_input_all_ones=}")
+                        logging.debug(f"{position_ids=}")
                         outputs = self.model(
                             input_ids=input_ids,
                             attention_mask=attention_mask_input_all_ones,
                             position_ids=position_ids,
                             use_cache=False,
                         )
+
+                        # # concatenate all microbatches
+                        # input_ids = input_ids.reshape(
+                        #     (num_microbatches, -1, seq_len)
+                        # ).reshape(-1, seq_len)
+                        # attention_mask_input_all_ones = (
+                        #     attention_mask_input_all_ones.reshape(
+                        #         (num_microbatches, -1, seq_len)
+                        #     )
+                        #     .reshape(-1, seq_len)
+                        #     .to(input_ids.device)
+                        # )
+                        # position_ids = position_ids.reshape(
+                        #     (num_microbatches, -1, seq_len)
+                        # ).reshape(-1, seq_len).to(input_ids.device)
+                        # logging.debug(f"oooooooooooooooooo model input ooooooooooooooooooo")
+                        # logging.debug(f"{input_ids=}")
+                        # logging.debug(f"{attention_mask_input_all_ones=}")
+                        # logging.debug(f"{position_ids=}")
+                        # outputs = self.model(
+                        #     input_ids=input_ids,
+                        #     attention_mask=attention_mask_input_all_ones,
+                        #     position_ids=position_ids,
+                        #     use_cache=False,
+                        # )
 
                     # Get logprobs
                     if not hasattr(outputs, "logits"):
@@ -497,6 +534,7 @@ class DTensorPolicyWorker:
                 "all_mb_metrics": dict(mb_metrics),
             }
 
+            logging.debug("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
             return metrics
 
     def get_logprobs(
