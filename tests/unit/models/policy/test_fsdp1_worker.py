@@ -12,23 +12,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import ray
-import pytest
-import pprint
-import torch
 import os
+import pprint
 from copy import deepcopy
 
-from nemo_reinforcer.algorithms.interfaces import LossFunction
-from nemo_reinforcer.algorithms.loss_functions import ClippedPGLossFn, NLLLoss
-from nemo_reinforcer.algorithms.utils import get_tokenizer
-from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.models.generation.interfaces import configure_generation_config
-from nemo_reinforcer.models.policy import PolicyConfig
-from nemo_reinforcer.models.policy.hf_policy import HfPolicy
-from tests.unit.test_utils import SimpleLoss, SimpleNLLLoss
+import pytest
+import ray
+import torch
 
+from nemo_rl.algorithms.interfaces import LossFunction
+from nemo_rl.algorithms.loss_functions import ClippedPGLossFn, NLLLoss
+from nemo_rl.algorithms.utils import get_tokenizer
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
+from nemo_rl.models.generation.interfaces import configure_generation_config
+from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.hf_policy import HfPolicy
+from tests.unit.test_utils import SimpleLoss, SimpleNLLLoss
 
 basic_llama_test_config: PolicyConfig = {
     "model_name": "meta-llama/Llama-3.2-1B",
