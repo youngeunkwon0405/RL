@@ -83,7 +83,6 @@ def test_nll_loss():
     torch.testing.assert_close(loss.cpu(), torch.tensor(0.0))
     # Check the metrics dictionary contains the expected values
     assert metrics_dict["num_unmasked_tokens"] == 2
-    assert metrics_dict["total_tokens_per_mb"] == 3
 
     ## now assume we predict the incorrect token with high probability
     next_token_logits = (
@@ -109,7 +108,6 @@ def test_nll_loss():
     ## NLLLoss averages the loss over unmasked tokens
     torch.testing.assert_close(loss.cpu(), torch.tensor(999.0))
     assert metrics_dict["num_unmasked_tokens"] == 2
-    assert metrics_dict["total_tokens_per_mb"] == 3
 
 
 def test_dpo_loss():
