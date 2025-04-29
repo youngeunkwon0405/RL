@@ -246,7 +246,13 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         # Placeholder implementation
         pass
 
-    def get_weights_ipc_handles(self):
+    def prepare_weights_for_ipc(self):
+        futures = self.worker_group.run_all_workers_single_data(
+            "prepare_weights_for_ipc", only_on="all_tied_workers"
+        )
+        return ray.get(futures)[0]
+
+    def get_weights_ipc_handles(self, keys):
         """Fetch weight IPC handles from all workers.
 
         Returns:
@@ -255,7 +261,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         # Collect IPC handles from all workers
         worker_handles = ray.get(
             [
-                worker.get_weight_ipc_handles.remote()
+                worker.get_weights_ipc_handles.remote(keys)
                 for worker in self.worker_group.workers
             ]
         )
