@@ -1,7 +1,7 @@
 # SFT Algorithm Configuration
 seq_pack:
   train:
-    enabled: false
+    enabled: true
     algorithm: "concatenative"  # Packing algorithm to use (currently only "concatenative" is supported)
     prefetch_samples: 100  # Number of samples to prefetch from the dataset for packing (should be larger than the global batch size)
     # attention_mask_strategy: "full"  # Options: "block_diagonal" or "full" # TODO(ahmadki): enable this
@@ -24,12 +24,12 @@ sft:
   val_batches: 8
   val_global_batch_size: 32
   val_micro_batch_size: 1
-  val_at_start: true
+  val_at_start: false
   seed: 42
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/sft"
+  checkpoint_dir: "/results/reinforcer/sft/checkpoints"
   metric_name: "val_loss"
   higher_is_better: false
   keep_top_k: 3
@@ -78,8 +78,8 @@ data:
   add_eos: true
 
 logger:
-  log_dir: "logs"  # Base directory for all logs
-  wandb_enabled: true # Make sure you do a ``wandb login [Your API key]'' before running
+  log_dir: "/results/reinforcer/sft/logs"  # Base directory for all logs
+  wandb_enabled: false # Make sure you do a ``wandb login [Your API key]'' before running
   tensorboard_enabled: true
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:

@@ -138,6 +138,46 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
     return train_dataset, val_dataset, sft_task_spec
 
 
+def print_dict(d, indent=0):
+    """Recursively prints a nested dictionary with indentation for readability.
+
+    Args:
+        d (dict): The dictionary to print.
+        indent (int): The current indentation level.
+    """
+    for key, value in d.items():
+        prefix = " " * (indent * 4)  # 4 spaces per indent level
+        if key == "message_log":
+            # message_log is a list of lists of dicts
+            print(f"{prefix}{key}:")
+            for i, conversation in enumerate(value):
+                print(f"{prefix}    Conversation {i}:")
+                for j, message in enumerate(conversation):
+                    print(
+                        f"{prefix}        Message {j} (role: {message.get('role', 'unknown')}):"
+                    )
+                    print(
+                        f"{prefix}            content: {message.get('content', '')[:100]}{'...' if len(message.get('content', '')) > 100 else ''}"
+                    )
+                    # Don't print token_ids in full as they're usually large tensors
+                    if "token_ids" in message:
+                        print(
+                            f"{prefix}            token_ids: [tensor of shape {message['token_ids'].shape}]"
+                        )
+                        print(f"{prefix}            token_ids: {message['token_ids']}")
+        elif isinstance(value, dict):
+            print(f"{prefix}{key}:")
+            print_dict(value, indent + 1)
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            # Handle list of dictionaries
+            print(f"{prefix}{key}:")
+            for i, item in enumerate(value):
+                print(f"{prefix}    Item {i}:")
+                print_dict(item, indent + 2)
+        else:
+            print(f"{prefix}{key}: {value}")
+
+
 def main():
     """Main entry point."""
     # Parse arguments
@@ -190,6 +230,13 @@ def main():
         sft_save_state,
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
+
+    # for batch in train_dataloader:
+    #     print("==========================")
+    #     print_dict(batch)
+    #     print("==========================")
+    #     break
+
     sft_train(
         policy,
         train_dataloader,

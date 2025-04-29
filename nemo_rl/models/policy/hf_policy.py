@@ -11,11 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 import os
+import sys
 from collections import defaultdict
 from typing import List, Optional, Union
 
 import ray
+import torch
 from transformers import AutoTokenizer
 
 from nemo_rl.algorithms.interfaces import LossFunction
@@ -32,6 +35,9 @@ from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from nemo_rl.models.policy.fsdp1_policy_worker import FSDP1PolicyWorker
 
+logging.basicConfig(level=logging.DEBUG)
+torch.set_printoptions(profile="full")
+
 
 class HfPolicy(PolicyInterface, GenerationInterface):
     def __init__(
@@ -46,6 +52,14 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         optimizer_path: Optional[str] = None,
         init_reference_model: bool = True,
     ):
+        # Configure logging for this Ray worker
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=[logging.StreamHandler(sys.stdout)],
+        )
+        torch.set_printoptions(profile="full")
+
         if weights_path:
             weights_path = os.path.abspath(weights_path)
         if optimizer_path:
@@ -155,12 +169,21 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
     ):
+        logging.debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+        logging.debug("HF Policy training")
+        logging.debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+
         """Train the policy on a batch of data with a given loss function."""
         batch_size = gbs or self.cfg["train_global_batch_size"]
         micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
         # Shard and replicate the batch
         shards = self.dp_size
         sharded_data = data.shard_by_batch_size(shards, batch_size=batch_size)
+
+        logging.debug(f"{batch_size=}")
+        logging.debug(f"{micro_batch_size=}")
+        logging.debug(f"{shards=}")
+        logging.debug(f"{sharded_data=}")
 
         # Train each shard in parallel
         futures = self.worker_group.run_all_workers_multiple_data(
@@ -188,6 +211,8 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             for k, v in r["all_mb_metrics"].items():
                 all_mb_metrics[k].extend(v)
         aggregated_results["all_mb_metrics"] = dict(all_mb_metrics)
+
+        logging.debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
 
         return aggregated_results
 
