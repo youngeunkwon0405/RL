@@ -14,6 +14,8 @@ license = {text = "Apache 2.0"}
 dependencies = [
     # setuptools is here just so we can install TE
     "setuptools",
+    # hatchling for nemo-run
+    "hatchling",
     # for mcore (may need to uv pip install pybind11 for some reason; need to double check if needed)
     "pybind11",
     "torch==2.6.0",
@@ -111,6 +113,7 @@ docs = [
 dev = [
     "pre-commit==3.6.0",
     "ruff==0.9.9",
+    "debugpy>=1.8.0",
 ]
 test = [
     "pytest>=7.0.0",

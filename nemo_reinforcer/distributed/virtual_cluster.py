@@ -98,7 +98,7 @@ def init_ray(log_dir: Optional[str] = None):
         # If no existing cluster, start a new one with local resources
         ray.init(
             log_to_driver=True,
-            include_dashboard=False,
+            include_dashboard=True,
             runtime_env=runtime_env,
             _temp_dir=os.path.abspath(log_dir) if log_dir else None,
         )

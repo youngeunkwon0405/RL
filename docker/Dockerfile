@@ -21,12 +21,14 @@ WORKDIR /opt/reinforcer
 
 # First copy only the dependency files
 COPY --chown=ray --chmod=755 pyproject.toml uv.lock ./
+COPY --chown=ray --chmod=755 3rdparty/ ./3rdparty/
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/reinforcer_venv
 ENV VIRTUAL_ENV=/opt/reinforcer_venv
+ENV UV_LINK_MODE=copy
 
 # Create and activate virtual environment
-RUN <<"EOF"
+RUN <<"EOF" bash -exu
 uv venv /opt/reinforcer_venv
 # uv sync has a more reliable resolver than simple uv pip install which can fail
 
@@ -35,6 +37,11 @@ uv venv /opt/reinforcer_venv
 # Do everything in one layer to prevent large layers.
 
 uv sync --locked --extra vllm --no-install-project
+EOF
+RUN <<"EOF" bash -exu
+uv sync --locked --extra mcore --no-install-project --no-build-isolation 
+EOF
+RUN <<"EOF" bash -exu
 uv sync --locked --all-groups --no-install-project
 EOF
 
