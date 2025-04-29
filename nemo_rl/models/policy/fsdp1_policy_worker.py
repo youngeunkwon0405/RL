@@ -89,7 +89,7 @@ class FSDP1PolicyWorker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
-            torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
+            torch_dtype=self.dtype,
         )
         # caching since this property is not always preserved after FSDP
         self.num_tied_weights = len(find_tied_parameters(self.model))
@@ -98,7 +98,7 @@ class FSDP1PolicyWorker:
             self.reference_model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 device_map="cpu",  # load weights onto CPU initially
-                torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
+                torch_dtype=self.dtype,
             )
         else:
             self.reference_model = None
