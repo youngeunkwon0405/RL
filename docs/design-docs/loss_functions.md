@@ -43,7 +43,7 @@ class SimpleAverageLoss(LossFunction):
         self,
         next_token_losses: torch.Tensor,
         data: BatchedDataDict,
-        normalization_factor: torch.Tensor,
+        total_valid_tokens_or_seqs: torch.Tensor,
     ) -> Tuple[torch.Tensor, dict]:
         """Compute the simple average loss with proper microbatch handling."""
         token_mask = data["token_mask"] ## token mask for this microbatch
@@ -52,10 +52,10 @@ class SimpleAverageLoss(LossFunction):
         # mask.sum() will be 10 for microbatch 1, 6 for microbatch 2
         mask = token_mask * sample_mask.unsqueeze(-1)
 
-        # normalization_factor will be 16 in our example since there are 16 tokens in the global batch
+        # total_valid_tokens_or_seqs will be 16 in our example since there are 16 tokens in the global batch
         # since we specified that this is a token-level loss, the policy
         # will give us the right normalization factor automatically.
-        loss = (next_token_losses * mask).sum() / (normalization_factor + 1e-8)
+        loss = (next_token_losses * mask).sum() / (total_valid_tokens_or_seqs + 1e-8)
         return loss
 
 ## test out the loss function
@@ -74,10 +74,10 @@ sample_data = {
     ),
     "sample_mask": torch.ones(2)
 }
-normalization_factor = torch.sum(sample_data["token_mask"] * sample_data["sample_mask"].unsqueeze(-1))
+total_valid_tokens_or_seqs = torch.sum(sample_data["token_mask"] * sample_data["sample_mask"].unsqueeze(-1))
 
 loss_fn = SimpleAverageLoss()
-loss_no_microbatching = loss_fn(next_token_losses, sample_data, normalization_factor)
+loss_no_microbatching = loss_fn(next_token_losses, sample_data, total_valid_tokens_or_seqs)
 
 microbatch_1_data = {
     "token_mask": sample_data["token_mask"][:1],
@@ -88,8 +88,8 @@ microbatch_2_data = {
     "sample_mask": sample_data["sample_mask"][1:],
 }
 loss_with_microbatching = (
-    loss_fn(next_token_losses[:1], microbatch_1_data, normalization_factor)
-    + loss_fn(next_token_losses[1:], microbatch_2_data, normalization_factor)
+    loss_fn(next_token_losses[:1], microbatch_1_data, total_valid_tokens_or_seqs)
+    + loss_fn(next_token_losses[1:], microbatch_2_data, total_valid_tokens_or_seqs)
 )
 
 assert loss_no_microbatching == loss_with_microbatching

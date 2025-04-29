@@ -25,7 +25,7 @@ class SimpleLoss:
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict,
-        normalization_factor=None,
+        total_valid_tokens_or_seqs: torch.Tensor,
     ) -> Tuple[torch.Tensor, Dict[str, Any]]:
         # Just return mean of logprobs as the loss for testing
         loss = next_token_logits.mean()

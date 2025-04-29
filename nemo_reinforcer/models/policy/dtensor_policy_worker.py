@@ -291,7 +291,9 @@ class DTensorPolicyWorker:
             losses = []
             all_mb_metrics = []
             for gb_start in range(0, dataset_size, local_gbs):
-                global_batch = data.slice(gb_start, gb_start + local_gbs)
+                global_batch: BatchedDataDict = data.slice(
+                    gb_start, gb_start + local_gbs
+                )
 
                 assert "sample_mask" in global_batch, (
                     "sample_mask must be present in the data!"
@@ -302,18 +304,18 @@ class DTensorPolicyWorker:
                         "token_mask must be present in the data when using token-level loss"
                     )
                     ## get number of tokens in the global batch
-                    normalization_factor = torch.sum(
+                    total_valid_tokens_or_seqs = torch.sum(
                         global_batch["token_mask"][:, 1:]
                         * global_batch["sample_mask"].unsqueeze(-1)
                     )
                     torch.distributed.all_reduce(
-                        normalization_factor, group=self.dp_mesh.get_group()
+                        total_valid_tokens_or_seqs, group=self.dp_mesh.get_group()
                     )
                 elif loss_fn.loss_type == LossType.SAMPLE_LEVEL:
                     ## get number of valid samples in the global batch
-                    normalization_factor = torch.sum(global_batch["sample_mask"])
+                    total_valid_tokens_or_seqs = torch.sum(global_batch["sample_mask"])
                     torch.distributed.all_reduce(
-                        normalization_factor, group=self.dp_mesh.get_group()
+                        total_valid_tokens_or_seqs, group=self.dp_mesh.get_group()
                     )
                 else:
                     raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
@@ -364,7 +366,7 @@ class DTensorPolicyWorker:
                     else:
                         logits = outputs.logits
 
-                    loss, loss_metrics = loss_fn(logits, mb, normalization_factor)
+                    loss, loss_metrics = loss_fn(logits, mb, total_valid_tokens_or_seqs)
                     ## scale by the number of global batches so we get the correct
                     ## value when summing metrics across all microbatches
                     for k in loss_metrics.keys():

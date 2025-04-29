@@ -76,7 +76,7 @@ def test_nll_loss():
     loss, metrics_dict = loss_fn(
         next_token_logits,
         data,
-        normalization_factor=torch.sum(
+        global_normalization_factor=torch.sum(
             data["token_mask"] * data["sample_mask"].unsqueeze(-1)
         ),
     )
@@ -100,7 +100,7 @@ def test_nll_loss():
     loss, metrics_dict = loss_fn(
         next_token_logits,
         data,
-        normalization_factor=torch.sum(
+        global_normalization_factor=torch.sum(
             data["token_mask"] * data["sample_mask"].unsqueeze(0)
         ),
     )
@@ -132,7 +132,9 @@ def test_dpo_loss():
     )
 
     loss, metrics_dict = loss_fn(
-        next_token_logits, data, normalization_factor=torch.sum(data["sample_mask"])
+        next_token_logits,
+        data,
+        global_normalization_factor=torch.sum(data["sample_mask"]),
     )
 
     ## chosen and rejected errors are the same, so difference between them is 0

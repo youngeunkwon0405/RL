@@ -19,7 +19,7 @@ import torch
 from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
-    masked_global_mean,
+    masked_mean,
 )
 
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
@@ -99,7 +99,7 @@ class ClippedPGLossFn(LossFunction):
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict[ClippedPGLossDataDict],
-        normalization_factor: torch.Tensor,
+        total_valid_tokens_or_seqs: torch.Tensor,
     ) -> Tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
         token_mask = data["token_mask"][:, 1:]
@@ -112,8 +112,8 @@ class ClippedPGLossFn(LossFunction):
         mask = token_mask * sample_mask.unsqueeze(-1)
 
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
-        mult_prob_error = masked_global_mean(
-            torch.exp(lp_error), mask, normalization_factor
+        mult_prob_error = masked_mean(
+            torch.exp(lp_error), mask, total_valid_tokens_or_seqs
         ).item()
         if mult_prob_error == 0.0:
             # this sometimes gets 0 (everything masked/invalid). Doing this to avoid screwing up stats too much
@@ -157,7 +157,7 @@ class ClippedPGLossFn(LossFunction):
                     logprobs_reference=reference_policy_logprobs,
                 )
             )
-            kl = masked_global_mean(kl, mask, normalization_factor)
+            kl = masked_mean(kl, mask, total_valid_tokens_or_seqs)
         else:
             kl = 0
 
@@ -182,18 +182,18 @@ class ClippedPGLossFn(LossFunction):
             )
         else:
             actor_importance_weights = torch.ones_like(prev_logprobs)
-        actor_loss = masked_global_mean(
+        actor_loss = masked_mean(
             actor_importance_weights * torch.max(loss1, loss2),
             mask,
-            normalization_factor,
+            total_valid_tokens_or_seqs,
         )
         loss = actor_loss + kl
         with torch.no_grad():
-            probs_ratio = masked_global_mean(
-                ratios.detach(), mask, normalization_factor
+            probs_ratio = masked_mean(
+                ratios.detach(), mask, total_valid_tokens_or_seqs
             ).item()
-            probs_ratio_clamped = masked_global_mean(
-                ratios_clamped.detach(), mask, normalization_factor
+            probs_ratio_clamped = masked_mean(
+                ratios_clamped.detach(), mask, total_valid_tokens_or_seqs
             ).item()
 
         return (
@@ -218,7 +218,7 @@ class NLLLoss(LossFunction):
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict,
-        normalization_factor: torch.Tensor,
+        total_valid_tokens_or_seqs: torch.Tensor,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
     ) -> Tuple[torch.Tensor, dict]:
@@ -255,7 +255,7 @@ class NLLLoss(LossFunction):
         else:
             ## single scalar loss
             ## scale by the total number of tokens in the batch
-            loss = -masked_global_mean(token_logprobs, mask, normalization_factor)
+            loss = -masked_mean(token_logprobs, mask, total_valid_tokens_or_seqs)
 
         return loss, {
             "loss": loss.item() if loss.ndim == 0 else loss,
@@ -354,7 +354,7 @@ class DPOLossFn(LossFunction):
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict[DPOLossDataDict],
-        normalization_factor: torch.Tensor,
+        total_valid_tokens_or_seqs: torch.Tensor,
     ) -> torch.Tensor:
         ## TODO(@ashors): there's some duplicate code here with the NLLLoss function. We should refactor
         token_mask = data["token_mask"][:, 1:]
@@ -395,19 +395,19 @@ class DPOLossFn(LossFunction):
 
         ## divide by 2 because each preference example corresponds to 2 samples (chosen, rejected)
         return (
-            masked_global_mean(
-                per_sample_loss, sample_mask[::2], normalization_factor / 2
+            masked_mean(
+                per_sample_loss, sample_mask[::2], total_valid_tokens_or_seqs / 2
             ),
-            masked_global_mean(
+            masked_mean(
                 rewards_chosen > rewards_rejected,
                 sample_mask[::2],
-                normalization_factor / 2,
+                total_valid_tokens_or_seqs / 2,
             ),
-            masked_global_mean(
-                rewards_chosen, sample_mask[::2], normalization_factor / 2
+            masked_mean(
+                rewards_chosen, sample_mask[::2], total_valid_tokens_or_seqs / 2
             ),
-            masked_global_mean(
-                rewards_rejected, sample_mask[1::2], normalization_factor / 2
+            masked_mean(
+                rewards_rejected, sample_mask[1::2], total_valid_tokens_or_seqs / 2
             ),
         )
 
@@ -415,20 +415,22 @@ class DPOLossFn(LossFunction):
         self,
         next_token_logits: torch.Tensor,
         data: BatchedDataDict[DPOLossDataDict],
-        normalization_factor: torch.Tensor,
+        total_valid_tokens_or_seqs: torch.Tensor,
     ) -> Tuple[torch.Tensor, dict]:
         sft_loss_chosen = torch.tensor(0.0)
         if self.sft_loss_weight > 0:
             sft_loss, _ = self.sft_loss(
                 next_token_logits,
                 data,
-                normalization_factor=normalization_factor,  ## unused because sft loss returned is at the sample level
+                total_valid_tokens_or_seqs=total_valid_tokens_or_seqs,  ## unused because sft loss returned is at the sample level
                 dpo_loss=True,
                 dpo_average_log_probs=self.sft_average_log_probs,
             )
             sft_loss_chosen, sft_loss_rejected = self.split_output_tensor(sft_loss)
-            sft_loss_chosen = masked_global_mean(
-                sft_loss_chosen, data["sample_mask"][::2], normalization_factor / 2
+            sft_loss_chosen = masked_mean(
+                sft_loss_chosen,
+                data["sample_mask"][::2],
+                total_valid_tokens_or_seqs / 2,
             )
 
         (
@@ -436,7 +438,7 @@ class DPOLossFn(LossFunction):
             accuracy,
             rewards_chosen_mean,
             rewards_rejected_mean,
-        ) = self.preference_loss(next_token_logits, data, normalization_factor)
+        ) = self.preference_loss(next_token_logits, data, total_valid_tokens_or_seqs)
 
         dpo_loss = (
             self.sft_loss_weight * sft_loss_chosen
