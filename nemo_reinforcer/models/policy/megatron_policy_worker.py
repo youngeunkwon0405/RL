@@ -102,6 +102,11 @@ from nemo_reinforcer.distributed.named_sharding import NamedSharding
 from nemo_reinforcer.models.policy.utils import get_gpu_info
 from nemo_reinforcer.distributed.model_utils import from_parallel_logits_to_logprobs
 import nemo_reinforcer.models.megatron.converters as model_converters
+from nemo_reinforcer.models.megatron.refit_utils import (
+    get_global_param_key_to_local_key_map,
+    gather_and_convert_params,
+    get_param_conversion_recipe_dict,
+)
 
 
 def setup_megatron_model(
@@ -425,6 +430,7 @@ class MegatronPolicyWorker:
         )
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
+        self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
 
     def is_alive(self):
         return True
@@ -843,24 +849,6 @@ class MegatronPolicyWorker:
         # Get device UUID using NVML
         return get_device_uuid(device_idx)
 
-    def get_param_conversion_recipe_dict(self, name):
-        converter_dict = model_converters.REGISTRY[
-            self.cfg["megatron_cfg"]["converter_class"]
-        ]
-
-        local_layer = model_converters.get_local_layer_num(name)
-        global_layer = (
-            model_converters.get_global_layer_num(name, self.megatron_cfg.model_config)
-            if local_layer is not None
-            else None
-        )
-        format_dict = model_converters.SafeDict(l=local_layer, gl=global_layer)
-
-        formatted_mapping = {
-            k.format_map(format_dict): rec for k, rec in converter_dict.items()
-        }
-        return formatted_mapping, format_dict
-
     @torch.no_grad()
     def prepare_weights_for_ipc(self):
         """Prepare Megatron model weights for IPC transfer to vLLM.
@@ -881,35 +869,65 @@ class MegatronPolicyWorker:
         param_info = []
 
         # Process each parameter in the model
-        for name, param in self.model.named_parameters():
+        for name, param in self.model.state_dict().items():
             # Skip _extra_state entries (these are metadata, not actual weights)
             if "_extra_state" in name:
                 continue
 
-            if param.requires_grad:
-                # Convert parameter to target dtype
-                param_data = param.detach().to(self.dtype)
+            # Use the conversion dict to get the appropriate recipe for this parameter.
+            recipe_dict, _ = get_param_conversion_recipe_dict(
+                name, self.converter_type, self.megatron_cfg.model_config
+            )
+            tp = 1
+            if name in recipe_dict:
+                recipe = recipe_dict[name]
+                if "tp" in recipe and recipe["tp"] is not None:
+                    tp = tp_world_size
 
-                # Use the conversion dict to get the appropriate recipe for this parameter.
-                recipe_dict, _ = self.get_param_conversion_recipe_dict(name)
-                tp = 1
-                if name in recipe_dict:
-                    recipe = recipe_dict[name]
-                    if "tp" in recipe and recipe["tp"] is not None:
-                        tp = tp_world_size
-
-                # Calculate size for this parameter
-                size_in_bytes = param_data.element_size() * param_data.numel() * tp
-                param_info.append((name, size_in_bytes))
+            # Calculate size for this parameter
+            prec_to_bytes = {
+                torch.bfloat16: 2,
+                torch.float16: 2,
+                torch.float32: 4,
+            }
+            scale = prec_to_bytes[self.dtype] / prec_to_bytes[param.dtype]
+            size_in_bytes = param.element_size() * param.numel() * tp * scale
+            param_info.append(((name, recipe.get("hf", None)), size_in_bytes))
 
         # Include buffers (non-parameter tensors)
         for name, buffer in self.model.named_buffers():
             if "_extra_state" in name:
                 continue
 
-            buffer_data = buffer.detach().to(self.dtype)
-            size_in_bytes = buffer_data.element_size() * buffer_data.numel()
+            prec_to_bytes = {
+                torch.bfloat16: 2,
+                torch.float16: 2,
+                torch.float32: 4,
+            }
+            scale = prec_to_bytes[self.dtype] / prec_to_bytes[buffer.dtype]
+            size_in_bytes = buffer.element_size() * buffer.numel() * scale
             param_info.append((name, size_in_bytes))
+
+        # Gather parameter info from all pipeline parallel ranks to ensure complete coverage
+        pp_group = parallel_state.get_pipeline_model_parallel_group()
+        pp_world_size = torch.distributed.get_world_size(pp_group)
+
+        # Gather all parameter info from all PP ranks
+        all_param_infos = [None] * pp_world_size
+        torch.distributed.all_gather_object(all_param_infos, param_info, group=pp_group)
+
+        # Merge all parameter infos, keeping only unique parameter names
+        merged_param_info = []
+        seen_params = set()
+
+        for rank_param_info in all_param_infos:
+            for name, size in rank_param_info:
+                if name not in seen_params:
+                    merged_param_info.append((name, size))
+                    seen_params.add(name)
+
+        # Update param_info with the merged information
+        param_info = merged_param_info
 
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         return param_info
@@ -924,159 +942,17 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
-        with torch.no_grad():
-            import re  # For computing global keys from layer numbers
-
-            # Initialize pipeline parallel group information.
-            pp_group = parallel_state.get_pipeline_model_parallel_group()
-            pp_world_size = torch.distributed.get_world_size(pp_group)
-            my_pp_rank = parallel_state.get_pipeline_model_parallel_rank()
-            pp_global_rank_ids = model_converters.get_all_rank_ids_in_group(pp_group)
-
-            # Build a mapping on each PP rank from a computed global key to the raw state dict key.
-            # The global key is computed by replacing the local layer number (after "layers.")
-            # with its corresponding global layer number (if applicable).
-            local_map = {}
-            for key in self.model.state_dict().keys():
-                local_layer = model_converters.get_local_layer_num(key)
-                if local_layer is not None:
-                    global_layer = model_converters.get_global_layer_num(
-                        key, self.megatron_cfg.model_config
-                    )
-                    # Replace the first occurrence of the digits after "layers." with the global layer number.
-                    global_key = re.sub(
-                        r"(?<=layers\.)\d+", str(global_layer), key, count=1
-                    )
-                else:
-                    global_key = key
-                local_map[global_key] = key
-
-            # Gather the local maps from all PP ranks (only lightweight key info is gathered).
-            all_maps = [None] * pp_world_size
-            torch.distributed.all_gather_object(all_maps, local_map, group=pp_group)
-
-            # Build the union over global keys and assign an owner (the rank with the smallest PP rank).
-            union_global_map = {}
-            for pp_rank, omap in enumerate(all_maps):
-                for gk, raw_key in omap.items():
-                    if (
-                        gk not in union_global_map
-                        or pp_global_rank_ids[pp_rank] < union_global_map[gk][0]
-                    ):
-                        union_global_map[gk] = (pp_global_rank_ids[pp_rank], raw_key)
-                    else:
-                        print(
-                            f"WARNING: {gk} already in union_global_map when gathering keys",
-                            flush=True,
-                        )
-
-            # merged_cpu_param_dict = {}
-            gathered_params = {}
-
-            # Process each parameter (by its unique global key) one at a time.
-            for gk in sorted(union_global_map.keys()):
-                ptime = time.time()
-                owner_pp_global_rank, owner_raw_key = union_global_map[gk]
-
-                # Only the owner PP rank has the parameter locally.
-                if torch.distributed.get_rank() == owner_pp_global_rank:
-                    param = self.model.state_dict()[owner_raw_key]
-
-                    # Use the conversion dict to get the appropriate recipe for this parameter.
-                    recipe_dict, format_dict = self.get_param_conversion_recipe_dict(
-                        owner_raw_key
-                    )
-                    recipe = recipe_dict.get(owner_raw_key, None)
-                    if recipe is None:
-                        print(
-                            f"WARNING: {owner_raw_key} has no recipe mapping for conversion",
-                            flush=True,
-                        )
-                        hf_mapping = {"None": None}
-                    else:
-                        # If the parameter is TP-sharded, gather its slices on GPU.
-                        if recipe.get("tp", None) is not None:
-                            tp_group = parallel_state.get_tensor_model_parallel_group()
-                            tp_world_size = torch.distributed.get_world_size(tp_group)
-                            gathered_slices = [
-                                torch.empty_like(param) for _ in range(tp_world_size)
-                            ]
-                            torch.distributed.all_gather(
-                                gathered_slices, param, group=tp_group
-                            )
-                            full_param = torch.cat(
-                                gathered_slices, dim=recipe["tp"]
-                            ).to(torch.bfloat16)
-                        else:
-                            full_param = torch.clone(param).to(torch.bfloat16)
-
-                        # Convert the parameter using the provided function or mapping.
-                        if recipe.get("hf_func", None) is not None:
-                            hf_mapping = recipe["hf_func"](
-                                full_param, self.megatron_cfg.model_config
-                            )
-                            hf_mapping = {
-                                k.format_map(format_dict): v
-                                for k, v in hf_mapping.items()
-                            }
-                        elif recipe.get("hf", None) is not None:
-                            hf_mapping = {
-                                recipe["hf"].format_map(format_dict): full_param
-                            }
-                        else:
-                            raise NotImplementedError(
-                                f"No conversion recipe found for {owner_raw_key}"
-                            )
-                else:
-                    hf_mapping = (
-                        None  # Non-owner ranks will receive the converted tensors.
-                    )
-
-                # Broadcast the list of target HF parameter keys from the owner.
-                if torch.distributed.get_rank() == owner_pp_global_rank:
-                    target_keys = [list(hf_mapping.keys())]
-                else:
-                    target_keys = [None]  # Placeholder to be filled by broadcast.
-
-                torch.distributed.broadcast_object_list(
-                    target_keys, src=owner_pp_global_rank, group=pp_group
-                )
-                if "None" in target_keys[0]:
-                    continue
-
-                # For each converted tensor (could be more than one per original parameter), broadcast it individually.
-                for target_key in target_keys[0]:
-                    if torch.distributed.get_rank() == owner_pp_global_rank:
-                        tensor_to_send = hf_mapping[target_key]
-                    else:
-                        tensor_to_send = None
-                    # Broadcast tensor metadata (shape and dtype) to allocate GPU buffer on receiving ranks.
-                    meta = [None]
-                    if torch.distributed.get_rank() == owner_pp_global_rank:
-                        meta[0] = (tensor_to_send.shape, str(tensor_to_send.dtype))
-                    torch.distributed.broadcast_object_list(
-                        meta, src=owner_pp_global_rank, group=pp_group
-                    )
-                    shape, dtype_str = meta[0]
-                    dtype = getattr(torch, dtype_str.split(".")[-1])
-                    if torch.distributed.get_rank() != owner_pp_global_rank:
-                        tensor_to_send = torch.empty(
-                            *shape, dtype=dtype, device=torch.cuda.current_device()
-                        )
-                    torch.distributed.broadcast(
-                        tensor_to_send, src=owner_pp_global_rank, group=pp_group
-                    )
-                    gathered_params[target_key] = tensor_to_send
-
-                torch.cuda.empty_cache()
-                torch.cuda.synchronize()
-                print(f"Time taken to convert {gk} {time.time() - ptime}", flush=True)
-            gc.collect()
-            torch.cuda.empty_cache()
-            print(
-                "Finished parameter-by-parameter gathering over PP with conversion mapping.",
-                flush=True,
-            )
+        param_name_to_rank_and_key = get_global_param_key_to_local_key_map(
+            self.model, self.megatron_cfg.model_config, keys
+        )
+        gathered_params = gather_and_convert_params(
+            self.model,
+            self.converter_type,
+            self.megatron_cfg.model_config,
+            param_name_to_rank_and_key,
+        )
+        gc.collect()
+        torch.cuda.empty_cache()
 
         # Get device UUID for IPC handles
         device_uuid = self.report_device_id()
