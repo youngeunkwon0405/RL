@@ -28,11 +28,11 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
 )
 from torch.distributed.tensor.placement_types import Replicate, Shard
-from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.gemma3.modeling_gemma3 import (
     Gemma3ForCausalLM,
     Gemma3ForConditionalGeneration,
 )
+from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 
 from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
