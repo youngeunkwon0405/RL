@@ -34,38 +34,8 @@ from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 
 from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 
-def _parallelize_gemma3_conditional(
-    model: Gemma3ForCausalLM,
-    dp_mesh: DeviceMesh,
-    tp_mesh: DeviceMesh,
-    mp_policy: MixedPrecisionPolicy,
-    offload_policy: torch.distributed.fsdp.OffloadPolicy,
-    sequence_parallel: bool = False,
-    activation_checkpointing: bool = False,
-):
-    """Parallelizes a Gemma3ForCausalLM model across data parallel dimensions.
-
-    Tensor parallelism is not supported for Gemma3 models because of tied word embeddings.
-    """
-    assert tp_mesh.size() == 1, (
-        "Gemma3 models do not support TP because of tied word embeddings"
-    )
-
-    if activation_checkpointing:
-        for i in range(len(model.language_model.model.layers)):
-            model.language_model.model.layers[i].mlp = checkpoint_wrapper(model.language_model.model.layers[i].mlp)
-
-    for layer in model.language_model.model.layers:
-        fully_shard(
-            layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
-        )
-
-    return fully_shard(
-        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
-    )
-
 def _parallelize_gemma3(
-    model: Gemma3ForCausalLM,
+    model: Union[Gemma3ForCausalLM, Gemma3ForConditionalGeneration],
     dp_mesh: DeviceMesh,
     tp_mesh: DeviceMesh,
     mp_policy: MixedPrecisionPolicy,
@@ -81,11 +51,16 @@ def _parallelize_gemma3(
         "Gemma3 models do not support TP because of tied word embeddings"
     )
 
-    if activation_checkpointing:
-        for i in range(len(model.model.layers)):
-            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
+    if isinstance(model, Gemma3ForConditionalGeneration):
+        layers = model.language_model.model.layers
+    else:
+        layers = model.model.layers
 
-    for layer in model.model.layers:
+    if activation_checkpointing:
+        for i in range(len(layers)):
+            layers[i].mlp = checkpoint_wrapper(layers[i].mlp)
+
+    for layer in layers:
         fully_shard(
             layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
         )
@@ -277,7 +252,7 @@ PARALLIZE_FUNCTIONS = {
     Qwen2ForCausalLM: _parallelize_qwen,
     LlamaForCausalLM: _parallelize_llama,
     Gemma3ForCausalLM: _parallelize_gemma3,
-    Gemma3ForConditionalGeneration: _parallelize_gemma3_conditional,
+    Gemma3ForConditionalGeneration: _parallelize_gemma3,
 }
 
 
