@@ -86,7 +86,9 @@ def get_cpu_state_dict(
         if len(val.shape) == 0:
             new_state_dict[k] = val.cpu()
         else:
-            cpu_tensor = torch.empty( *val.shape, device="cpu", pin_memory=pin_memory, dtype=val.dtype)
+            cpu_tensor = torch.empty(
+                *val.shape, device="cpu", pin_memory=pin_memory, dtype=val.dtype
+            )
             cpu_tensor.copy_(val, non_blocking=True)
             new_state_dict[k] = cpu_tensor
 
