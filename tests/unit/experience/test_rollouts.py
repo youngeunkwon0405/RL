@@ -12,34 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
+from copy import deepcopy
+
 import pytest
 import ray
 import torch
-from copy import deepcopy
-import gc
-
 from transformers import AutoTokenizer
 
-from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.models.policy import PolicyConfig
-from nemo_reinforcer.models.policy.hf_policy import HfPolicy
-from nemo_reinforcer.models.generation.interfaces import configure_generation_config
-from nemo_reinforcer.experience.rollouts import run_multi_turn_rollout
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
+from nemo_rl.environments.games.sliding_puzzle import (
+    SlidingPuzzleConfig,
+    SlidingPuzzleEnv,
+    SlidingPuzzleGameLogic,
+    SlidingPuzzleMetadata,
+)
+from nemo_rl.experience.rollouts import run_multi_turn_rollout
+from nemo_rl.models.generation.interfaces import configure_generation_config
+from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
+from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.hf_policy import HfPolicy
 
 # Import the test environment definitions
 from tests.unit.test_envs import (
+    MultiStepCalcMetadata,
     MultiStepCalculatorEnv,
     _MultiStepCalculatorLogic,
-    MultiStepCalcMetadata,
-    SlidingPuzzleEnv,
-    SlidingPuzzleMetadata,
 )
-
-# Import the game logic for generating initial state from its new location
-from tests.unit.environments.sliding_puzzle_game import SlidingPuzzleGame
-
-from nemo_reinforcer.models.generation.vllm import VllmConfig, VllmGeneration
 
 MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
 
@@ -463,16 +463,16 @@ def sliding_puzzle_environment(rollout_cluster):
 def initial_sliding_puzzle_batch(rollout_tokenizer):
     print("Creating initial sliding puzzle test batch...")
     batch_size = 1
-    game_config = {
+    game_config: SlidingPuzzleConfig = {
         "size": 2,
         "shuffle_moves": 1,
     }
     max_moves = 10  # Set a limit for the test
 
     # Generate initial game state
-    initial_game_state = SlidingPuzzleGame.generate(game_config)
-    initial_render = SlidingPuzzleGame.render(initial_game_state)
-    welcome_message = SlidingPuzzleGame.init(initial_game_state)
+    initial_game_state = SlidingPuzzleGameLogic.generate(game_config)
+    initial_render = SlidingPuzzleGameLogic.render(initial_game_state)
+    welcome_message = SlidingPuzzleGameLogic.init(initial_game_state)
 
     prompt_instructions = (
         f"{welcome_message}\n\n"
