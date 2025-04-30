@@ -14,24 +14,24 @@
 
 import gc
 import os
-from typing import Optional, Union, List, TypedDict
+from typing import List, Optional, TypedDict, Union
 
 import ray
 import torch
 
-from nemo_rl.models.generation.interfaces import (
-    GenerationInterface,
-    GenerationDatumSpec,
-    GenerationOutputSpec,
-    verify_right_padding,
-    GenerationConfig,
-)
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import (
-    RayVirtualCluster,
     PY_EXECUTABLES,
+    RayVirtualCluster,
 )
-from nemo_rl.distributed.worker_groups import RayWorkerGroup, RayWorkerBuilder
+from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
+from nemo_rl.models.generation.interfaces import (
+    GenerationConfig,
+    GenerationDatumSpec,
+    GenerationInterface,
+    GenerationOutputSpec,
+    verify_right_padding,
+)
 
 
 class VllmSpecificArgs(TypedDict):
@@ -155,7 +155,7 @@ class VllmGenerationWorker:
             self.SamplingParams = vllm.SamplingParams
         except ImportError:
             raise ImportError(
-                f"vLLM is not installed. Please check that VllmGenerationWorker.DEFAULT_PY_EXECUTABLE covers the vllm dependency. "
+                "vLLM is not installed. Please check that VllmGenerationWorker.DEFAULT_PY_EXECUTABLE covers the vllm dependency. "
                 "If you are working interactively, you can install by running  `uv sync --extra vllm` anywhere in the repo."
             )
         vllm_kwargs = self.cfg.get("vllm_kwargs", {}).copy()

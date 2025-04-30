@@ -16,26 +16,25 @@ import warnings
 from collections import defaultdict
 from functools import partial
 from pathlib import Path
-from transformers import AutoTokenizer
 from typing import Optional, Tuple, TypedDict
-from tqdm import tqdm
 
 import numpy as np
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
+from transformers import AutoTokenizer
+
 from nemo_rl.algorithms.loss_functions import (
     DPOLossFn,
 )
-from nemo_rl.algorithms.utils import set_seed, get_tokenizer
+from nemo_rl.algorithms.utils import set_seed
 from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset, dpo_collate_fn
 from nemo_rl.data.interfaces import TaskDataSpec
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.models.interfaces import PolicyInterface
-from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.utils.checkpoint import CheckpointManager, CheckpointingConfig
+from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import Logger, LoggerConfig
 from nemo_rl.utils.timer import Timer
 
@@ -217,7 +216,7 @@ def setup(
         init_reference_model=True,
     )
     loss_fn = DPOLossFn(master_config["dpo"])
-    print(f"  ✓ Model initialized")
+    print("  ✓ Model initialized")
 
     print("\n" + "=" * 60)
     print(" " * 18 + "SETUP COMPLETE")
@@ -447,14 +446,6 @@ def dpo_train(
                     % master_config["checkpointing"]["save_period"]
                     == 0
                 ):  # +1 because step is 0-indexed
-                    is_last_checkpoint = (
-                        min(
-                            len(train_dataloader) * max_num_epochs,
-                            master_config["dpo"]["max_num_steps"],
-                        )
-                        - (total_steps + 1)
-                        < master_config["checkpointing"]["save_period"]
-                    )
                     dpo_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     dpo_save_state["total_steps"] = total_steps + 1
                     dpo_save_state["epoch"] = current_epoch
@@ -471,7 +462,9 @@ def dpo_train(
                             optimizer_path=os.path.join(
                                 checkpoint_path, "policy", "optimizer"
                             ),
-                            save_hf=is_last_checkpoint,
+                            tokenizer_path=os.path.join(
+                                checkpoint_path, "policy", "tokenizer"
+                            ),
                         )
                         torch.save(
                             train_dataloader.state_dict(),

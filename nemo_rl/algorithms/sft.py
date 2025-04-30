@@ -13,13 +13,14 @@
 # limitations under the License.
 import os
 import warnings
-from transformers import AutoTokenizer
 from pathlib import Path
 from typing import Optional, Tuple, TypedDict
 
 import numpy as np
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
+from transformers import AutoTokenizer
+
 from nemo_rl.algorithms.loss_functions import (
     NLLLoss,
 )
@@ -34,9 +35,9 @@ from nemo_rl.data.llm_message_utils import (
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.models.interfaces import PolicyInterface
-from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.utils.checkpoint import CheckpointManager, CheckpointingConfig
+from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import Logger, LoggerConfig
 from nemo_rl.utils.timer import Timer
 
@@ -195,7 +196,7 @@ def setup(
         init_reference_model=False,
     )
     loss_fn = NLLLoss()
-    print(f"  ✓ Model initialized")
+    print("  ✓ Model initialized")
 
     print("\n" + "=" * 60)
     print(" " * 18 + "SETUP COMPLETE")
@@ -446,15 +447,6 @@ def sft_train(
                     % master_config["checkpointing"]["save_period"]
                     == 0
                 ):  # +1 because step is 0-indexed
-                    is_last_checkpoint = (
-                        min(
-                            len(train_dataloader) * max_num_epochs,
-                            master_config["sft"]["max_num_steps"],
-                        )
-                        - (total_steps + 1)
-                        < master_config["checkpointing"]["save_period"]
-                    )
-
                     sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     sft_save_state["total_steps"] = total_steps + 1
                     sft_save_state["epoch"] = current_epoch
@@ -475,7 +467,6 @@ def sft_train(
                             tokenizer_path=os.path.join(
                                 checkpoint_path, "policy", "tokenizer"
                             ),
-                            save_hf=is_last_checkpoint,
                         )
                         torch.save(
                             train_dataloader.state_dict(),
