@@ -311,7 +311,7 @@ def grpo_train(
             POLICY_GENERATION_STALE = False
         else:
             policy_generation.prepare_for_generation()
-        val_metrics, log_to_console = validate(
+        val_metrics, timing_metrics, log_to_console = validate(
             policy_generation,
             val_dataloader,
             tokenizer,
@@ -324,7 +324,7 @@ def grpo_train(
         log_metrics(
             log_to_console,
             val_metrics,
-            timer,
+            timing_metrics,
             0,
             logger,
             is_val=True,
@@ -478,7 +478,7 @@ def grpo_train(
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
-                val_metrics, log_to_console = validate(
+                val_metrics, timing_metrics, log_to_console = validate(
                     policy_generation,
                     val_dataloader,
                     tokenizer,
@@ -491,7 +491,7 @@ def grpo_train(
                 log_metrics(
                     log_to_console,
                     val_metrics,
-                    timer,
+                    timing_metrics,
                     step + 1,
                     logger,
                     is_val=True,
@@ -544,7 +544,10 @@ def grpo_train(
             "Avg Reward": np.mean(rewards.numpy()),
             "Avg Generation Length": rollout_metrics["mean_gen_tokens_per_sample"],
         }
-        log_metrics(log_to_console, metrics, timer, step + 1, logger, is_val=False)
+        timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+        log_metrics(
+            log_to_console, metrics, timing_metrics, step + 1, logger, is_val=False
+        )
 
         timer.reset()
         step += 1
@@ -564,7 +567,7 @@ def grpo_train(
                 POLICY_GENERATION_STALE = False
             else:
                 policy_generation.prepare_for_generation()
-            val_metrics, log_to_console = validate(
+            val_metrics, timing_metrics, log_to_console = validate(
                 policy_generation,
                 val_dataloader,
                 tokenizer,
@@ -576,7 +579,7 @@ def grpo_train(
             log_metrics(
                 log_to_console,
                 val_metrics,
-                timer,
+                timing_metrics,
                 step,
                 logger,
                 is_val=True,
@@ -674,7 +677,8 @@ def validate(
         "Samples processed:": len(total_rewards),
     }
 
+    timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     # Make sure to reset the timer after validation
     timer.reset()
 
-    return val_metrics, log_to_console
+    return val_metrics, timing_metrics, log_to_console

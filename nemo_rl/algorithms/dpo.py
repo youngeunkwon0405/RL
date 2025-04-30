@@ -302,9 +302,10 @@ def validate(
         }
 
     # Make sure to reset the timer after validation
+    timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     timer.reset()
 
-    return val_metrics, log_to_console
+    return val_metrics, timing_metrics, log_to_console
 
 
 def dpo_train(
@@ -340,7 +341,7 @@ def dpo_train(
     # Run validation at the start if configured
     if val_at_start and total_steps == 0:
         print("\n🔍 Running initial validation...")
-        val_metrics, log_to_console = validate(
+        val_metrics, timing_metrics, log_to_console = validate(
             policy,
             val_dataloader,
             tokenizer,
@@ -354,7 +355,7 @@ def dpo_train(
         log_metrics(
             log_to_console,
             val_metrics,
-            timer,
+            timing_metrics,
             0,
             logger,
             is_val=True,
@@ -402,7 +403,7 @@ def dpo_train(
 
                 # Run validation if it's a validation step
                 if val_period > 0 and (total_steps + 1) % val_period == 0:
-                    val_metrics, log_to_console = validate(
+                    val_metrics, timing_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
                         tokenizer,
@@ -416,7 +417,7 @@ def dpo_train(
                     log_metrics(
                         log_to_console,
                         val_metrics,
-                        timer,
+                        timing_metrics,
                         total_steps + 1,
                         logger,
                         is_val=True,
@@ -462,7 +463,10 @@ def dpo_train(
             log_to_console = {
                 "loss": float(metrics["loss"]),
             }
-            log_metrics(log_to_console, metrics, timer, total_steps + 1, logger)
+            timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+            log_metrics(
+                log_to_console, metrics, timing_metrics, total_steps + 1, logger
+            )
 
             timer.reset()
             current_step += 1
@@ -481,7 +485,7 @@ def dpo_train(
     if master_config["checkpointing"]["enabled"] and not final_checkpoint_saved:
         ## check whether we need to run final validation
         if total_steps % val_period != 0:
-            val_metrics, log_to_console = validate(
+            val_metrics, timing_metrics, log_to_console = validate(
                 policy,
                 val_dataloader,
                 tokenizer,
@@ -495,7 +499,7 @@ def dpo_train(
             log_metrics(
                 log_to_console,
                 val_metrics,
-                timer,
+                timing_metrics,
                 total_steps,
                 logger,
                 is_val=True,

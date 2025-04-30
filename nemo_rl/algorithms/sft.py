@@ -300,10 +300,11 @@ def validate(
     else:
         log_to_console = {}
 
+    timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     # Make sure to reset the timer after validation
     timer.reset()
 
-    return val_metrics, log_to_console
+    return val_metrics, timing_metrics, log_to_console
 
 
 def sft_train(
@@ -334,7 +335,7 @@ def sft_train(
     # Run validation at the start if configured
     if val_at_start and total_steps == 0:
         print("\n🔍 Running initial validation...")
-        val_metrics, log_to_console = validate(
+        val_metrics, timing_metrics, log_to_console = validate(
             policy,
             val_dataloader,
             tokenizer,
@@ -349,7 +350,7 @@ def sft_train(
         log_metrics(
             log_to_console,
             val_metrics,
-            timer,
+            timing_metrics,
             0,
             logger,
             is_val=True,
@@ -415,7 +416,7 @@ def sft_train(
 
                 # Run validation if it's a validation step
                 if val_period > 0 and (total_steps + 1) % val_period == 0:
-                    val_metrics, log_to_console = validate(
+                    val_metrics, timing_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
                         tokenizer,
@@ -430,7 +431,7 @@ def sft_train(
                     log_metrics(
                         log_to_console,
                         val_metrics,
-                        timer,
+                        timing_metrics,
                         total_steps + 1,
                         logger,
                         is_val=True,
@@ -478,7 +479,12 @@ def sft_train(
                 "loss": float(metrics["loss"]),
             }
             log_metrics(
-                log_to_console, metrics, timer, total_steps + 1, logger, is_val=False
+                log_to_console,
+                metrics,
+                timing_metrics,
+                total_steps + 1,
+                logger,
+                is_val=False,
             )
 
             timer.reset()
@@ -498,7 +504,7 @@ def sft_train(
     if master_config["checkpointing"]["enabled"] and not final_checkpoint_saved:
         ## check whether we need to run final validation
         if total_steps % val_period != 0:
-            val_metrics, log_to_console = validate(
+            val_metrics, timing_metrics, log_to_console = validate(
                 policy,
                 val_dataloader,
                 tokenizer,
@@ -513,7 +519,7 @@ def sft_train(
             log_metrics(
                 log_to_console,
                 val_metrics,
-                timer,
+                timing_metrics,
                 total_steps,
                 logger,
                 is_val=True,

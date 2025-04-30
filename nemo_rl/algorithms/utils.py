@@ -502,13 +502,15 @@ def reduce_microbatch_metrics(metrics):
     return metrics
 
 
-def log_metrics(log_to_console, metrics, timer, step, logger, is_val=False) -> None:
+def log_metrics(
+    log_to_console, metrics, timing_metrics, step, logger, is_val=False
+) -> None:
     """Log training or validation metrics both to console and to logger (wandb/tensorboard).
 
     Args:
         log_to_console (dict): Metrics to display in console output
         metrics (dict): Full metrics dictionary to log to logger
-        timer (Timer): Timer object containing timing information
+        timing_metrics (dict): Timing metrics to log to logger
         step (int): Current training step
         logger (Logger): Logger object
         is_val (bool, optional): Whether these are validation metrics. Defaults to False.
@@ -528,7 +530,6 @@ def log_metrics(log_to_console, metrics, timer, step, logger, is_val=False) -> N
 
     # Display total time first, separately
     ## TODO: make this cleaner
-    timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     total_time = (
         timing_metrics.get("total_step_time", 0)
         if prefix == "train"
