@@ -35,6 +35,7 @@ policy:
   precision: "bfloat16"
   tensor_model_parallel_size: 1
   pipeline_model_parallel_size: 1
+  pipeline_dtype: "float32"
   context_parallel_size: 1
 
   dtensor_cfg:
@@ -45,6 +46,7 @@ policy:
   megatron_cfg:
     enabled: true
     empty_unused_memory_level: 1
+    converter_type: "Qwen2ForCausalLM"
     
     optimizer:
       optimizer: "adam"
@@ -79,7 +81,7 @@ policy:
       lr_warmup_init: 5.0e-7
 
   generation:
-    backend: "megatron"
+    backend: "vllm"
     max_new_tokens: ${policy.max_total_sequence_length}
     temperature: 1.0
     top_p: 1.0

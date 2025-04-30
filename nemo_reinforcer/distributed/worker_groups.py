@@ -56,10 +56,7 @@ class MultiWorkerFuture:
         all_results = ray.get(self.futures)
 
         if self.return_from_workers:
-            return_results = []
-            for worker_idx, result in zip(self.return_from_workers, all_results):
-                return_results.append(result)
-            return return_results
+            return [all_results[worker_idx] for worker_idx in self.return_from_workers]
 
         # If we don't need to deduplicate by tied workers, return all results
         if not self.respect_tied_workers:
@@ -531,7 +528,7 @@ class RayWorkerGroup:
             method_name: Name of the method to call on each worker
             data: Iterable of SlicedDataDicts to pass to workers/groups
             in_sharded_axes: List of axes that are sharded
-            replicate_on_axes: List of axes that are replicated
+            replicate_on_axes: List of axes that are to be replicated
             output_is_replicated: List of axes along which the output is replicated (and we should just return the first result)
             common_kwargs: Additional keyword arguments to pass to all workers
         Returns:

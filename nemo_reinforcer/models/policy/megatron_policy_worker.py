@@ -64,8 +64,16 @@ from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
     get_tensor_model_parallel_rank,
     get_tensor_model_parallel_world_size,
+    get_pipeline_model_parallel_group,
+    get_pipeline_model_parallel_rank,
+    get_pipeline_model_parallel_world_size,
+    get_pipeline_model_parallel_last_rank,
+    is_pipeline_last_stage,
 )
-from nemo_reinforcer.models.megatron.common import forward_step_arbitrary_loss
+from nemo_reinforcer.models.megatron.common import (
+    forward_step_arbitrary_loss,
+    broadcast_tensor,
+)
 from nemo.tron.train import train_step
 from nemo.tron.setup import HAVE_FSDP2
 
@@ -240,13 +248,12 @@ class MegatronPolicyWorker:
     ):
         self.cfg = config
         self.checkpoint_dir = checkpoint_dir
-
-        if self.cfg["precision"] == "float32":
-            self.dtype = torch.float32
-        elif self.cfg["precision"] == "bfloat16":
-            self.dtype = torch.bfloat16
-        else:
-            raise ValueError(f"Unknown precision: {self.cfg['precision']}")
+        dtype_map = {
+            "float32": torch.float32,
+            "bfloat16": torch.bfloat16,
+            "float16": torch.float16,
+        }
+        self.dtype = dtype_map[self.cfg["precision"]]
 
         hf_model_name = self.cfg["model_name"]
         self.tokenizer = tokenizer
@@ -315,7 +322,8 @@ class MegatronPolicyWorker:
         ]  # not supported right now
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
-        model_cfg.params_dtype = torch.bfloat16  # amp
+        model_cfg.params_dtype = self.dtype  # amp
+        model_cfg.pipeline_dtype = self.dtype  # dtype_map[self.cfg["pipeline_dtype"]]
         model_cfg.parallel_output = True
 
         checkpoint_config = CheckpointConfig(
@@ -431,6 +439,7 @@ class MegatronPolicyWorker:
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
+        self._held_gather_buffer = None
 
     def is_alive(self):
         return True
@@ -552,10 +561,22 @@ class MegatronPolicyWorker:
                                 denominator += 1
                         loss_metrics[key] = numerator / denominator
 
-                loss_metrics["lr"] = curr_lr
-                loss_metrics["wd"] = curr_wd
+                    loss_metrics["lr"] = curr_lr
+                    loss_metrics["wd"] = curr_wd
+                    torch.distributed.broadcast_object_list(
+                        [loss_metrics],
+                        src=get_pipeline_model_parallel_last_rank(),
+                        group=get_pipeline_model_parallel_group(),
+                    )
+                else:
+                    loss_metrics = [None]
+                    torch.distributed.broadcast_object_list(
+                        loss_metrics,
+                        src=get_pipeline_model_parallel_last_rank(),
+                        group=get_pipeline_model_parallel_group(),
+                    )
+                    loss_metrics = loss_metrics[0]
 
-                print(f"Skipped iterations: {skipped_iter}")
                 all_mb_metrics.append(loss_metrics)
 
         # Aggregate metrics across all microbatches
@@ -575,6 +596,7 @@ class MegatronPolicyWorker:
         }
         return metrics
 
+    @torch.no_grad()
     def get_logprobs(
         self, data: BatchedDataDict, micro_batch_size: int = None
     ) -> BatchedDataDict:
@@ -601,51 +623,60 @@ class MegatronPolicyWorker:
         all_log_probs = []
         self.model.eval()
 
-        with torch.no_grad():
+        pp_rank = get_pipeline_model_parallel_rank()
+        pp_grp = get_pipeline_model_parallel_group()
+        pp_size = get_pipeline_model_parallel_world_size()
 
-            def forward_step_fn(data_iterator: Iterable, model: GPTModel):
-                data_dict = next(data_iterator)
-                input_ids = data_dict["input_ids"].cuda()
-                attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
-                    input_ids, 0, False, False, False
-                )
-                output_tensor = model(input_ids, position_ids, attention_mask)
-
-                def collection_fn(output_tensor):
-                    tp_grp = get_tensor_model_parallel_group()
-                    tp_rank = get_tensor_model_parallel_rank()
-                    token_logprobs = from_parallel_logits_to_logprobs(
-                        output_tensor.to(torch.float32),
-                        target=input_ids,
-                        vocab_start_index=tp_rank * output_tensor.shape[-1],
-                        vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
-                        group=tp_grp,
-                        inference_only=True,
-                    )
-
-                    # Prepend 0 logprob for first token to maintain same sequence length as input
-                    token_logprobs = torch.cat(
-                        [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
-                    )
-
-                    return torch.tensor(0.0), {"logprobs": token_logprobs}
-
-                return output_tensor, collection_fn
-
-            forward_backward_func = get_forward_backward_func()
-            list_of_logprobs = forward_backward_func(
-                forward_step_func=forward_step_fn,
-                data_iterator=data.make_microbatch_iterator(logprob_batch_size),
-                model=self.model,
-                num_microbatches=max(1, data.size // logprob_batch_size),
-                seq_length=self.cfg["max_total_sequence_length"],
-                micro_batch_size=logprob_batch_size,
-                decoder_seq_length=self.cfg["max_total_sequence_length"],
-                forward_only=True,
+        def forward_step_fn(data_iterator: Iterable, model: GPTModel):
+            data_dict = next(data_iterator)
+            input_ids = data_dict["input_ids"].cuda()
+            attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
+                input_ids, 0, False, False, False
             )
+            output_tensor = model(input_ids, position_ids, attention_mask)
+
+            def collection_fn(output_tensor):
+                tp_grp = get_tensor_model_parallel_group()
+                tp_rank = get_tensor_model_parallel_rank()
+                token_logprobs = from_parallel_logits_to_logprobs(
+                    output_tensor.to(torch.float32),
+                    target=input_ids,
+                    vocab_start_index=tp_rank * output_tensor.shape[-1],
+                    vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
+                    group=tp_grp,
+                    inference_only=True,
+                )
+
+                # Prepend 0 logprob for first token to maintain same sequence length as input
+                token_logprobs = torch.cat(
+                    [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
+                )
+
+                return torch.tensor(0.0), {"logprobs": token_logprobs}
+
+            return output_tensor, collection_fn
+
+        forward_backward_func = get_forward_backward_func()
+        list_of_logprobs = forward_backward_func(
+            forward_step_func=forward_step_fn,
+            data_iterator=data.make_microbatch_iterator(logprob_batch_size),
+            model=self.model,
+            num_microbatches=max(1, data.size // logprob_batch_size),
+            seq_length=self.cfg["max_total_sequence_length"],
+            micro_batch_size=logprob_batch_size,
+            decoder_seq_length=self.cfg["max_total_sequence_length"],
+            forward_only=True,
+        )
+        if is_pipeline_last_stage(ignore_virtual=True):
             all_logprobs = [l["logprobs"] for l in list_of_logprobs]
             logprobs = torch.cat(all_logprobs, dim=0)
-            return BatchedDataDict(logprobs=logprobs).to("cpu")
+            # broadcast logprobs to first pp rank
+            broadcast_tensor(logprobs, torch.distributed.get_rank(), pp_grp)
+        else:
+            logprobs = broadcast_tensor(
+                None, get_pipeline_model_parallel_last_rank(), pp_grp
+            )
+        return BatchedDataDict(logprobs=logprobs).to("cpu")
 
     @contextmanager
     def use_reference_model(self):
@@ -859,9 +890,6 @@ class MegatronPolicyWorker:
         # Ensure model is in evaluation mode
         self.model.eval()
 
-        # Store the state dict for later access
-        self._held_state_dict_reference = {}
-
         # Get tensor parallel info
         tp_world_size = parallel_state.get_tensor_model_parallel_world_size()
 
@@ -965,7 +993,7 @@ class MegatronPolicyWorker:
             all_handles.append((key, handle))
 
         # Store references to avoid premature garbage collection
-        self._held_gathered_params_reference = gathered_params
+        self._held_gather_buffer = gathered_params
         shapes = {}
         for key, tensor in gathered_params.items():
             shapes[key] = tensor.shape
@@ -995,16 +1023,16 @@ class MegatronPolicyWorker:
     @torch.no_grad()
     def offload_before_refit(self):
         """Offload the optimizer and buffers to the CPU."""
-        return
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
-            for state in self.optimizer.state.values():
+            # Iterate through the state dictionaries for each parameter group
+            for state in self.optimizer._get_state().values():
+                # Iterate through the state items (e.g., momentum, variance) for a parameter
                 for k, v in state.items():
-                    if torch.is_tensor(v):
+                    # Check if the item is a tensor and on the GPU
+                    if torch.is_tensor(v) and v.is_cuda:
+                        # Move the tensor to CPU and update the state dictionary
                         state[k] = v.to("cpu")
-
-        for buffer in self.model.buffers():
-            buffer.data = buffer.data.to("cpu")
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -1019,15 +1047,14 @@ class MegatronPolicyWorker:
     @torch.no_grad()
     def offload_after_refit(self):
         # Offload as much as possible on the CPU
-        return
-        self.model = self.move_to_cpu(self.model)
+        self.model = self.move_model(self.model, "cpu")
         self.model.eval()
         torch.randn(1).cuda()  # wake up torch allocator
         self.offload_before_refit()  # rerun the old offload function
 
-        if self._held_reference_model_params is not None:
-            del self._held_reference_model_params
-            self._held_reference_model_params = None
+        if self._held_gather_buffer is not None:
+            del self._held_gather_buffer
+            self._held_gather_buffer = None
 
         gc.collect()
         torch.cuda.empty_cache()
@@ -1038,7 +1065,11 @@ class MegatronPolicyWorker:
             f"GPU Memory after refit complete: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
 
-    def move_to_cpu(self, model):
+    def move_model(self, model, device):
+        for name, item in model.state_dict().items():
+            if isinstance(item, torch.Tensor):
+                item = item.detach().to(device=device, non_blocking=True, copy=True)
+            model.state_dict()[name] = item
         return model
 
     def save_checkpoint(
