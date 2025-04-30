@@ -31,10 +31,71 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Shard, Replicate
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
+from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM, Gemma3ForConditionalGeneration
 
 from typing import Union, List
 from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 from torch.distributed.device_mesh import DeviceMesh
+
+def _parallelize_gemma3_conditional(
+    model: Gemma3ForCausalLM,
+    dp_mesh: DeviceMesh,
+    tp_mesh: DeviceMesh,
+    mp_policy: MixedPrecisionPolicy,
+    offload_policy: torch.distributed.fsdp.OffloadPolicy,
+    sequence_parallel: bool = False,
+    activation_checkpointing: bool = False,
+):
+    """Parallelizes a Gemma3ForCausalLM model across data parallel dimensions.
+
+    Tensor parallelism is not supported for Gemma3 models because of tied word embeddings.
+    """
+    assert tp_mesh.size() == 1, (
+        "Gemma3 models do not support TP because of tied word embeddings"
+    )
+
+    if activation_checkpointing:
+        for i in range(len(model.language_model.model.layers)):
+            model.language_model.model.layers[i].mlp = checkpoint_wrapper(model.language_model.model.layers[i].mlp)
+
+    for layer in model.language_model.model.layers:
+        fully_shard(
+            layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+        )
+
+    return fully_shard(
+        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+    )
+
+def _parallelize_gemma3(
+    model: Gemma3ForCausalLM,
+    dp_mesh: DeviceMesh,
+    tp_mesh: DeviceMesh,
+    mp_policy: MixedPrecisionPolicy,
+    offload_policy: torch.distributed.fsdp.OffloadPolicy,
+    sequence_parallel: bool = False,
+    activation_checkpointing: bool = False,
+):
+    """Parallelizes a Gemma3ForCausalLM model across data parallel dimensions.
+
+    Tensor parallelism is not supported for Gemma3 models because of tied word embeddings.
+    """
+    assert tp_mesh.size() == 1, (
+        "Gemma3 models do not support TP because of tied word embeddings"
+    )
+
+    if activation_checkpointing:
+        for i in range(len(model.model.layers)):
+            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
+
+    for layer in model.model.layers:
+        fully_shard(
+            layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+        )
+
+    return fully_shard(
+        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+    )
 
 
 def _parallelize_llama(
@@ -218,6 +279,8 @@ def _parallelize_qwen(
 PARALLIZE_FUNCTIONS = {
     Qwen2ForCausalLM: _parallelize_qwen,
     LlamaForCausalLM: _parallelize_llama,
+    Gemma3ForCausalLM: _parallelize_gemma3,
+    Gemma3ForConditionalGeneration: _parallelize_gemma3_conditional,
 }
 
 
