@@ -477,7 +477,7 @@ def dpo_train(
         if current_epoch >= total_num_epochs:
             break
 
-    ## save a final checkpoint in hf format
+    ## save a final checkpoint if needed
     if master_config["checkpointing"]["enabled"] and not final_checkpoint_saved:
         ## check whether we need to run final validation
         if total_steps % val_period != 0:

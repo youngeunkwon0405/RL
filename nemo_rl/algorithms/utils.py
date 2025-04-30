@@ -20,16 +20,15 @@ from typing import Callable, Optional, Tuple, TypedDict
 
 import numpy as np
 import torch
-from nemo_reinforcer.data.datasets import AllTaskProcessedDataset
-from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.models.dtensor.parallelize import (
-    get_logprobs_from_vocab_parallel_logits,
-)
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
 from nemo_rl.data import DataConfig, hf_datasets
-from nemo_rl.distributed.virtual_cluster import ClusterConfig
+from nemo_rl.data.datasets import AllTaskProcessedDataset
+from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
+from nemo_rl.models.dtensor.parallelize import (
+    get_logprobs_from_vocab_parallel_logits,
+)
 from nemo_rl.models.policy import PolicyConfig, TokenizerConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
