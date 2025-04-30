@@ -376,9 +376,34 @@ class DTensorPolicyWorker:
                             dtype=torch.long,
                             device=input_ids.device,
                         )
-                        position_ids = torch.arange(
-                            seq_len, device=input_ids.device
-                        ).repeat(batch_size, 1)
+
+                        if "packed_lengths" in mb:
+                            # Build list of 1D position tensors
+                            position_id_rows = [
+                                torch.cat([torch.arange(l) for l in lengths])
+                                for lengths in mb["packed_lengths"]
+                            ]
+
+                            # Pad each row to fixed seq_len
+                            position_ids = torch.stack(
+                                [
+                                    torch.cat(
+                                        [
+                                            row,
+                                            torch.zeros(
+                                                seq_len - len(row), dtype=torch.long
+                                            ),
+                                        ]
+                                    )
+                                    for row in position_id_rows
+                                ]
+                            )
+
+                        else:
+                            # Default behavior for non-packed sequences
+                            position_ids = torch.arange(
+                                seq_len, device=input_ids.device
+                            ).repeat(batch_size, 1)
 
                         outputs = self.model(
                             input_ids=input_ids,

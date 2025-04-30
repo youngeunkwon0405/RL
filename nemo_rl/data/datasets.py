@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional, Union
+from typing import Any, Dict, List, Union, Tuple, Optional
 
 import torch
 from datasets import Dataset
@@ -146,7 +146,51 @@ def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict[Any]:
     return output
 
 
-def eval_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict[Any]:
+def packed_rl_collate_fn(data_batch: List[Dict[str, Any]]) -> BatchedDataDict:
+    """Collate function for packed RL training.
+
+    This function handles packed data batches from PackedDataset.
+    It reuses the logic from rl_collate_fn but adapts it for packed data.
+    """
+    # Create a list of "unpacked" samples to pass to rl_collate_fn
+    unpacked_samples = []
+
+    for packed_item in data_batch:
+        samples = packed_item["samples"]
+        sequence_lengths = packed_item["lengths"]
+
+        # Create a single "unpacked" sample that represents the packed group
+        packed_message_log = []
+        for sample in samples:
+            packed_message_log.extend(sample["message_log"])
+
+        # Use minimum loss multiplier from all samples
+        min_loss_multiplier = min(sample["loss_multiplier"] for sample in samples)
+
+        # Create a DatumSpec-like dictionary for this packed group
+        unpacked_sample = {
+            "message_log": packed_message_log,
+            "length": sum(sequence_lengths),
+            "loss_multiplier": min_loss_multiplier,
+            "extra_env_info": samples[0]["extra_env_info"],
+            "task_name": samples[0].get("task_name", None),
+            "idx": samples[0]["idx"],
+            "stop_strings": samples[0].get("stop_strings", None),
+        }
+
+        unpacked_samples.append(unpacked_sample)
+
+    # Use the existing rl_collate_fn to process the unpacked samples
+    result = rl_collate_fn(unpacked_samples)
+
+    # Add packed-specific information
+    result["is_packed"] = True
+    result["packed_lengths"] = [item["lengths"] for item in data_batch]
+
+    return result
+
+
+def eval_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
     """Collate function for evaluation.
 
     Takes a list of data samples and combines them into a single batched dictionary
