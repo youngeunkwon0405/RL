@@ -555,6 +555,15 @@ def grpo_train(
     if master_config["checkpointing"]["enabled"] and not final_checkpoint_saved:
         ## check whether we need to run final validation
         if step % val_period != 0:
+            if NEED_REFIT and POLICY_GENERATION_STALE:
+                refit_policy_generation(
+                    policy,
+                    policy_generation,
+                    refit_buffer_size_gb,
+                )
+                POLICY_GENERATION_STALE = False
+            else:
+                policy_generation.prepare_for_generation()
             val_metrics, log_to_console = validate(
                 policy_generation,
                 val_dataloader,
@@ -563,6 +572,7 @@ def grpo_train(
                 step=step,
                 master_config=master_config,
             )
+            policy_generation.finish_generation()
             log_metrics(
                 log_to_console,
                 val_metrics,
