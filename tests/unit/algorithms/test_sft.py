@@ -12,19 +12,25 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
-from nemo_reinforcer.algorithms.sft import sft_train, _default_sft_save_state
-from nemo_reinforcer.algorithms.loss_functions import NLLLoss
+
+from nemo_rl.algorithms.loss_functions import NLLLoss
+from nemo_rl.algorithms.sft import _default_sft_save_state, sft_train
 
 
 @pytest.fixture
 def mock_components():
     # Create mock components
     policy = MagicMock()
-    policy.train.return_value = {"loss": torch.tensor(0.5), "all_mb_metrics": {}}
+    policy.train.return_value = {
+        "loss": torch.tensor(0.5),
+        "grad_norm": torch.tensor(1.0),
+        "all_mb_metrics": {},
+    }
 
     # Create a proper message log structure with token_ids
     mock_batch = {
