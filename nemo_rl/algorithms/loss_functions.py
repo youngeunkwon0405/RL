@@ -38,6 +38,7 @@ class ClippedPGLossConfig(TypedDict):
     ratio_clip_max: float
     use_on_policy_kl_approximation: bool
     use_importance_sampling_correction: bool
+    token_level_loss: bool
 
 
 class ClippedPGLossDataDict(TypedDict):
@@ -82,7 +83,7 @@ class ClippedPGLossFn(LossFunction):
     Due to potential numerical instability, we cast the logits to float32 before computing the loss.
     """
 
-    def __init__(self, cfg: ClippedPGLossConfig, use_token_level_loss: bool = False):
+    def __init__(self, cfg: ClippedPGLossConfig):
         self.ratio_clip_min = cfg["ratio_clip_min"]
         self.ratio_clip_max = cfg["ratio_clip_max"]
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
@@ -93,7 +94,7 @@ class ClippedPGLossFn(LossFunction):
         ]
 
         self.loss_type = (
-            LossType.TOKEN_LEVEL if use_token_level_loss else LossType.SAMPLE_LEVEL
+            LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SAMPLE_LEVEL
         )
 
     def __call__(
