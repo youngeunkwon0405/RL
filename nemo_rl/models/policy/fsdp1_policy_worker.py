@@ -283,6 +283,10 @@ class FSDP1PolicyWorker:
                 else:
                     raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
 
+                # when FSDP reduces the gradients across devices, they're automatically averaged
+                # but we want to sum them so we cancel out the average here
+                total_valid_tokens_or_seqs /= torch.distributed.get_world_size()
+
                 self.optimizer.zero_grad()
                 mb_losses = []
 

@@ -318,6 +318,10 @@ class DTensorPolicyWorker:
                 else:
                     raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
 
+                # when FSDP reduces the gradients over the DP dim, they're automatically averaged
+                # but we want to sum them so we cancel out the average here
+                total_valid_tokens_or_seqs /= self.dp_size
+
                 self.optimizer.zero_grad()
                 mb_losses = []
 

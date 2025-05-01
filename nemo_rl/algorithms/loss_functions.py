@@ -82,7 +82,7 @@ class ClippedPGLossFn(LossFunction):
     Due to potential numerical instability, we cast the logits to float32 before computing the loss.
     """
 
-    def __init__(self, cfg: ClippedPGLossConfig):
+    def __init__(self, cfg: ClippedPGLossConfig, use_token_level_loss: bool = False):
         self.ratio_clip_min = cfg["ratio_clip_min"]
         self.ratio_clip_max = cfg["ratio_clip_max"]
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
@@ -92,7 +92,9 @@ class ClippedPGLossFn(LossFunction):
             "use_importance_sampling_correction"
         ]
 
-        self.loss_type = LossType.TOKEN_LEVEL
+        self.loss_type = (
+            LossType.TOKEN_LEVEL if use_token_level_loss else LossType.SAMPLE_LEVEL
+        )
 
     def __call__(
         self,
@@ -111,9 +113,21 @@ class ClippedPGLossFn(LossFunction):
         mask = token_mask * sample_mask.unsqueeze(-1)
 
         lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
-        mult_prob_error = masked_mean(
-            torch.exp(lp_error), mask, total_valid_tokens_or_seqs
-        ).item()
+        if self.loss_type == LossType.TOKEN_LEVEL:
+            # average over all tokens in the microbatch
+            mult_prob_error = masked_mean(
+                torch.exp(lp_error),
+                mask,
+                global_normalization_factor=total_valid_tokens_or_seqs,
+            ).item()
+        else:
+            # first average over tokens per sample, then average over samples
+            mult_prob_error = masked_mean(
+                masked_mean(torch.exp(lp_error), token_mask, dim=-1),
+                sample_mask,
+                global_normalization_factor=total_valid_tokens_or_seqs,
+            ).item()
+
         if mult_prob_error == 0.0:
             # this sometimes gets 0 (everything masked/invalid). Doing this to avoid screwing up stats too much
             mult_prob_error = 1.0
@@ -156,7 +170,16 @@ class ClippedPGLossFn(LossFunction):
                     logprobs_reference=reference_policy_logprobs,
                 )
             )
-            kl = masked_mean(kl, mask, total_valid_tokens_or_seqs)
+            if self.loss_type == LossType.TOKEN_LEVEL:
+                kl = masked_mean(
+                    kl, mask, global_normalization_factor=total_valid_tokens_or_seqs
+                )
+            else:
+                kl = masked_mean(
+                    masked_mean(kl, token_mask, dim=-1),
+                    sample_mask,
+                    global_normalization_factor=total_valid_tokens_or_seqs,
+                )
         else:
             kl = 0
 
@@ -181,19 +204,47 @@ class ClippedPGLossFn(LossFunction):
             )
         else:
             actor_importance_weights = torch.ones_like(prev_logprobs)
-        actor_loss = masked_mean(
-            actor_importance_weights * torch.max(loss1, loss2),
-            mask,
-            total_valid_tokens_or_seqs,
-        )
+
+        if self.loss_type == LossType.TOKEN_LEVEL:
+            actor_loss = masked_mean(
+                actor_importance_weights * torch.max(loss1, loss2),
+                mask,
+                global_normalization_factor=total_valid_tokens_or_seqs,
+            )
+        else:
+            actor_loss = masked_mean(
+                masked_mean(
+                    actor_importance_weights * torch.max(loss1, loss2),
+                    token_mask,
+                    dim=-1,
+                ),
+                sample_mask,
+                global_normalization_factor=total_valid_tokens_or_seqs,
+            )
         loss = actor_loss + kl
         with torch.no_grad():
-            probs_ratio = masked_mean(
-                ratios.detach(), mask, total_valid_tokens_or_seqs
-            ).item()
-            probs_ratio_clamped = masked_mean(
-                ratios_clamped.detach(), mask, total_valid_tokens_or_seqs
-            ).item()
+            if self.loss_type == LossType.TOKEN_LEVEL:
+                probs_ratio = masked_mean(
+                    ratios.detach(),
+                    mask,
+                    global_normalization_factor=total_valid_tokens_or_seqs,
+                ).item()
+                probs_ratio_clamped = masked_mean(
+                    ratios_clamped.detach(),
+                    mask,
+                    global_normalization_factor=total_valid_tokens_or_seqs,
+                ).item()
+            else:
+                probs_ratio = masked_mean(
+                    masked_mean(ratios.detach(), token_mask, dim=-1),
+                    sample_mask,
+                    global_normalization_factor=total_valid_tokens_or_seqs,
+                ).item()
+                probs_ratio_clamped = masked_mean(
+                    masked_mean(ratios_clamped.detach(), token_mask, dim=-1),
+                    sample_mask,
+                    global_normalization_factor=total_valid_tokens_or_seqs,
+                ).item()
 
         return (
             loss,
@@ -254,7 +305,11 @@ class NLLLoss(LossFunction):
         else:
             ## single scalar loss
             ## scale by the total number of tokens in the batch
-            loss = -masked_mean(token_logprobs, mask, total_valid_tokens_or_seqs)
+            loss = -masked_mean(
+                token_logprobs,
+                mask,
+                global_normalization_factor=total_valid_tokens_or_seqs,
+            )
 
         return loss, {
             "loss": loss.item() if loss.ndim == 0 else loss,
@@ -395,18 +450,24 @@ class DPOLossFn(LossFunction):
         ## divide by 2 because each preference example corresponds to 2 samples (chosen, rejected)
         return (
             masked_mean(
-                per_sample_loss, sample_mask[::2], total_valid_tokens_or_seqs / 2
+                per_sample_loss,
+                sample_mask[::2],
+                global_normalization_factor=total_valid_tokens_or_seqs / 2,
             ),
             masked_mean(
                 rewards_chosen > rewards_rejected,
                 sample_mask[::2],
-                total_valid_tokens_or_seqs / 2,
+                global_normalization_factor=total_valid_tokens_or_seqs / 2,
             ),
             masked_mean(
-                rewards_chosen, sample_mask[::2], total_valid_tokens_or_seqs / 2
+                rewards_chosen,
+                sample_mask[::2],
+                global_normalization_factor=total_valid_tokens_or_seqs / 2,
             ),
             masked_mean(
-                rewards_rejected, sample_mask[1::2], total_valid_tokens_or_seqs / 2
+                rewards_rejected,
+                sample_mask[1::2],
+                global_normalization_factor=total_valid_tokens_or_seqs / 2,
             ),
         )
 
@@ -429,7 +490,7 @@ class DPOLossFn(LossFunction):
             sft_loss_chosen = masked_mean(
                 sft_loss_chosen,
                 data["sample_mask"][::2],
-                total_valid_tokens_or_seqs / 2,
+                global_normalization_factor=total_valid_tokens_or_seqs / 2,
             )
 
         (

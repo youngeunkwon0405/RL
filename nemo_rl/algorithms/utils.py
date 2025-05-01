@@ -120,15 +120,18 @@ def surpress_user_warnings(f):
 
 
 def masked_mean(
-    values, mask, global_normalization_factor: Optional[torch.Tensor] = None
+    values,
+    mask,
+    dim: Optional[int] = None,
+    global_normalization_factor: Optional[torch.Tensor] = None,
 ):
     """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
     normalization_factor = (
-        torch.sum(mask)
+        torch.sum(mask, dim=dim)
         if global_normalization_factor is None
         else global_normalization_factor
     )
-    return torch.sum(values * mask) / (normalization_factor + 1e-8)
+    return torch.sum(values * mask, dim=dim) / (normalization_factor + 1e-8)
 
 
 def set_seed(seed: int):
