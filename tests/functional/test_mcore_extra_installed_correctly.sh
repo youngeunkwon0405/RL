@@ -34,6 +34,7 @@ EOF
 uv run --extra mcore python <<"EOF"
 # This must be the first import to get all of the megatron non-core packages added to the path
 import nemo_rl
+import megatron.core
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron.init import initialize_megatron
 from nemo.tron.config import (
