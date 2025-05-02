@@ -30,7 +30,7 @@ def test_create_local_venv():
             assert venv_python == f"{tempdir}/test_venv/bin/python"
             # Check if sphinx package is installed in the created venv
 
-            # Run a Python command to check if emoji can be imported
+            # Run a Python command to check if sphinx can be imported
             result = subprocess.run(
                 [
                     venv_python,
