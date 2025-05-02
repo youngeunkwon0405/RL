@@ -29,7 +29,7 @@ from nemo_rl.models.dtensor.parallelize import (
 
 class LossType(enum.Enum):
     TOKEN_LEVEL = "token_level"
-    SAMPLE_LEVEL = "sample_level"
+    SEQUENCE_LEVEL = "sequence_level"
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -94,7 +94,7 @@ class ClippedPGLossFn(LossFunction):
         ]
 
         self.loss_type = (
-            LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SAMPLE_LEVEL
+            LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
         )
 
     def __call__(
@@ -400,7 +400,7 @@ class DPOLossFn(LossFunction):
         self.sft_average_log_probs = cfg["sft_average_log_probs"]
         self.sft_loss = NLLLoss()
 
-        self.loss_type = LossType.SAMPLE_LEVEL
+        self.loss_type = LossType.SEQUENCE_LEVEL
 
     def split_output_tensor(self, tensor: torch.Tensor):
         return tensor[::2], tensor[1::2]

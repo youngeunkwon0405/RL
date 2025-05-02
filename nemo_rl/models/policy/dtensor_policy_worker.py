@@ -309,7 +309,7 @@ class DTensorPolicyWorker:
                     torch.distributed.all_reduce(
                         total_valid_tokens_or_seqs, group=self.dp_mesh.get_group()
                     )
-                elif loss_fn.loss_type == LossType.SAMPLE_LEVEL:
+                elif loss_fn.loss_type == LossType.SEQUENCE_LEVEL:
                     ## get number of valid samples in the global batch
                     total_valid_tokens_or_seqs = torch.sum(global_batch["sample_mask"])
                     torch.distributed.all_reduce(
@@ -372,8 +372,8 @@ class DTensorPolicyWorker:
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                     loss_metrics["normalization_factor"] = (
-                        total_valid_tokens_or_seqs / self.dp_size
-                    ).cpu()
+                        total_valid_tokens_or_seqs.cpu()
+                    )
 
                     # Backward pass
                     if not eval_mode:

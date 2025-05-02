@@ -481,7 +481,7 @@ def sft_train(
             }
             metrics.update(train_results["all_mb_metrics"])
             for k, v in metrics.items():
-                if k == "lr":
+                if k in {"lr", "normalization_factor"}:
                     metrics[k] = np.mean(v).item()
                 else:
                     metrics[k] = np.sum(v).item()
