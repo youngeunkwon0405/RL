@@ -23,6 +23,7 @@ from torch.distributed.fsdp import CPUOffloadPolicy, MixedPrecisionPolicy, fully
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
+    PrepareModuleInput,
     RowwiseParallel,
     SequenceParallel,
     parallelize_module,
@@ -38,6 +39,42 @@ from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 
 from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 
+class RotaryEmbedParallel(SequenceParallel):
+    """Custom SequenceParallel class for Qwen2 / Gemma3 rotary embeddings because the input is a tuple."""
+
+    @staticmethod
+    def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
+        new_inputs = list(inputs)
+
+        if not isinstance(inputs[0], DTensor):
+            """Guard the metadata for Sequence Parallel here"""
+            try:
+                new_inputs[0] = DTensor.from_local(
+                    local_tensor=inputs[0],
+                    device_mesh=device_mesh,
+                    placements=sequence_sharding,
+                    run_check=True,
+                )
+            except ValueError as e:
+                raise ValueError(
+                    f"Failed to shard tensor for sequence parallelism. Local Shape is ({inputs[0].shape}) "
+                    f"at rank {torch.distributed.get_rank()}. Different TP ranks must have the same shape. "
+                    f"Original error: {str(e)}"
+                ) from e
+
+        if not isinstance(inputs[1], DTensor):
+            new_inputs[1] = DTensor.from_local(
+                local_tensor=inputs[1],
+                device_mesh=device_mesh,
+                placements=(Replicate(),),
+                run_check=False,
+            )
+
+        return type(inputs)(new_inputs)
+
+    @staticmethod
+    def _prepare_output_fn(use_local_output, mod, outputs, device_mesh):
+        return type(outputs)([o.to_local() if use_local_output else o for o in outputs])
 
 def _parallelize_gemma3(
     model: Union[Gemma3ForCausalLM, Gemma3ForConditionalGeneration],
@@ -52,14 +89,55 @@ def _parallelize_gemma3(
 
     Tensor parallelism is not supported for Gemma3 models because of tied word embeddings.
     """
-    assert tp_mesh.size() == 1, (
-        "Gemma3 models do not support TP because of tied word embeddings"
-    )
-
     if isinstance(model, Gemma3ForConditionalGeneration):
         layers = model.language_model.model.layers
+        model_prefix = "language_model.model"
     else:
         layers = model.model.layers
+        model_prefix = "model"
+
+    if tp_mesh.size() > 1:
+        # TODO: add asserts
+        # num_key_value_groups % TP_size == 0 ?
+
+        # For gemma3 models, we don't include the model.embed_tokens and lm_head in the 
+        # parallelization plans because they have tied weights.
+        base_model_tp_plan = {
+            f"{model_prefix}.layers.*.self_attn.q_proj": ColwiseParallel(),
+            f"{model_prefix}.layers.*.self_attn.k_proj": ColwiseParallel(),
+            f"{model_prefix}.layers.*.self_attn.v_proj": ColwiseParallel(),
+            f"{model_prefix}.layers.*.self_attn.o_proj": RowwiseParallel(),
+            f"{model_prefix}.layers.*.mlp.up_proj": ColwiseParallel(),
+            f"{model_prefix}.layers.*.mlp.gate_proj": ColwiseParallel(),
+            f"{model_prefix}.layers.*.mlp.down_proj": RowwiseParallel(),
+        }
+
+        base_model_sp_plan = {
+            f"{model_prefix}.rotary_emb": RotaryEmbedParallel(use_local_output=True),
+            f"{model_prefix}.rotary_emb_local": RotaryEmbedParallel(use_local_output=True),
+            f"{model_prefix}.layers.0": PrepareModuleInput(
+                input_layouts=(Replicate(),),
+                desired_input_layouts=(Shard(1),),
+            ),
+            f"{model_prefix}.layers.*.input_layernorm": SequenceParallel(),
+            f"{model_prefix}.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
+            f"{model_prefix}.layers.*.post_attention_layernorm": SequenceParallel(),
+            f"{model_prefix}.layers.*.pre_feedforward_layernorm": SequenceParallel(),
+            f"{model_prefix}.layers.*.mlp.down_proj": RowwiseParallel(output_layouts=Shard(1)),
+            f"{model_prefix}.layers.*.post_feedforward_layernorm": SequenceParallel(),
+            f"{model_prefix}.norm": SequenceParallel(),
+            f"{model_prefix}.lm_head": PrepareModuleInput(
+                input_layouts=(Shard(1),),
+                desired_input_layouts=(Replicate(),),
+                use_local_output=True,
+            ),
+        }
+
+        if sequence_parallel:
+            # Enable sequence parallelism only if TP size > 1
+            base_model_tp_plan.update(base_model_sp_plan)
+
+        parallelize_module(model, tp_mesh, base_model_tp_plan)
 
     if activation_checkpointing:
         for i in range(len(layers)):
@@ -138,6 +216,7 @@ def _parallelize_llama(
     )
 
 
+
 def _parallelize_qwen(
     model: Union[Qwen2ForCausalLM, Qwen3ForCausalLM],
     dp_mesh: DeviceMesh,
@@ -148,40 +227,6 @@ def _parallelize_qwen(
     activation_checkpointing: bool = False,
 ):
     """Parallelizes a Qwen2ForCausalLM model across data and tensor parallel dimensions."""
-
-    class QwenRotaryEmbedParallel(SequenceParallel):
-        """Custom SequenceParallel class for Qwen2 rotary embeddings because the input is a tuple."""
-
-        @staticmethod
-        def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
-            new_inputs = list(inputs)
-
-            if not isinstance(inputs[0], DTensor):
-                """Guard the metadata for Sequence Parallel here"""
-                try:
-                    new_inputs[0] = DTensor.from_local(
-                        local_tensor=inputs[0],
-                        device_mesh=device_mesh,
-                        placements=sequence_sharding,
-                        run_check=True,
-                    )
-                except ValueError as e:
-                    raise ValueError(
-                        f"Failed to shard tensor for sequence parallelism. Local Shape is ({inputs[0].shape}) "
-                        f"at rank {torch.distributed.get_rank()}. Different TP ranks must have the same shape. "
-                        f"Original error: {str(e)}"
-                    ) from e
-
-            if not isinstance(inputs[1], DTensor):
-                new_inputs[1] = DTensor.from_local(
-                    local_tensor=inputs[1],
-                    device_mesh=device_mesh,
-                    placements=(Replicate(),),
-                    run_check=False,
-                )
-
-            return type(inputs)(new_inputs)
-
     class Qwen3QKNorm(SequenceParallel):
         @staticmethod
         def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
@@ -200,9 +245,9 @@ def _parallelize_qwen(
                 )
 
     if tp_mesh.size() > 1:
-        assert not model.config.tie_word_embeddings, (
-            "Tie word embeddings not supported when TP is enabled"
-        )
+        # assert not model.config.tie_word_embeddings, (
+        #     "Tie word embeddings not supported when TP is enabled"
+        # )
         if sequence_parallel:
             base_model_tp_plan = {
                 "lm_head": ColwiseParallel(
@@ -214,7 +259,7 @@ def _parallelize_qwen(
                     input_layouts=Replicate(),
                     output_layouts=Shard(1),
                 ),
-                "model.rotary_emb": QwenRotaryEmbedParallel(),
+                "model.rotary_emb": RotaryEmbedParallel(),
                 "model.norm": SequenceParallel(),
                 "model.layers.*.input_layernorm": SequenceParallel(),
                 "model.layers.*.self_attn.q_proj": ColwiseParallel(
