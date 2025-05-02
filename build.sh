@@ -2,7 +2,7 @@ PATH=/usr/bin:$PATH
 set -eoux pipefail
 rm -rf .venv
 uv venv
-uv pip install torch==2.6.0 setuptools
+#uv pip install torch==2.6.0 setuptools
 uv sync
 #uv sync --no-build-isolation
 #uv run --extra mcore --no-build-isolation te.py
