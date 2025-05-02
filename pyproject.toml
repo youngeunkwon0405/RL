@@ -2,6 +2,14 @@
 requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
+
+[tool.setuptools]
+packages = ["nemo_rl"]
+
+[tool.setuptools.dynamic]
+version = {attr = "nemo_rl.__version__"}  # any module attribute compatible with ast.literal_eval
+readme = {file = "README.md", content-type = "text/markdown"}
+
 [project]
 name = "nemo-rl"
 dynamic = [
@@ -78,25 +86,21 @@ test = [
     "pytest-cov",
 ]
 
-[tool.setuptools]
-packages = ["nemo_rl"]
-
-[tool.setuptools.dynamic]
-version = {attr = "nemo_rl.__version__"}  # any module attribute compatible with ast.literal_eval
-readme = {file = "README.md", content-type = "text/markdown"}
-
 [tool.uv.sources]
-#megatron-core = { git = "https://github.com/NVIDIA/Megatron-LM", rev = "222adb83439f3aac15e6e637a3fafc2929021948" }
-# Using this instead of ^ b/c pybind command doesn't use sys.executable ( but need to double check since i changed lots)
-# also had to do editable b/c make file didn't seem to get copied over
-megatron-core = { path = "3rdparty/Megatron-LM", editable = true }
-nemo-tron = { path = "3rdparty/NeMo/nemo" }  # seems to difficult to get the subpackages right
+#megatron-core = { path = "3rdparty/Megatron-LM", editable = true }
+#nemo-tron = { path = "3rdparty/NeMo/nemo" }  # seems to difficult to get the subpackages right
+megatron-core = { workspace = true }
+nemo-tron = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "3rdparty/Megatron-LM",
+    "3rdparty/NeMo/nemo",
+]
 
 [tool.uv]
 # Currently, TE must be built with no build-isolation b/c it requires torch
 no-build-isolation-package = ["transformer-engine"]
-# TODO(only if ray==2.45.0): For now, don't install ray b/c 2.45 is not published yet
-#override-dependencies = ["ray; sys_platform == 'never'"]
 # Always apply the build group since dependencies like TE/mcore/nemo-run require build dependencies
 # and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
 # avoid including these in the default dependency set, but for now it's required.
@@ -105,10 +109,7 @@ default-groups = ["dev", "build"]
 #  --link-mode=hardlink (default on linux; may get warnings about switching to --link-mode copy if uv cache and venv on different file-systems)
 #  --link-mode=copy (slower but more reliable; supresses warning)
 #  --link-mode=symlink (fastest option when uv cache and venv on different file-system; caveat: venv is brittle since it depends on the environment/container)
-#
-#link-mode = "symlink"
-
-
+link-mode = "copy"
 
 [tool.black]
 line-length = 120
