@@ -79,7 +79,7 @@ def broadcast_tensor(
                 non-source ranks (will be created with correct shape/dtype).
                 If not None on non-source ranks, it's used as the buffer
                 for the broadcast and must match the source tensor's metadata.
-        src_rank (int): The rank of the source process within the group.
+        src_rank (int): The global rank of the source process.
         group: The process group for communication.
 
     Returns:
@@ -91,7 +91,7 @@ def broadcast_tensor(
                     provided on a non-source rank has mismatched shape/dtype/device.
         TypeError: If broadcasting metadata fails (e.g., due to pickling issues).
     """
-    rank = dist.get_rank(group=group)
+    rank = dist.get_rank()
     # Assume operations happen on the default CUDA device for the rank
     # TODO: Consider making device explicit if needed, e.g., derive from tensor on src
     device = torch.cuda.current_device()
