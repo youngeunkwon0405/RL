@@ -4,18 +4,21 @@
 - [Nemo-RL: A Scalable and Efficient Post-Training Library for Models Ranging from tiny to \>100B Parameters, scaling from 1 GPU to 100s](#nemo-rl-a-scalable-and-efficient-post-training-library-for-models-ranging-from-tiny-to-100b-parameters-scaling-from-1-gpu-to-100s)
   - [Features](#features)
   - [Prerequisites](#prerequisites)
+    - [Clone **NeMo RL**](#clone-nemo-rl)
+    - [Install `uv`](#install-uv)
   - [Quick start](#quick-start)
     - [GRPO](#grpo)
-      - [Single Node](#grpo-single-node)
-      - [Multi-node](#grpo-multi-node)
+      - [GRPO Single Node](#grpo-single-node)
+      - [GRPO Multi-node](#grpo-multi-node)
         - [GRPO Qwen2.5-32B](#grpo-qwen25-32b)
     - [SFT](#sft)
-      - [Single Node](#sft-single-node)
-      - [Multi-node](#sft-multi-node)
+      - [SFT Single Node](#sft-single-node)
+      - [SFT Multi-node](#sft-multi-node)
     - [DPO](#dpo)
-      - [Single Node](#dpo-single-node)
-      - [Multi-node](#dpo-multi-node)
+      - [DPO Single Node](#dpo-single-node)
+      - [DPO Multi-node](#dpo-multi-node)
   - [Cluster Start](#cluster-start)
+  - [Citation](#citation)
 
 **Nemo-RL** is a scalable and efficient post-training library designed for models ranging from 1 GPU to thousands, and from tiny to over 100 billion parameters.
 
@@ -50,13 +53,24 @@ What you can expect:
 
 ## Prerequisites
 
-Clone **NeMo RL**
+### Clone **NeMo RL**
+
 ```sh
-git clone git@github.com:NVIDIA/nemo-rl.git
+# --recursive initializes the dependent submodules
+git clone --recursive git@github.com:NVIDIA/nemo-rl.git
 cd nemo-rl
+
+# To download the pinned versions of these submodules within an existing git repository, run
+# git submodule update --init --recursive
+
+# Different branches of the repo can have different pinned versions of these third-party submodules. Ensure submodules are automatically updated after switching branches or pulling updates by configuring git with:
+# git config submodule.recurse true
+
+# **NOTE**: this setting will not download **new** or remove **old** submodules with the branch's changes.
+# You will have to run the full `git submodule update --init --recursive` command in these situations.
 ```
 
-Install `uv`
+### Install `uv`
 ```sh
 # For faster setup and environment isolation, we use `uv`
 pip install uv
