@@ -59,12 +59,12 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         self.sharding_annotations = NamedSharding(
             layout=np.arange(cluster.world_size()).reshape(
                 (
-                    -1,
                     config["pipeline_model_parallel_size"],
+                    -1,
                     config["tensor_model_parallel_size"],
                 )
             ),
-            names=["data_parallel", "pipeline_model_parallel", "tensor_model_parallel"],
+            names=["pipeline_model_parallel", "data_parallel", "tensor_model_parallel"],
         )
 
         pre_init_queue = (

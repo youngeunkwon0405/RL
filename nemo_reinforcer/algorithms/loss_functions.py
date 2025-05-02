@@ -27,6 +27,7 @@ from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 # get_logprobs_from_vocab_parallel_logits,
 # )
 from nemo_reinforcer.distributed.model_utils import from_parallel_logits_to_logprobs
+from megatron.core.parallel_state import get_tensor_model_parallel_group, get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size, get_pipeline_model_parallel_group, get_pipeline_model_parallel_rank, get_pipeline_model_parallel_world_size
 
 
 class ClippedPGLossConfig(TypedDict):
