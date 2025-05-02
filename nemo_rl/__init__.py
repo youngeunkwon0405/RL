@@ -15,7 +15,6 @@ import os
 import sys
 from pathlib import Path
 
-# Add Megatron-LM to the Python path
 """
 This is a work around to ensure whenever NeMo RL is imported, that we
 add Megatron-LM to the python path. This is because the only sub-package
