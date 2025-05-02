@@ -87,8 +87,6 @@ test = [
 ]
 
 [tool.uv.sources]
-#megatron-core = { path = "3rdparty/Megatron-LM", editable = true }
-#nemo-tron = { path = "3rdparty/NeMo/nemo" }  # seems to difficult to get the subpackages right
 megatron-core = { workspace = true }
 nemo-tron = { workspace = true }
 
