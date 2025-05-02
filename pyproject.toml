@@ -143,7 +143,7 @@ select = ["D", "F"]
 #   documentation for every function parameter.
 # - F841: local variable assigned but never used (exluced to favor readability)
 # TODO: Remove D10 once we are about to release to get all the docstrings written
-ignore = ["D417", "D10"]
+ignore = ["D417", "D10", "F841"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
