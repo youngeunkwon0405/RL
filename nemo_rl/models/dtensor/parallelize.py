@@ -24,6 +24,7 @@ from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
     SequenceParallel,
     parallelize_module,
@@ -113,12 +114,13 @@ def _parallelize_gemma3(
         }
 
         base_model_sp_plan = {
+            f"{model_prefix}.embed_tokens": PrepareModuleOutput(
+                output_layouts=Replicate(),
+                desired_output_layouts=Shard(1),
+                use_local_output=False,
+            ),
             f"{model_prefix}.rotary_emb": RotaryEmbedParallel(use_local_output=True),
             f"{model_prefix}.rotary_emb_local": RotaryEmbedParallel(use_local_output=True),
-            f"{model_prefix}.layers.0": PrepareModuleInput(
-                input_layouts=(Replicate(),),
-                desired_input_layouts=(Shard(1),),
-            ),
             f"{model_prefix}.layers.*.input_layernorm": SequenceParallel(),
             f"{model_prefix}.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
             f"{model_prefix}.layers.*.post_attention_layernorm": SequenceParallel(),
