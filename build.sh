@@ -15,7 +15,7 @@ uv run --extra mcore --no-build-isolation echo good
 
 uv run python <<"EOF"
 print(-1)
-import nemo_reinforcer
+import nemo_rl
 print(0)
 from megatron.training.utils import get_ltor_masks_and_position_ids
 exit(0)
