@@ -324,7 +324,7 @@ class FSDP1PolicyWorker:
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                     loss_metrics["normalization_factor"] = (
                         total_valid_tokens_or_seqs / torch.distributed.get_world_size()
-                    )
+                    ).cpu()
 
                     # Backward pass
                     if not eval_mode:
