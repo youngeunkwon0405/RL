@@ -318,10 +318,6 @@ class DTensorPolicyWorker:
                 else:
                     raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
 
-                # when FSDP reduces the gradients over the DP dim, they're automatically averaged
-                # but we want to sum them so we cancel out the average here
-                total_valid_tokens_or_seqs /= self.dp_size
-
                 self.optimizer.zero_grad()
                 mb_losses = []
 
@@ -375,12 +371,19 @@ class DTensorPolicyWorker:
                         loss_metrics[k] /= num_global_batches
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                    # Backward pass
+                    loss_metrics["normalization_factor"] = (
+                        total_valid_tokens_or_seqs / self.dp_size
+                    )
 
+                    # Backward pass
                     if not eval_mode:
                         ## NOTE: invalid samples should be multiplied
                         ## by zero in the loss function to prevent them
-                        ## from affecting the gradien
+                        ## from affecting the gradient calculation
+
+                        # when FSDP reduces the gradients over the DP dim, they're automatically averaged
+                        # but we want to sum them so we cancel out the average here
+                        loss *= self.dp_size
                         loss.backward()
                     if num_valid_samples > 0:
                         mb_losses.append(loss.item())
