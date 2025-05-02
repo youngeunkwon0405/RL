@@ -21,7 +21,7 @@ WORKDIR /opt/reinforcer
 
 # First copy only the dependency files
 COPY --chown=ray --chmod=755 pyproject.toml uv.lock ./
-COPY --chown=ray --chmod=755 3rdparty/ ./3rdparty/
+COPY --link --chown=ray --chmod=755 3rdparty/ ./3rdparty/
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/reinforcer_venv
 ENV VIRTUAL_ENV=/opt/reinforcer_venv
@@ -37,11 +37,7 @@ uv venv /opt/reinforcer_venv
 # Do everything in one layer to prevent large layers.
 
 uv sync --locked --extra vllm --no-install-project
-EOF
-RUN <<"EOF" bash -exu
 uv sync --locked --extra mcore --no-install-project --no-build-isolation 
-EOF
-RUN <<"EOF" bash -exu
 uv sync --locked --all-groups --no-install-project
 EOF
 
@@ -50,7 +46,7 @@ ENV PATH="/opt/reinforcer_venv/bin:$PATH"
 # The ray images automatically activate the anaconda venv. We will
 # comment this out of the .bashrc to give the same UX between docker
 # and other clusters like slurm.
-RUN <<"EOF"
+RUN <<"EOF" bash -exu
 cp ~/.bashrc ~/.bashrc.backup  # backup existing .bashrc
 
 # Comment out the conda initialize block

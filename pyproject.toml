@@ -12,12 +12,6 @@ description = "Nemo-Reinforcer: A Scalable and Efficient Post-Training Library f
 requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
-    # setuptools is here just so we can install TE
-    "setuptools",
-    # hatchling for nemo-run
-    "hatchling",
-    # for mcore (may need to uv pip install pybind11 for some reason; need to double check if needed)
-    "pybind11",
     "torch==2.6.0",
     "colored==2.2.3",
     "ray[default]==2.43.0",
@@ -59,6 +53,10 @@ nemo-tron = { path = "3rdparty/NeMo/nemo" }  # seems to difficult to get the sub
 no-build-isolation-package = ["transformer-engine"]
 # TODO(only if ray==2.45.0): For now, don't install ray b/c 2.45 is not published yet
 #override-dependencies = ["ray; sys_platform == 'never'"]
+# Always apply the build group since dependencies like TE/mcore/nemo-run require build dependencies
+# and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
+# avoid including these in the default dependency set, but for now it's required.
+default-groups = ["dev", "build"]
 
 [project.optional-dependencies]
 vllm = [
@@ -100,7 +98,13 @@ build = [
     "torch==2.6.0",
     "setuptools",
     "packaging",
-    "einops"
+    "einops",
+    # setuptools is here just so we can install TE
+    "setuptools",
+    # hatchling for nemo-run
+    "hatchling",
+    # for mcore (may need to uv pip install pybind11 for some reason; need to double check if needed)
+    "pybind11",
 ]
 docs = [
     "sphinx",

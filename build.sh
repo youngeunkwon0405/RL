@@ -3,6 +3,7 @@ set -eoux pipefail
 rm -rf .venv
 uv venv
 uv pip install torch==2.6.0 setuptools
+uv sync
 #uv sync --no-build-isolation
 #uv run --extra mcore --no-build-isolation te.py
 # commenting out above uv run --extra mcore --no-build-isolation te.py to speed up
@@ -13,6 +14,8 @@ uv run --extra mcore --no-build-isolation echo good
 ( cd 3rdparty/Megatron-LM/megatron/core/datasets; uv run --with pybind11 make )
 
 uv run python <<"EOF"
+print(-1)
+import nemo_reinforcer
 print(0)
 from megatron.training.utils import get_ltor_masks_and_position_ids
 exit(0)

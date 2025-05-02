@@ -2149,16 +2149,13 @@ dependencies = [
     { name = "accelerate" },
     { name = "colored" },
     { name = "datasets" },
-    { name = "hatchling" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
     { name = "omegaconf" },
-    { name = "pybind11" },
     { name = "ray", extra = ["default"] },
     { name = "rich" },
-    { name = "setuptools" },
     { name = "tensorboard" },
     { name = "torch" },
     { name = "torchdata" },
@@ -2179,7 +2176,9 @@ vllm = [
 [package.dev-dependencies]
 build = [
     { name = "einops" },
+    { name = "hatchling" },
     { name = "packaging" },
+    { name = "pybind11" },
     { name = "setuptools" },
     { name = "torch" },
 ]
@@ -2207,7 +2206,6 @@ requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets" },
-    { name = "hatchling" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM" },
@@ -2215,10 +2213,8 @@ requires-dist = [
     { name = "numpy" },
     { name = "nvidia-ml-py" },
     { name = "omegaconf" },
-    { name = "pybind11" },
     { name = "ray", extras = ["default"], specifier = "==2.43.0" },
     { name = "rich" },
-    { name = "setuptools" },
     { name = "tensorboard" },
     { name = "torch", specifier = "==2.6.0" },
     { name = "torchdata" },
@@ -2232,7 +2228,9 @@ provides-extras = ["vllm", "mcore"]
 [package.metadata.requires-dev]
 build = [
     { name = "einops" },
+    { name = "hatchling" },
     { name = "packaging" },
+    { name = "pybind11" },
     { name = "setuptools" },
     { name = "torch", specifier = "==2.6.0" },
 ]
