@@ -95,7 +95,10 @@ data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
   prompt_file: "examples/prompts/cot.txt"
   system_prompt_file: null
-  dataset_name: "OpenMathInstruct-2"
+  dataset_name: "custom"
+  train_path: "/lustre/fs12/portfolios/llmservice/users/abukharin/reasoning/alignment/data/train_deepscaler.jsonl"
+  val_path: "/lustre/fs12/portfolios/llmservice/users/abukharin/reasoning/alignment/data/val_deepscaler.jsonl"
+
 
 env:
   math:
