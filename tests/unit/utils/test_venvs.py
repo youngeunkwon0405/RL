@@ -17,10 +17,14 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from nemo_rl.utils.venvs import create_local_venv
+from tests.unit.conftest import TEST_ASSETS_DIR
 
 
 def test_create_local_venv():
-    with TemporaryDirectory() as tempdir:
+    # The temporary directory is created within the project.
+    # For some reason, creating a virtual environment outside of the project
+    # doesn't work reliably.
+    with TemporaryDirectory(dir=TEST_ASSETS_DIR) as tempdir:
         # Mock os.environ to set NEMO_RL_VENV_DIR for this test
         with patch.dict(os.environ, {"NEMO_RL_VENV_DIR": tempdir}):
             venv_python = create_local_venv(
