@@ -17,6 +17,7 @@ dist/
 *.vscode/
 release_run*
 ckpts/
+local_packages/
 
 # Test
 coverage.json
