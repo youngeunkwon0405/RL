@@ -90,6 +90,22 @@ def _parallelize_gemma3(
 
     Tensor parallelism is not supported for Gemma3 models because of tied word embeddings.
     """
+    class Gemma3QKNorm(SequenceParallel):
+        @staticmethod
+        def _prepare_input_fn(sequence_sharding, mod, inputs, device_mesh):
+            input_tensor = inputs[0]
+
+            if isinstance(input_tensor, DTensor):
+                assert input_tensor.placements == (Shard(dim=1),)
+            elif isinstance(input_tensor, torch.Tensor):
+                # assume the input passed in already sharded on the sequence dim and create the DTensor
+                return DTensor.from_local(
+                    input_tensor, device_mesh, sequence_sharding, run_check=False
+                )
+            else:
+                raise ValueError(
+                    f"expecting input of {mod} to be a torch.Tensor or DTensor, but got {input_tensor}"
+                )
     if isinstance(model, Gemma3ForConditionalGeneration):
         layers = model.language_model.model.layers
         model_prefix = "language_model.model"
@@ -116,11 +132,20 @@ def _parallelize_gemma3(
         base_model_sp_plan = {
             f"{model_prefix}.embed_tokens": PrepareModuleOutput(
                 output_layouts=Replicate(),
-                desired_output_layouts=Shard(1),
+                desired_output_layouts=Replicate(),
                 use_local_output=False,
             ),
-            f"{model_prefix}.rotary_emb": RotaryEmbedParallel(use_local_output=True),
-            f"{model_prefix}.rotary_emb_local": RotaryEmbedParallel(use_local_output=True),
+            f"{model_prefix}.rotary_emb": RotaryEmbedParallel(),
+            f"{model_prefix}.rotary_emb_local": RotaryEmbedParallel(),
+            f"{model_prefix}.layers.*.self_attn": PrepareModuleInput(
+                input_kwarg_layouts={"attention_mask": Replicate()},
+                desired_input_kwarg_layouts={"attention_mask": Replicate()},
+            ),
+            f"{model_prefix}.layers.*.self_attn.q_proj": ColwiseParallel(use_local_output=False),
+            f"{model_prefix}.layers.*.self_attn.k_proj": ColwiseParallel(use_local_output=False),
+            f"{model_prefix}.layers.*.self_attn.v_proj": ColwiseParallel(use_local_output=False),
+            f"{model_prefix}.layers.*.self_attn.q_norm": Gemma3QKNorm(sequence_dim=2),
+            f"{model_prefix}.layers.*.self_attn.k_norm": Gemma3QKNorm(sequence_dim=2),
             f"{model_prefix}.layers.*.input_layernorm": SequenceParallel(),
             f"{model_prefix}.layers.*.self_attn.o_proj": RowwiseParallel(output_layouts=Shard(1)),
             f"{model_prefix}.layers.*.post_attention_layernorm": SequenceParallel(),
