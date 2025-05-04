@@ -93,7 +93,7 @@ nemo-tron = { workspace = true }
 [tool.uv.workspace]
 members = [
     "3rdparty/Megatron-LM",
-    "3rdparty/NeMo/nemo",
+    "3rdparty/NeMo",
 ]
 
 [tool.uv]
