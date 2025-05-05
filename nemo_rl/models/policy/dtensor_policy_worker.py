@@ -307,14 +307,12 @@ class DTensorPolicyWorker:
                 # make_microbatch_iterator assumes that the batch size is a multiple of the microbatch size
                 # so its safe to not check for the case where the last data slice is smaller than mbs
                 if self.cfg['dynamic_batching']:
-                    num_microbatches = len(batch.metadata['micro_batch_indices'])
                     mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes(
                         max_sequence_length=data['input_ids'].shape[1],
                         round_seq_len_multiple=64,
                         input_lengths_key='input_lengths',
                     )
                 else:
-                    num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
                     mb_iterator = batch.make_microbatch_iterator(mbs)
 
                 for mb in mb_iterator:      
@@ -362,7 +360,9 @@ class DTensorPolicyWorker:
                     # Backward pass
 
                     # Loss is accumulated across microbatches so we need to scale by the number of microbatches
-                    loss = loss / num_microbatches
+                    loss = loss * (batch_size / local_gbs)
+                    loss_metrics['loss'] = loss.item()
+                    
                     if not eval_mode:
                         ## NOTE: invalid samples should be multiplied
                         ## by zero in the loss function to prevent them
@@ -461,7 +461,6 @@ class DTensorPolicyWorker:
         with unshard_fsdp2_model(self.model), torch.no_grad():
             data.to("cuda")
             if self.cfg['dynamic_batching']:
-                data.metadata['micro_batch_indices'] = data.metadata['micro_batch_indices'][0]
                 mb_iterator = data.make_microbatch_iterator_with_dynamic_shapes(
                     max_sequence_length=data['input_ids'].shape[1],
                     round_seq_len_multiple=64,
