@@ -27,6 +27,8 @@ class PackingAlgorithm(enum.Enum):
     """Enum for supported sequence packing algorithms."""
 
     CONCATENATIVE = "concatenative"
+    FIRST_FIT_DECREASING = "first_fit_decreasing"
+    FIRST_FIT_SHUFFLE = "first_fit_shuffle"
 
 
 class SequencePacker(ABC):
@@ -235,6 +237,128 @@ class ConcatenativePacker(SequencePacker):
         return bins
 
 
+class FirstFit(SequencePacker):
+    """Base class for First-Fit algorithms.
+
+    First-Fit algorithms place each sequence into the first bin where it fits.
+    If no bin can fit the sequence, a new bin is created.
+
+    This is an abstract base class that provides the common implementation for
+    First-Fit variants. Subclasses must implement the _prepare_sequences method
+    to determine the order in which sequences are processed.
+    """
+
+    def _prepare_sequences(self, sequence_lengths: List[int]) -> List[Tuple[int, int]]:
+        """Prepare sequences for packing.
+
+        This method determines the order in which sequences are processed.
+        Subclasses must override this method.
+
+        Args:
+            sequence_lengths: A list of sequence lengths to pack.
+
+        Returns:
+            A list of (length, index) pairs.
+        """
+        raise NotImplementedError("Subclasses must implement _prepare_sequences")
+
+    def _pack_implementation(self, sequence_lengths: List[int]) -> List[List[int]]:
+        """Pack sequences using the First-Fit algorithm.
+
+        Args:
+            sequence_lengths: A list of sequence lengths to pack.
+
+        Returns:
+            A list of bins, where each bin is a list of indices into the original
+            sequence_lengths list.
+        """
+        # Prepare sequences for packing (order determined by subclass)
+        indexed_lengths = self._prepare_sequences(sequence_lengths)
+
+        bins = []  # List of bins, each bin is a list of sequence indices
+        bin_remaining = []  # Remaining capacity for each bin
+
+        for length, idx in indexed_lengths:
+            # If the sequence is larger than the bin capacity, it cannot be packed
+            if length > self.bin_capacity:
+                raise ValueError(
+                    f"Sequence length {length} exceeds bin capacity {self.bin_capacity}"
+                )
+
+            # Try to find a bin where the sequence fits
+            bin_found = False
+            for i, remaining in enumerate(bin_remaining):
+                if remaining >= length:
+                    # Add the sequence to this bin
+                    bins[i].append(idx)
+                    bin_remaining[i] -= length
+                    bin_found = True
+                    break
+
+            # If no suitable bin was found, create a new one
+            if not bin_found:
+                bins.append([idx])
+                bin_remaining.append(self.bin_capacity - length)
+
+        return bins
+
+
+class FirstFitDecreasing(FirstFit):
+    """First-Fit Decreasing (FFD) algorithm for sequence packing.
+
+    This algorithm sorts sequences by length in descending order and then
+    places each sequence into the first bin where it fits.
+
+    Time complexity: O(n log n) for sorting + O(n * m) for packing,
+    where n is the number of sequences and m is the number of bins.
+    """
+
+    def _prepare_sequences(self, sequence_lengths: List[int]) -> List[Tuple[int, int]]:
+        """Prepare sequences for packing by sorting them in descending order.
+
+        Args:
+            sequence_lengths: A list of sequence lengths to pack.
+
+        Returns:
+            A list of (length, index) pairs sorted by length in descending order.
+        """
+        # Create a list of (length, index) pairs
+        indexed_lengths = [(length, i) for i, length in enumerate(sequence_lengths)]
+
+        # Sort by length in descending order
+        indexed_lengths.sort(reverse=True)
+
+        return indexed_lengths
+
+
+class FirstFitShuffle(FirstFit):
+    """First-Fit Shuffle algorithm for sequence packing.
+
+    This algorithm randomly shuffles the sequences and then places each
+    sequence into the first bin where it fits.
+
+    Time complexity: O(n * m) for packing, where n is the number of sequences
+    and m is the number of bins.
+    """
+
+    def _prepare_sequences(self, sequence_lengths: List[int]) -> List[Tuple[int, int]]:
+        """Prepare sequences for packing by randomly shuffling them.
+
+        Args:
+            sequence_lengths: A list of sequence lengths to pack.
+
+        Returns:
+            A list of (length, index) pairs in random order.
+        """
+        # Create a list of (length, index) pairs
+        indexed_lengths = [(length, i) for i, length in enumerate(sequence_lengths)]
+
+        # Shuffle the sequences
+        random.shuffle(indexed_lengths)
+
+        return indexed_lengths
+
+
 def get_packer(
     algorithm: Union[PackingAlgorithm, str],
     bin_capacity: int,
@@ -256,6 +380,8 @@ def get_packer(
     """
     packers: Dict[PackingAlgorithm, Type[SequencePacker]] = {
         PackingAlgorithm.CONCATENATIVE: ConcatenativePacker,
+        PackingAlgorithm.FIRST_FIT_DECREASING: FirstFitDecreasing,
+        PackingAlgorithm.FIRST_FIT_SHUFFLE: FirstFitShuffle,
     }
 
     # Convert string to enum if needed
