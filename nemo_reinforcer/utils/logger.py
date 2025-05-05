@@ -45,6 +45,7 @@ _rich_logging_configured = False
 class WandbConfig(TypedDict):
     project: str
     name: str
+    id: str
 
 
 class TensorboardConfig(TypedDict):
@@ -126,8 +127,8 @@ class TensorboardLogger(LoggerInterface):
 class WandbLogger(LoggerInterface):
     """Weights & Biases logger backend."""
 
-    def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None):
-        self.run = wandb.init(**cfg, dir=log_dir)
+    def __init__(self, cfg: WandbConfig, log_dir: Optional[str] = None,find_last_wandb: Optional[bool]=False):
+        self.run = wandb.init(**cfg, dir=log_dir,resume="allow")
         print(
             f"Initialized WandbLogger for project {cfg.get('project')}, run {cfg.get('name')} at {log_dir}"
         )
@@ -180,7 +181,7 @@ class WandbLogger(LoggerInterface):
         Args:
             params: Dict of hyperparameters to log
         """
-        self.run.config.update(params)
+        self.run.config.update(params, allow_val_change=True)
 
 
 class GpuMetricSnapshot(TypedDict):
@@ -488,7 +489,7 @@ class RayGpuMonitorLogger:
 class Logger(LoggerInterface):
     """Main logger class that delegates to multiple backend loggers."""
 
-    def __init__(self, cfg: LoggerConfig):
+    def __init__(self, cfg: LoggerConfig, find_last_wandb: bool = False):
         """Initialize the logger.
 
         Args:
@@ -510,7 +511,7 @@ class Logger(LoggerInterface):
         if cfg["wandb_enabled"]:
             wandb_log_dir = os.path.join(self.base_log_dir, "wandb")
             os.makedirs(wandb_log_dir, exist_ok=True)
-            self.wandb_logger = WandbLogger(cfg["wandb"], log_dir=wandb_log_dir)
+            self.wandb_logger = WandbLogger(cfg["wandb"], log_dir=wandb_log_dir,find_last_wandb=find_last_wandb)
             self.loggers.append(self.wandb_logger)
 
         if cfg["tensorboard_enabled"]:

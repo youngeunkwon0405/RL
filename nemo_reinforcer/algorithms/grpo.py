@@ -143,11 +143,7 @@ def setup(
     logger_config = master_config["logger"]
     cluster_config = master_config["cluster"]
 
-    # ==========================
-    #         Logger
-    # ==========================
-    logger = Logger(logger_config)
-    logger.log_hyperparams(master_config)
+
 
     # ==========================
     #      Checkpointing
@@ -157,6 +153,14 @@ def setup(
     grpo_save_state: Optional[GRPOSaveState] = checkpointer.load_training_info(
         last_checkpoint_path
     )
+
+    # ==========================
+    #         Logger
+    # ==========================
+    logger = Logger(logger_config,find_last_wandb=True if last_checkpoint_path is not None else False)
+    logger.log_hyperparams(master_config)
+
+
     if grpo_save_state is None:
         grpo_save_state = _default_grpo_save_state()
 
@@ -537,6 +541,7 @@ def grpo_train(
                     - (step + 1)
                     < master_config["checkpointing"]["save_period"]
                 )
+                save_hf = ((step + 1) % (master_config["checkpointing"]["save_period"]*10) == 0)
 
                 grpo_save_state["step"] = step + 1
                 grpo_save_state["val_reward"] = val_metrics["accuracy"]
@@ -554,7 +559,7 @@ def grpo_train(
                         tokenizer_path=os.path.join(
                             checkpoint_path, "policy", "tokenizer"
                         ),
-                        save_hf=is_last_checkpoint,
+                        save_hf=save_hf,
                     )
                     torch.save(
                         dataloader.state_dict(),
