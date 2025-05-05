@@ -49,9 +49,9 @@ def split_qkv_llama(gathered_mcore_qkv_layer, cfg):
     k_slice = torch.arange(heads_per_group, qkv_total_dim, (heads_per_group + 2))
     v_slice = torch.arange(heads_per_group + 1, qkv_total_dim, (heads_per_group + 2))
 
-    q_name = "model.layers.{gl}.self_attn.q_proj.weight"
-    k_name = "model.layers.{gl}.self_attn.k_proj.weight"
-    v_name = "model.layers.{gl}.self_attn.v_proj.weight"
+    q_name = "language_model.model.layers.{gl}.self_attn.q_proj.weight"
+    k_name = "language_model.model.layers.{gl}.self_attn.k_proj.weight"
+    v_name = "language_model.model.layers.{gl}.self_attn.v_proj.weight"
     # Extract Q, K, V and reshape back to [num_heads * head_size, hidden_size]
     q = qkv_weights[q_slice].reshape(-1, hidden_size)
     k = qkv_weights[k_slice].reshape(-1, hidden_size)
@@ -78,14 +78,14 @@ def split_fc1_gate_down_llama_common(gathered_mcore_fc1, cfg, gate_proj_name, up
 
 def split_fc1_gate_down_llama4_dense(gathered_mcore_fc1, cfg):
     # For dense layers in Llama4
-    gate_proj_name = "model.layers.{gl}.feed_forward.gate_proj.weight"
-    up_proj_name = "model.layers.{gl}.feed_forward.up_proj.weight"
+    gate_proj_name = "language_model.model.layers.{gl}.feed_forward.gate_proj.weight"
+    up_proj_name = "language_model.model.layers.{gl}.feed_forward.up_proj.weight"
     return split_fc1_gate_down_llama_common(gathered_mcore_fc1, cfg, gate_proj_name, up_proj_name)
 
 def split_shared_fc1_llama4(gathered_mcore_fc1, cfg):
     # For the shared expert in Llama4 MoE layers
-    gate_proj_name = "model.layers.{gl}.feed_forward.shared_expert.gate_proj.weight"
-    up_proj_name = "model.layers.{gl}.feed_forward.shared_expert.up_proj.weight"
+    gate_proj_name = "language_model.model.layers.{gl}.feed_forward.shared_expert.gate_proj.weight"
+    up_proj_name = "language_model.model.layers.{gl}.feed_forward.shared_expert.up_proj.weight"
     return split_fc1_gate_down_llama_common(gathered_mcore_fc1, cfg, gate_proj_name, up_proj_name)
 
 def transpose_expert_weight(gathered_expert_weight, cfg, target_name):
@@ -100,12 +100,12 @@ def transpose_expert_weight(gathered_expert_weight, cfg, target_name):
 
 def transpose_expert_fc1(gathered_expert_weight, cfg):
     # Target name for Llama4 HF MoE FC1 (gate_up_proj combines gate and up)
-    target_name = "model.layers.{gl}.feed_forward.experts.gate_up_proj"
+    target_name = "language_model.model.layers.{gl}.feed_forward.experts.gate_up_proj"
     return transpose_expert_weight(gathered_expert_weight, cfg, target_name)
 
 def transpose_expert_fc2(gathered_expert_weight, cfg):
     # Target name for Llama4 HF MoE FC2 (down_proj)
-    target_name = "model.layers.{gl}.feed_forward.experts.down_proj"
+    target_name = "language_model.model.layers.{gl}.feed_forward.experts.down_proj"
     return transpose_expert_weight(gathered_expert_weight, cfg, target_name)
 
 
@@ -113,28 +113,28 @@ def transpose_expert_fc2(gathered_expert_weight, cfg):
 # Assumes the checkpoint being converted is from a Llama4 model architecture
 mcore_te_to_hf_llama4 = {
     # Embeddings
-    "embedding.word_embeddings.weight": {"tp": 0, "hf": "model.embed_tokens.weight"}, # Needs vocab pruning if nemo vocab > hf vocab
-    "output_layer.weight": {"tp": 0, "hf": "lm_head.weight"}, # Needs vocab pruning if nemo vocab > hf vocab
+    "embedding.word_embeddings.weight": {"tp": 0, "hf": "language_model.model.embed_tokens.weight"}, # Needs vocab pruning if nemo vocab > hf vocab
+    "output_layer.weight": {"tp": 0, "hf": "language_model.lm_head.weight"}, # Needs vocab pruning if nemo vocab > hf vocab
 
     # Final LayerNorm
-    "decoder.final_layernorm.weight": {"hf": "model.norm.weight"},
+    "decoder.final_layernorm.weight": {"hf": "language_model.model.norm.weight"},
 
     # Attention Layers
     "decoder.layers.{l}.self_attention.linear_proj.weight": { # o_proj
         "tp": 1,
-        "hf": "model.layers.{gl}.self_attn.o_proj.weight",
+        "hf": "language_model.model.layers.{gl}.self_attn.o_proj.weight",
     },
     "decoder.layers.{l}.self_attention.linear_qkv.weight": { # q, k, v
         "tp": 0,
         "hf_func": split_qkv_llama,
     },
     "decoder.layers.{l}.self_attention.linear_qkv.layer_norm_weight": { # input_layernorm
-        "hf": "model.layers.{gl}.input_layernorm.weight"
+        "hf": "language_model.model.layers.{gl}.input_layernorm.weight"
     },
 
     # MLP Layers (Dense Layers in Llama4 Arch)
     "decoder.layers.{l}.pre_mlp_layernorm.weight": { # post_attention_layernorm (used for dense layers)
-        "hf": "model.layers.{gl}.post_attention_layernorm.weight"
+        "hf": "language_model.model.layers.{gl}.post_attention_layernorm.weight"
     },
     "decoder.layers.{l}.mlp.linear_fc1.weight": { # gate_proj + up_proj (used for dense layers)
         "tp": 0,
@@ -142,12 +142,12 @@ mcore_te_to_hf_llama4 = {
     },
      "decoder.layers.{l}.mlp.linear_fc2.weight": { # down_proj (used for dense layers)
         "tp": 1,
-        "hf": "model.layers.{gl}.feed_forward.down_proj.weight",
+        "hf": "language_model.model.layers.{gl}.feed_forward.down_proj.weight",
     },
 
     # MoE Layers (Specific to Llama4 MoE Arch)
     "decoder.layers.{l}.mlp.router.weight": { # MoE router
-        "hf": "model.layers.{gl}.feed_forward.router.weight",
+        "hf": "language_model.model.layers.{gl}.feed_forward.router.weight",
     },
     "decoder.layers.{l}.mlp.shared_experts.linear_fc1.weight": { # Shared Expert gate_proj + up_proj
          "tp": 0, # Matches fc1 row-parallel
@@ -155,7 +155,7 @@ mcore_te_to_hf_llama4 = {
     },
     "decoder.layers.{l}.mlp.shared_experts.linear_fc2.weight": { # Shared Expert down_proj
          "tp": 1, # Matches fc2 column-parallel
-         "hf": "model.layers.{gl}.feed_forward.shared_expert.down_proj.weight",
+         "hf": "language_model.model.layers.{gl}.feed_forward.shared_expert.down_proj.weight",
     },
     "decoder.layers.{l}.mlp.experts.linear_fc1.weight": { # MoE Experts gate_up_proj (needs transpose)
          "tp": 0, # Matches fc1 row-parallel for the weight matrix itself (before expert dim)
@@ -170,4 +170,3 @@ mcore_te_to_hf_llama4 = {
     # as Llama4 uses pre_mlp_layernorm for dense layers.
     # "decoder.layers.{l}.mlp.linear_fc1.layer_norm_weight": { ... }
 }
-
