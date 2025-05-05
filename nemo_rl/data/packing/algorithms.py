@@ -45,7 +45,7 @@ class SequencePacker(ABC):
         self.metrics = None
 
         if collect_metrics:
-            from nemo_reinforcer.data.packing.metrics import PackingMetrics
+            from nemo_rl.data.packing.metrics import PackingMetrics
 
             self.metrics = PackingMetrics()
 
@@ -104,7 +104,7 @@ class SequencePacker(ABC):
             )
         else:
             # Create a temporary metrics object if not collecting
-            from nemo_reinforcer.data.packing.metrics import PackingMetrics
+            from nemo_rl.data.packing.metrics import PackingMetrics
 
             temp_metrics = PackingMetrics()
             return temp_metrics.calculate_stats_only(
