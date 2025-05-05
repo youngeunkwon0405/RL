@@ -12,109 +12,95 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import gc
-import warnings
 import os
+import time
+import warnings
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
-from typing import Any, Dict, List, Optional, Iterable
 from functools import partial
-import re
-import sys, types
+from typing import Any, Dict, Iterable, Optional
 
 import ray
-from ray.util.queue import Queue
 import torch
-import time
-
-from transformers import AutoTokenizer
-
-from nemo.tron.init import initialize_megatron
-from nemo.tron.config import (
-    ConfigContainer,
-    TrainingConfig,
-    LoggerConfig,
-    OptimizerConfig,
-    SchedulerConfig,
-    CheckpointConfig,
-    DistributedDataParallelConfig,
-)
-from nemo.tron.utils.common_utils import get_rank_safe
-from nemo.tron.config import TokenizerConfig
-from nemo.tron.model import get_model_from_config
-from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint
-from nemo.tron.init import initialize_megatron, set_jit_fusion_options
-from nemo.tron.setup import _init_checkpointing_context, _update_model_config_funcs
-from nemo.tron.state import GlobalState
-from nemo.tron.optim import setup_optimizer
-from nemo.tron import fault_tolerance
-from nemo.tron.tokenizers.tokenizer import build_tokenizer
-from nemo.tron.utils.train_utils import (
-    calc_params_l2_norm,
-    logical_and_across_model_parallel_group,
-    reduce_max_stat_across_model_parallel_group,
-)
-
-
 from megatron.core import parallel_state
-from megatron.core.rerun_state_machine import get_rerun_state_machine
-from megatron.core.pipeline_parallel import get_forward_backward_func
-from megatron.training.utils import get_ltor_masks_and_position_ids
-from megatron.core.models.gpt import GPTModel
-from megatron.core.parallel_state import (
-    get_tensor_model_parallel_group,
-    get_tensor_model_parallel_rank,
-    get_tensor_model_parallel_world_size,
-    get_pipeline_model_parallel_group,
-    get_pipeline_model_parallel_rank,
-    get_pipeline_model_parallel_world_size,
-    get_pipeline_model_parallel_last_rank,
-    is_pipeline_last_stage,
+from megatron.core.inference.engines import (
+    StaticInferenceEngine,
 )
-from nemo_rl.models.megatron.common import (
-    forward_step_arbitrary_loss,
-    broadcast_tensor,
-)
-from nemo.tron.train import train_step
-from nemo.tron.setup import HAVE_FSDP2
-
 from megatron.core.inference.model_inference_wrappers.inference_wrapper_config import (
     InferenceWrapperConfig,
 )
 from megatron.core.inference.text_generation_controllers.text_generation_controller import (
     TextGenerationController,
 )
+from megatron.core.models.gpt import GPTModel
+from megatron.core.parallel_state import (
+    get_pipeline_model_parallel_group,
+    get_pipeline_model_parallel_last_rank,
+    get_pipeline_model_parallel_rank,
+    get_pipeline_model_parallel_world_size,
+    get_tensor_model_parallel_group,
+    get_tensor_model_parallel_rank,
+    is_pipeline_last_stage,
+)
+from megatron.core.pipeline_parallel import get_forward_backward_func
+from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.inference.text_generation.mcore_engine_server import (
-    ModelInferenceWrapperServer,
     run_mcore_engine,
 )
-from megatron.core.inference.engines import (
-    StaticInferenceEngine,
+from megatron.training.utils import get_ltor_masks_and_position_ids
+from nemo.tron import fault_tolerance
+from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint
+from nemo.tron.config import (
+    CheckpointConfig,
+    ConfigContainer,
+    DistributedDataParallelConfig,
+    LoggerConfig,
+    OptimizerConfig,
+    SchedulerConfig,
+    TokenizerConfig,
+    TrainingConfig,
 )
-from megatron.core.inference.sampling_params import SamplingParams
+from nemo.tron.init import initialize_megatron, set_jit_fusion_options
+from nemo.tron.model import get_model_from_config
+from nemo.tron.optim import setup_optimizer
+from nemo.tron.setup import (
+    HAVE_FSDP2,
+    _init_checkpointing_context,
+    _update_model_config_funcs,
+)
+from nemo.tron.state import GlobalState
+from nemo.tron.tokenizers.tokenizer import build_tokenizer
+from nemo.tron.utils.common_utils import get_rank_safe
+from nemo.tron.utils.train_utils import (
+    logical_and_across_model_parallel_group,
+    reduce_max_stat_across_model_parallel_group,
+)
+from ray.util.queue import Queue
+from transformers import AutoTokenizer
+
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
+from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
+from nemo_rl.distributed.named_sharding import NamedSharding
+from nemo_rl.distributed.virtual_cluster import (
+    PY_EXECUTABLES,
+)
 from nemo_rl.models.generation.interfaces import (
-    GenerationInterface,
     GenerationDatumSpec,
     GenerationOutputSpec,
     verify_right_padding,
 )
-from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.distributed.virtual_cluster import (
-    PY_EXECUTABLES,
+from nemo_rl.models.megatron.common import (
+    broadcast_tensor,
+    forward_step_arbitrary_loss,
 )
-from nemo_rl.distributed.named_sharding import NamedSharding
-
-from nemo_rl.models.policy.utils import get_gpu_info
-from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
-import nemo_rl.models.megatron.converters as model_converters
 from nemo_rl.models.megatron.refit_utils import (
-    get_global_param_key_to_local_key_map,
     gather_and_convert_params,
+    get_global_param_key_to_local_key_map,
     get_param_conversion_recipe_dict,
 )
+from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.utils import get_gpu_info
 
 
 def setup_megatron_model(
@@ -228,6 +214,7 @@ class MegatronPolicyWorker:
 
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
+
         This makes it easier to identify which worker is producing specific log messages.
         """
         if torch.distributed.is_initialized():
@@ -600,11 +587,13 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict, micro_batch_size: int = None
     ) -> BatchedDataDict:
         """Get the logprobs of the model for a batch of data.
+
         Uses the configured logprob_batch_size to do microbatching.
         Input data is assumed to be right-padded. The method internally converts to
         left-padded format for computation, and returns outputs in right-padded format.
         If micro_batch_size is provided, it will be used instead of the configured
         logprob_batch_size.
+
         Returns:
           a BatchedDataDict with key "logprobs" and shape [batch_size, sequence_length].
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
@@ -676,6 +665,7 @@ class MegatronPolicyWorker:
     @contextmanager
     def use_reference_model(self):
         """Context manager that temporarily swaps the reference model and active model.
+
         On entry: Moves model to CPU, moves reference_model to CUDA. Swaps the references
         On exit: Restores original references and re-flips cuda/cpu
         """
@@ -717,8 +707,10 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict, micro_batch_size: int = None
     ) -> BatchedDataDict:
         """Get the logprobs from the reference policy for a batch of data.
+
         If micro_batch_size is provided, it will be used instead of the configured
         logprob_batch_size.
+
         Returns:
           a BatchedDataDict with key "reference_logprobs" and shape [batch_size, sequence_length].
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
@@ -736,6 +728,7 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
         """Generate a batch of data using huggingface framework generation.
+
         Args:
             data: BatchedDataDict containing input_ids and input_lengths tensors
         Returns:
@@ -771,10 +764,10 @@ class MegatronPolicyWorker:
             inference_max_requests=self.cfg["generation_batch_size"],
         )
 
+        from megatron.core.inference.contexts import StaticInferenceContext
         from megatron.core.inference.model_inference_wrappers.gpt.gpt_inference_wrapper import (
             GPTInferenceWrapper,
         )
-        from megatron.core.inference.contexts import StaticInferenceContext
 
         inference_context = StaticInferenceContext.from_config(inference_wrapper_config)
 
@@ -859,6 +852,7 @@ class MegatronPolicyWorker:
 
     def report_device_id(self) -> str:
         """Report the UUID of the current CUDA device using NVML.
+
         Returns:
             str: UUID of the device in the format "GPU-xxxxx"
         """
@@ -872,6 +866,7 @@ class MegatronPolicyWorker:
     @torch.no_grad()
     def prepare_weights_for_ipc(self):
         """Prepare Megatron model weights for IPC transfer to vLLM.
+
         Collects information about weight tensors (names and sizes).
         Returns a list of (parameter_name, size_in_bytes) tuples.
         """
@@ -951,6 +946,7 @@ class MegatronPolicyWorker:
     @torch.no_grad()
     def get_weights_ipc_handles(self, keys):
         """Get IPC handles for the requested Megatron model weights.
+
         Args:
             keys: List of parameter names to get handles for
         Returns:

@@ -14,9 +14,10 @@
 
 import importlib
 import os
-import torch
 from contextlib import contextmanager
 from copy import deepcopy
+
+import torch
 
 
 def import_class_from_path(name):
@@ -163,6 +164,7 @@ def copy_model_states_to_cpu(
     model, cpu_dict=None, megatron_amp_O2=True, sync=True, alias_non_tensor=False
 ):
     """Mutates the cpu_dict object to throw the model states into preallocated tensors(if they exist).
+
     For non tensors it will do a deepcopy, unless alias_non_tensor is True.
     """
     if cpu_dict is None:

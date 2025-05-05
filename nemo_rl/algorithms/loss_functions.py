@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Tuple, TypedDict, Optional
+from typing import Any, Optional, Tuple, TypedDict
 
 import torch
 
@@ -21,10 +21,10 @@ from nemo_rl.algorithms.utils import (
     masked_mean,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
 )
-from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 
 
 class ClippedPGLossConfig(TypedDict):

@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import torch
-
 from megatron.core import parallel_state
 
 _GROUP_TO_RANKS_CACHE = {}
@@ -54,6 +53,7 @@ def get_local_layer_num(s):
 
 def get_global_layer_num(s, cfg):
     """Assumes layer number is preceeded by 'layers.'.
+
     Assumes pipeline model parallel size is set.
     In the state dict, the layer number is the local layer number (PP local).
     This function converts the local layer number to the global layer number.

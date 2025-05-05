@@ -15,16 +15,16 @@ import os
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Union, Iterable
+from typing import Any, Dict, Iterable, List, Literal, Optional, Union
 
 import ray
 from ray.util.placement_group import PlacementGroup
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 from nemo_rl.distributed.batched_data_dict import SlicedDataDict
+from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.utils.venvs import create_local_venv
-from nemo_rl.distributed.named_sharding import NamedSharding
 
 
 @dataclass
@@ -519,8 +519,10 @@ class RayWorkerGroup:
         common_kwargs: Optional[Dict[str, Any]] = None,
     ):
         """Run a method on all workers in parallel with sharded data.
+
         All axes provided in in_sharded_axes will be replicated on replicate_on_axes. For axes not provided in either,
         data will just be sent to index 0 of that axis.
+
         Args:
             method_name: Name of the method to call on each worker
             data: Iterable of SlicedDataDicts to pass to workers/groups

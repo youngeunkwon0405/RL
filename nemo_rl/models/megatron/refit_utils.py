@@ -12,13 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import re
-from typing import Dict, Tuple, List
+from typing import Dict, List, Tuple
 
 import torch
 from megatron.core import parallel_state
-import nemo_rl.models.megatron.converters as model_converters
-
 from nemo.collections.llm.gpt.model.base import GPTConfig
+
+import nemo_rl.models.megatron.converters as model_converters
 
 
 def get_param_conversion_recipe_dict(
@@ -45,10 +45,12 @@ def get_global_param_key_to_local_key_map(
     model, model_cfg: GPTConfig, keys: List[Tuple[str, str]]
 ) -> Dict[str, Tuple[int, str]]:
     """Get a mapping from global parameter keys to local parameter keys.
+
     Args:
         model: The model to get the mapping for.
         model_cfg: The model configuration.
         keys: The keys to get the mapping for. Tuple of (local_key, global_hf_key)
+
     Returns:
         A dictionary mapping global parameter keys to a tuple of (rank, local parameter key).
     """

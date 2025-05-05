@@ -14,7 +14,6 @@
 
 import torch
 
-from megatron.core import parallel_state
 from nemo_rl.models.megatron.converters.llama import (
     split_fc1_gate_down_llama,
     split_qkv_llama,

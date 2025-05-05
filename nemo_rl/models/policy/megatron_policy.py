@@ -15,23 +15,23 @@ import os
 from collections import defaultdict
 from typing import List, Optional, Union
 
+import numpy as np
 import ray
 from ray.util.queue import Queue
 from transformers import AutoTokenizer
-import numpy as np
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 from nemo_rl.models.generation.interfaces import (
-    GenerationInterface,
     GenerationDatumSpec,
+    GenerationInterface,
     GenerationOutputSpec,
 )
 from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.distributed.named_sharding import NamedSharding
 
 
 class MegatronPolicy(PolicyInterface, GenerationInterface):
@@ -95,6 +95,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         self, data: BatchedDataDict[GenerationDatumSpec]
     ) -> BatchedDataDict:
         """Get the logprobs of the model for a data dict.
+
         Returns:
           a BatchedDataDict with key "logprobs" and shape [batch_size, sequence_length].
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
@@ -117,6 +118,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         self, data: BatchedDataDict[GenerationDatumSpec], micro_batch_size: int = None
     ) -> BatchedDataDict:
         """Get the logprobs of the reference policy for a data dict.
+
         If micro_batch_size is provided, it will be used instead of the configured
         logprob_batch_size.
         Returns: Identical to get_logprobs.
@@ -251,6 +253,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
 
     def get_weights_ipc_handles(self, keys):
         """Fetch weight IPC handles from all workers.
+
         Returns:
             dict: A dictionary mapping device UUIDs to parameter IPC handles.
         """
@@ -310,6 +313,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
 
     def __del__(self):
         """Shuts down the worker groups when the object is deleted or is garbage collected.
+
         This is an extra safety net in case the user forgets to call worker_group.shutdown() and the pointer to
         the object is lost due to leaving a function scope. It's always recommended that the
         user calls worker_group.shutdown().

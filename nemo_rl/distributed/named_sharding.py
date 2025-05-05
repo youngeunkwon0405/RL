@@ -11,12 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from typing import Any, Dict, List, Sequence, Union
+
 import numpy as np
-from typing import List, Sequence, Tuple, Any, Dict, Union
 
 
 class NamedSharding:
     """Represents an N-dimensional arrangement of ranks with named axes, facilitating data sharding, replication, and collection based on these axes.
+
     Example:
         layout = [
             [[0, 1, 2, 3], [4, 5, 6, 7]],
@@ -31,6 +33,7 @@ class NamedSharding:
 
     def __init__(self, layout: Sequence[Any], names: List[str]):
         """Initializes the NamedSharding object.
+
         Args:
             layout: A nested sequence (e.g., list of lists) representing the ND rank layout.
                     All inner lists must contain integer rank IDs.
@@ -98,13 +101,16 @@ class NamedSharding:
 
     def get_ranks(self, **kwargs: int) -> Union["NamedSharding", int]:
         """Gets the ranks corresponding to specific indices along named axes.
+
         Args:
             **kwargs: Keyword arguments where the key is the axis name (e.g., "dp", "tp")
                       and the value is the index along that axis.
+
         Returns:
             A new NamedSharding instance representing the subset of ranks.
             The shape of the returned sharding corresponds to the axes *not* specified
             in the kwargs. If all axes are specified, an int is returned.
+
         Raises:
             ValueError: If an invalid axis name is provided or if an index is out of bounds.
         """

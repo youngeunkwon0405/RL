@@ -252,7 +252,9 @@ def setup(
             init_reference_model=True,
         )
     else:
-        raise ValueError(f"Unknown training backend: {policy_config['training_backend']}")
+        raise ValueError(
+            f"Unknown training backend: {policy_config['training_backend']}"
+        )
 
     loss_fn = ClippedPGLossFn(loss_config)
 
