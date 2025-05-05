@@ -22,14 +22,17 @@ from .common import (
 )
 from .llama import mcore_te_to_hf_llama
 from .qwen2 import mcore_te_to_hf_qwen2
+from .llama4 import mcore_te_to_hf_llama4
 
 
 class ModelType(Enum):
     LLAMA = "LlamaForCausalLM"
+    LLAMA4 = "Llama4ForCausalLM"
     QWEN2 = "Qwen2ForCausalLM"
 
 
 REGISTRY = {
+    ModelType.LLAMA4: mcore_te_to_hf_llama4,
     ModelType.LLAMA: mcore_te_to_hf_llama,
     ModelType.QWEN2: mcore_te_to_hf_qwen2,
 }
