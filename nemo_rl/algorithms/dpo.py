@@ -472,7 +472,7 @@ def dpo_train(
             break
 
     ## save a final checkpoint if needed
-    if master_config["checkpointing"]["enabled"] and not final_checkpoint_saved:
+    if master_config["checkpointing"]["enabled"] and final_checkpoint_saved is False:
         ## check whether we need to run final validation
         if (total_steps - 1) % val_period != 0:
             val_metrics, timing_metrics, log_to_console = validate(
