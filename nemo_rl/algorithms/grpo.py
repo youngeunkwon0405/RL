@@ -26,14 +26,11 @@ from nemo_rl.algorithms.loss_functions import (
 )
 from nemo_rl.algorithms.utils import (
     calculate_baseline_and_std_per_prompt,
-    configure_logger,
-    extract_individual_configs,
     log_metrics,
     reduce_microbatch_metrics,
     save_checkpoint,
     setup_checkpointer,
     setup_dataloaders,
-    setup_policy,
     validate_checkpointing_config,
 )
 from nemo_rl.data import DataConfig
@@ -57,6 +54,7 @@ from nemo_rl.models.generation.interfaces import (
 from nemo_rl.models.generation.vllm import VllmGeneration
 from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import (
     Logger,
@@ -91,7 +89,7 @@ class GRPOSaveState(TypedDict):
 
 def _default_grpo_save_state() -> GRPOSaveState:
     return {
-        "step": 0,
+        "step": 1,
         "val_reward": -99999999.0,
     }
 
@@ -134,19 +132,16 @@ def setup(
     Returns:
         Tuple of policy, cluster, train_dataloader, val_dataloader, loss_fn, logger, checkpointer, grpo_save_state, master_config
     """
-    # Extract individual configs for easier access
-    (
-        policy_config,
-        data_config,
-        logger_config,
-        cluster_config,
-        checkpointing_config,
-    ) = extract_individual_configs(master_config)
+    policy_config = master_config["policy"]
+    logger_config = master_config["logger"]
+    cluster_config = master_config["cluster"]
+    checkpointing_config = master_config["checkpointing"]
     loss_config = master_config["loss_fn"]
     grpo_config = master_config["grpo"]
     generation_config = policy_config["generation"]
 
-    logger = configure_logger(logger_config)
+    logger = Logger(logger_config)
+    logger.log_hyperparams(master_config)
 
     checkpointer, last_checkpoint_path, grpo_save_state = setup_checkpointer(
         checkpointing_config, _default_grpo_save_state()
@@ -200,7 +195,7 @@ def setup(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
 
-    policy = setup_policy(cluster, policy_config, tokenizer, last_checkpoint_path)
+    policy = HfPolicy(cluster, policy_config, tokenizer, last_checkpoint_path)
 
     # initialize loss function
     loss_fn = ClippedPGLossFn(loss_config)
@@ -225,7 +220,7 @@ def setup(
 
 def get_grpo_save_state(step, val_metrics):
     grpo_save_state = {
-        "step": step,
+        "step": step + 1,
         "val_reward": val_metrics["accuracy"],
     }
     return grpo_save_state
@@ -330,14 +325,16 @@ def grpo_train(
             is_val=True,
         )
 
-    final_checkpoint_saved = False
+    final_checkpoint_saved = None
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
     for batch in dataloader:
         print(
-            f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
+            f"\n{'=' * 25} Step {step}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
         )
+
+        final_checkpoint_saved = False
 
         with timer.time("total_step_time"):
             # Prepare batch
@@ -468,7 +465,7 @@ def grpo_train(
                 train_results = policy.train(train_data, loss_fn)
 
             # Run validation if it's a validation step
-            if val_period > 0 and (step + 1) % val_period == 0:
+            if val_period > 0 and step % val_period == 0:
                 if NEED_REFIT and POLICY_GENERATION_STALE:
                     refit_policy_generation(
                         policy,
@@ -500,23 +497,23 @@ def grpo_train(
             ## Checkpointing
             if (
                 master_config["checkpointing"]["enabled"]
-                and (step + 1) % master_config["checkpointing"]["save_period"] == 0
+                and step % master_config["checkpointing"]["save_period"] == 0
             ):
                 policy.prepare_for_training()
 
-                grpo_save_state = get_grpo_save_state(step + 1, val_metrics)
+                grpo_save_state = get_grpo_save_state(step, val_metrics)
                 save_checkpoint(
                     checkpointer,
                     master_config,
                     grpo_save_state,
-                    step + 1,
+                    step,
                     dataloader,
                     policy,
                     timer,
                 )
                 policy.offload_after_refit()
 
-                final_checkpoint_saved = (step + 1) == min(
+                final_checkpoint_saved = step == min(
                     master_config["grpo"]["max_num_steps"], len(dataloader)
                 )
 
@@ -557,7 +554,7 @@ def grpo_train(
     ## save a final checkpoint if needed
     if master_config["checkpointing"]["enabled"] and not final_checkpoint_saved:
         ## check whether we need to run final validation
-        if step % val_period != 0:
+        if (step - 1) % val_period != 0:
             if NEED_REFIT and POLICY_GENERATION_STALE:
                 refit_policy_generation(
                     policy,
@@ -572,7 +569,7 @@ def grpo_train(
                 val_dataloader,
                 tokenizer,
                 val_task_to_env,
-                step=step,
+                step=step - 1,
                 master_config=master_config,
             )
             policy_generation.finish_generation()
@@ -580,16 +577,22 @@ def grpo_train(
                 log_to_console,
                 val_metrics,
                 timing_metrics,
-                step,
+                step - 1,
                 logger,
                 is_val=True,
             )
-        grpo_save_state = get_grpo_save_state(step, val_metrics)
+        grpo_save_state = get_grpo_save_state(
+            # if current_step is 0 after incrementing the step,
+            # the actual step that was run is the last step of the epoch
+            (step - 1)
+            % (min(len(dataloader), master_config["grpo"]["max_num_steps"]) + 1),
+            val_metrics,
+        )
         save_checkpoint(
             checkpointer,
             master_config,
             grpo_save_state,
-            step,
+            step - 1,
             dataloader,
             policy,
             timer,

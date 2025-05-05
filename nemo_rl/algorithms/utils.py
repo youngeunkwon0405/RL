@@ -15,7 +15,6 @@ import os
 import random
 import warnings
 from functools import wraps
-from pathlib import Path
 from typing import Callable, Optional, Tuple, TypedDict
 
 import numpy as np
@@ -23,17 +22,17 @@ import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
-from nemo_rl.data import DataConfig, hf_datasets
+from nemo_rl.data import hf_datasets
 from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
 )
 from nemo_rl.models.policy import PolicyConfig, TokenizerConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_rl.utils.logger import Logger, LoggerConfig
+from nemo_rl.utils.logger import Logger
+from nemo_rl.utils.timer import Timer
 
 
 def calculate_kl_penalty_joschu2020(
@@ -256,52 +255,6 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
 ######## utils for main entry point functions ########
 
 
-def extract_individual_configs(
-    master_config: TypedDict,
-) -> Tuple[PolicyConfig, DataConfig, LoggerConfig, ClusterConfig, CheckpointingConfig]:
-    """Extract individual configuration components from a master config dictionary.
-
-    Args:
-        master_config (MasterConfig): A dictionary containing configuration sections for
-            policy, data, logging, cluster setup, and checkpointing.
-
-    Returns:
-        tuple: A 5-tuple containing:
-            - policy_config: Configuration for the policy
-            - data_config: Configuration for datasets and data loading
-            - logger_config: Configuration for logging and metrics
-            - cluster_config: Configuration for cluster setup
-            - checkpointing_config: Configuration for checkpointing
-    """
-    policy_config = master_config["policy"]
-    data_config = master_config["data"]
-    logger_config = master_config["logger"]
-    cluster_config = master_config["cluster"]
-    checkpointing_config = master_config["checkpointing"]
-    return (
-        policy_config,
-        data_config,
-        logger_config,
-        cluster_config,
-        checkpointing_config,
-    )
-
-
-def configure_logger(logger_config: LoggerConfig) -> Logger:
-    """Configure and initialize a Logger instance.
-
-    Args:
-        logger_config (LoggerConfig): Configuration for the logger, containing settings
-            for logging backend (e.g. wandb, tensorboard) and other logging parameters.
-
-    Returns:
-        Logger: Initialized logger instance that can be used to log metrics and hyperparameters.
-    """
-    logger = Logger(logger_config)
-    logger.log_hyperparams(logger_config)
-    return logger
-
-
 def setup_checkpointer(
     checkpointer_config: CheckpointingConfig,
     default_save_state: TypedDict,
@@ -415,48 +368,14 @@ def setup_dataloaders(
     return train_dataloader, val_dataloader
 
 
-def setup_policy(
-    cluster: RayVirtualCluster,
-    policy_config: PolicyConfig,
-    tokenizer: AutoTokenizer,
-    last_checkpoint_path: Optional[str],
-    init_reference_model: bool = True,
-) -> HfPolicy:
-    """Setup and initialize the policy.
-
-    Args:
-        cluster (RayVirtualCluster): The Ray cluster
-        policy_config (PolicyConfig): Configuration for the policy
-        tokenizer (AutoTokenizer): Tokenizer to use with the model
-        last_checkpoint_path (Optional[str]): Path to latest checkpoint if one exists
-        init_reference_model (bool, optional): Whether to initialize a reference model. Defaults to True.
-
-    Returns:
-        HfPolicy: The initialized policy
-    """
-    return HfPolicy(
-        cluster=cluster,
-        config=policy_config,
-        tokenizer=tokenizer,
-        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy" / "optimizer"
-        if last_checkpoint_path
-        else None,
-        init_optimizer=True,
-        init_reference_model=init_reference_model,
-    )
-
-
 def save_checkpoint(
-    checkpointer,
-    master_config,
-    save_state,
-    total_steps,
-    train_dataloader,
-    policy,
-    timer,
+    checkpointer: CheckpointManager,
+    master_config: TypedDict,
+    save_state: TypedDict,
+    total_steps: int,
+    train_dataloader: StatefulDataLoader,
+    policy: HfPolicy,
+    timer: Timer,
 ) -> None:
     """Save a checkpoint.
 
@@ -474,7 +393,6 @@ def save_checkpoint(
         checkpoint_path = checkpointer.init_tmp_checkpoint(
             total_steps, save_state, master_config
         )
-
         policy.save_checkpoint(
             weights_path=os.path.join(checkpoint_path, "policy", "weights"),
             optimizer_path=os.path.join(checkpoint_path, "policy", "optimizer"),
@@ -508,7 +426,12 @@ def reduce_microbatch_metrics(metrics):
 
 
 def log_metrics(
-    log_to_console, metrics, timing_metrics, step, logger, is_val=False
+    log_to_console: dict,
+    metrics: dict,
+    timing_metrics: dict,
+    step: int,
+    logger: Logger,
+    is_val: bool = False,
 ) -> None:
     """Log training or validation metrics both to console and to logger (wandb/tensorboard).
 
@@ -536,9 +459,9 @@ def log_metrics(
     # Display total time first, separately
     ## TODO: make this cleaner
     total_time = (
-        timing_metrics.get("total_step_time", 0)
+        timing_metrics["total_step_time"]
         if prefix == "train"
-        else timing_metrics.get("total_validation_time", 0)
+        else timing_metrics["total_validation_time"]
     )
     print(f"  • Total {prefix} time: {total_time:.2f}s")
 
