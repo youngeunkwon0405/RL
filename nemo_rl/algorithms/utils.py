@@ -25,6 +25,7 @@ from transformers import AutoTokenizer
 
 from nemo_rl.data import DataConfig, hf_datasets
 from nemo_rl.data.datasets import AllTaskProcessedDataset
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
@@ -132,18 +133,22 @@ def surpress_user_warnings(f):
 
 # need to surpress the masked tensor warnings from pytorch
 @surpress_user_warnings
-def masked_mean(values, mask, dim=None):
+def masked_mean(
+    values: torch.Tensor, mask: torch.Tensor, dim: Optional[int] = None
+) -> torch.Tensor:
     """Masks values with mask, and computes the mean of the values using the masked values."""
     return (values * mask).sum(dim=dim) / (mask.sum(dim=dim) + 1e-8)
 
 
-def gather_logprobs(data, next_token_logits):
-    """Gather the log probabilities for the actual next tokens.
+def get_logprobs(
+    data: BatchedDataDict, next_token_logits: torch.Tensor
+) -> torch.Tensor:
+    """Get the log probabilities for the (potentially vocab parallel) actual next tokens.
 
     This function handles gathering log probabilities for both FSDP1 and dtensor.
 
     Args:
-        data (Dict): Dictionary containing input_ids tensor with token indices
+        data (BatchedDataDict): Dictionary containing input_ids tensor with token indices
         next_token_logits (torch.Tensor): Tensor of logits for next token predictions
 
     Returns:

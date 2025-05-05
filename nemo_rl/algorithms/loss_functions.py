@@ -18,7 +18,7 @@ import torch
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
-    gather_logprobs,
+    get_logprobs,
     masked_mean,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -107,7 +107,7 @@ class ClippedPGLossFn(LossFunction):
 
         next_token_logits = next_token_logits.to(torch.float32)
 
-        curr_logprobs = gather_logprobs(data, next_token_logits)
+        curr_logprobs = get_logprobs(data, next_token_logits)
 
         # Calculate KL regularization.
         if self.reference_policy_kl_penalty != 0:
@@ -194,7 +194,7 @@ class NLLLoss(LossFunction):
         next_token_logits = next_token_logits.to(torch.float32)
 
         # Gather the logprobs for the actual next tokens
-        token_logprobs = gather_logprobs(data, next_token_logits)
+        token_logprobs = get_logprobs(data, next_token_logits)
 
         if dpo_loss:
             ## shape: [batch_size]
@@ -314,7 +314,7 @@ class DPOLossFn(LossFunction):
         sample_mask = data["sample_mask"]
 
         next_token_logits = next_token_logits.to(torch.float32)
-        token_logprobs = gather_logprobs(data, next_token_logits)
+        token_logprobs = get_logprobs(data, next_token_logits)
 
         ref_logprobs = data["reference_policy_logprobs"][:, :-1]
 
