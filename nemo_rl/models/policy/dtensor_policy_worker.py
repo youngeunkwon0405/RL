@@ -30,9 +30,6 @@ from transformers.integrations.accelerate import find_tied_parameters
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import (
-    PY_EXECUTABLES,
-)
 from nemo_rl.models.dtensor.parallelize import (
     _parallelize_model,
     clip_grad_by_total_norm_,
@@ -95,8 +92,6 @@ def get_cpu_state_dict(
 
 @ray.remote
 class DTensorPolicyWorker:
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
-
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
 
