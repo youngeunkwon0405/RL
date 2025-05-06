@@ -357,12 +357,10 @@ class DTensorPolicyWorker:
                     loss, loss_metrics = loss_fn(logits, mb)
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                    # Backward pass
-
+                    loss_metrics["micro_batch_size"] = batch_size
                     # Loss is accumulated across microbatches so we need to scale by the number of microbatches
                     loss = loss * (batch_size / local_gbs)
-                    loss_metrics['loss'] = loss.item()
-                    
+                    # Backward pass
                     if not eval_mode:
                         ## NOTE: invalid samples should be multiplied
                         ## by zero in the loss function to prevent them
