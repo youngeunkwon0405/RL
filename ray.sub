@@ -126,8 +126,8 @@ while true; do
   bash /launch-head.sh
   count=\$((count+1))
   echo "Head node failed \$count times, restarting..."
-  cleanup
-  sleep 2
+#  cleanup
+#  sleep 2
 done
 echo ret_code=\$?
 EOF
@@ -161,8 +161,8 @@ while true; do
   bash /launch-worker.sh
   count=\$((count+1))
   echo "Worker failed \$count times, restarting..."
-  cleanup
-  sleep 2
+#  cleanup
+#  sleep 2
 done
 echo ret_code=\$?
 EOF
