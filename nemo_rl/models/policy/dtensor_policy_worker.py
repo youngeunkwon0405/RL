@@ -335,6 +335,10 @@ class DTensorPolicyWorker:
                     else:
                         logits = outputs.logits
 
+                    # Divide logits by temperature
+                    if "generation" in self.cfg and self.cfg["generation"] is not None:
+                        logits.div_(self.cfg["generation"]["temperature"])
+
                     loss, loss_metrics = loss_fn(logits, mb)
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
