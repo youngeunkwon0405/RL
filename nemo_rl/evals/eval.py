@@ -146,6 +146,7 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
             content = [message["content"] for message in message_log]
             content = "\n".join(content)
             prompts.append(content)
+
         # generate by vllm
         inputs = BatchedDataDict({"prompts": prompts})
         outputs = vllm_generation.generate_text(inputs)["texts"]
@@ -158,6 +159,12 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
                     "content": output,
                 }
             )
+            print("")
+            print("<<<<<<<<<<<<<<< inputs <<<<<<<<<<<<<<<")
+            print(prompts[idx])
+            print("======================================")
+            print(output)
+            print(">>>>>>>>>>>>>>> outputs >>>>>>>>>>>>>>>")
 
         # evaluate generations with the environment
         to_env = [

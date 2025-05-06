@@ -15,8 +15,13 @@ from typing import Dict, List, Optional, Tuple, TypedDict
 
 import ray
 import torch
-from math_verify.metric import math_metric
-from math_verify.parser import ExprExtractionConfig, LatexExtractionConfig
+from math_verify import (
+    ExprExtractionConfig,
+    LatexExtractionConfig,
+    StringExtractionConfig,
+    parse,
+    verify,
+)
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES
@@ -39,6 +44,22 @@ class MathEnvConfig(TypedDict):
 class HFVerifyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
 
+    def __init__(self, extraction_config: Optional[List[str]] = None):
+        if extraction_config:
+            configs = []
+            for config_name in extraction_config:
+                if config_name == "latex":
+                    configs.append(LatexExtractionConfig)
+                elif config_name == "expr":
+                    configs.append(ExprExtractionConfig)
+                elif config_name == "string":
+                    configs.append(StringExtractionConfig)
+                else:
+                    raise ValueError(f"Unknown extraction config `{config_name}`")
+        else:
+            configs = None
+        self.extraction_config = configs
+
     def verify(
         self, pred_responses: List[str], ground_truths: List[str]
     ) -> List[float]:
@@ -54,23 +75,15 @@ class HFVerifyWorker:
         results = []
         for response, ground_truth in zip(pred_responses, ground_truths):
             try:
-                # Use Latex and plain math extraction from predictions
-                # https://github.com/huggingface/Math-Verify?tab=readme-ov-file#extraction-targets
-                verify_func = math_metric(
-                    gold_extraction_target=(LatexExtractionConfig(),),
-                    pred_extraction_target=(
-                        ExprExtractionConfig(),
-                        LatexExtractionConfig(),
-                    ),
-                )
-
-                ground_truth_parsable = "\\boxed{" + ground_truth + "}"
-                try:
-                    ret_score, _ = verify_func([ground_truth_parsable], [response])
-                except Exception:
-                    ret_score = 0.0
-
-                results.append(float(ret_score))
+                if self.extraction_config is not None:
+                    gold = parse(ground_truth, self.extraction_config)
+                    pred = parse(
+                        response[-100:], self.extraction_config
+                    )  # avoid looking at the whole string
+                else:
+                    gold = parse(ground_truth)
+                    pred = parse(response[-100:])  # avoid looking at the whole string
+                results.append(float(verify(gold, pred)))
             except Exception:
                 results.append(0)
         return results
@@ -90,7 +103,7 @@ class MathEnvironment(EnvironmentInterface):
         self.workers = [
             HFVerifyWorker.options(
                 runtime_env={"py_executable": HFVerifyWorker.DEFAULT_PY_EXECUTABLE}
-            ).remote()
+            ).remote(cfg["extraction_config"])
             for _ in range(self.num_workers)
         ]
 

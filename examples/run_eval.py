@@ -15,6 +15,7 @@
 import argparse
 import os
 import pprint
+import random
 import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,7 +24,7 @@ from datasets import load_dataset
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
-from examples.run_grpo_math import math_data_processor
+from examples.run_grpo_math import gpqa_data_processor, math_data_processor
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import MathDataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset
@@ -51,6 +52,26 @@ def parse_args():
     return args, overrides
 
 
+def map_answer_to_shuffled_options(sample):
+    problem = sample["Question"]
+    choices = "ABCD"
+    options = [
+        sample["Correct Answer"],
+        sample["Incorrect Answer 1"],
+        sample["Incorrect Answer 2"],
+        sample["Incorrect Answer 3"],
+    ]
+    truth = sample["Correct Answer"]
+    random.shuffle(options)
+    answer = choices[options.index(truth)]
+
+    return {
+        "problem": problem,
+        "options": options,
+        "expected_answer": r"\boxed{" + answer + "}",
+    }
+
+
 def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_configs):
     print("\n▶ Setting up data...")
     math_task_spec = TaskDataSpec(
@@ -60,17 +81,25 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
     )
 
     # load dataset
-    base_dataset = load_dataset(data_config["dataset_name"])
-    if data_config["dataset_key"] is not None:
-        base_dataset = base_dataset[data_config["dataset_key"]]
-    # remap problem and solution keys
-    remapped_dataset = remap_dataset_keys(
-        base_dataset,
-        mapping_dict={
-            data_config["problem_key"]: "problem",
-            data_config["solution_key"]: "expected_answer",
-        },
+    base_dataset = load_dataset(
+        data_config["dataset_name"], data_config["dataset_subset"]
     )
+    if data_config["dataset_split"] is not None:
+        base_dataset = base_dataset[data_config["dataset_split"]]
+
+    # remap problem and solution keys
+    if os.path.basename(data_config["dataset_name"]) == "gpqa":
+        remapped_dataset = base_dataset.map(map_answer_to_shuffled_options)
+        task_data_processor = gpqa_data_processor
+    else:
+        remapped_dataset = remap_dataset_keys(
+            base_dataset,
+            mapping_dict={
+                data_config["problem_key"]: "problem",
+                data_config["solution_key"]: "expected_answer",
+            },
+        )
+        task_data_processor = math_data_processor
 
     math_env = MathEnvironment.options(
         runtime_env={"py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE}
@@ -80,7 +109,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
         dataset=remapped_dataset,
         tokenizer=tokenizer,
         default_task_data_spec=math_task_spec,
-        task_data_processors=math_data_processor,
+        task_data_processors=task_data_processor,
         max_seq_length=data_config["max_input_seq_length"],
     )
 

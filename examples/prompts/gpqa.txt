@@ -1,0 +1,7 @@
+What is the correct answer to this question: {problem}
+Choices:
+A. {options[0]}
+B. {options[1]}
+C. {options[2]}
+D. {options[3]}
+Let's think step by step, and put the final answer (should be a single letter A, B, C, or D) into a \boxed{}
