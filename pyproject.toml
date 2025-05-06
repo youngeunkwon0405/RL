@@ -27,6 +27,7 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "matplotlib",
 ]
 
 [tool.setuptools]

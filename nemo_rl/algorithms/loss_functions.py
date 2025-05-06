@@ -85,6 +85,7 @@ class ClippedPGLossFn(LossFunction):
         self.use_importance_sampling_correction = cfg[
             "use_importance_sampling_correction"
         ]
+        self.cfg = cfg
 
     def __call__(
         self,
@@ -92,6 +93,7 @@ class ClippedPGLossFn(LossFunction):
         data: BatchedDataDict[ClippedPGLossDataDict],
     ) -> Tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
+        # debug_logprobs(next_token_logits, data, self.cfg)
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
         advantages = data["advantages"][:, 1:]
@@ -419,3 +421,85 @@ class DPOLossFn(LossFunction):
             "rewards_rejected_mean": rewards_rejected_mean.item(),
             "num_valid_samples": num_valid_samples.item(),
         }
+
+def debug_logprobs(
+        data: BatchedDataDict[ClippedPGLossDataDict],
+        config: ClippedPGLossConfig,
+    ):
+    token_mask = data["token_mask"][:, 1:]
+    sample_mask = data["sample_mask"]
+    prev_logprobs = data["prev_logprobs"][:, 1:]
+    generation_logprobs = data["generation_logprobs"][:, 1:]
+    reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
+
+    mask = token_mask * sample_mask.unsqueeze(-1)
+
+    lp_error = torch.abs(generation_logprobs - prev_logprobs)  # noqa: F841  (precommit ignore for now)
+    mult_prob_error = masked_mean(torch.exp(lp_error), mask).item()
+    if mult_prob_error == 0.0:
+        # this sometimes gets 0 (everything masked/invalid). Doing this to avoid screwing up stats too much
+        mult_prob_error = 1.0
+    
+    import numpy as np
+    generation_logprobs = mask * generation_logprobs
+    prev_logprobs = mask * prev_logprobs
+    
+    print(f"data.keys(): {data.keys()}")
+    print(f"mult_prob_error: {mult_prob_error}")
+    print(f"generation_logprobs: {generation_logprobs.shape}")
+    print(f"prev_logprobs: {prev_logprobs.shape}")
+
+    # Create visualization of logprob differences
+    import matplotlib.pyplot as plt
+    batch_size = generation_logprobs.shape[0]
+    # Create figure with subplots
+    fig, axes = plt.subplots(batch_size, 2, figsize=(100, 6 * batch_size))
+    
+    # Handle single subplot case (when batch_size=1)
+    if batch_size == 1:
+        axes = [axes]  # Make it iterable
+
+    for i in range(batch_size):
+        input_length = data["input_lengths"][i]
+        generation_logprob = generation_logprobs[i].detach().cpu().numpy()[:input_length]
+        prev_logprob = prev_logprobs[i].detach().cpu().numpy()[:input_length]
+        # diffs = np.abs(generation_logprob - prev_logprob)
+        pos = np.arange(len(generation_logprob))
+        # import pdb; pdb.set_trace()
+        
+        # Plot with enhanced styling
+        axes[i, 0].plot(pos, generation_logprob, alpha=0.7, label='Generation logprobs', 
+                    linewidth=1, color='blue', marker='.', markersize=3)
+        axes[i, 0].plot(pos, prev_logprob, alpha=0.7, label='Previous logprobs', 
+                    linewidth=1, color='green', marker='.', markersize=3)
+        
+        # Add grid for better readability
+        axes[i, 0].grid(True, linestyle='--', alpha=0.3)
+        
+        # Add axis labels
+        axes[i, 0].set_xlabel('Token Position', fontsize=12)
+        axes[i, 0].set_ylabel('Log Probability', fontsize=12)
+        
+        axes[i, 0].set_title(f'Sample {i}', fontsize=14)
+        
+        # Better legend placement and styling
+        axes[i, 0].legend(loc='upper right', framealpha=0.7, fontsize=10)
+
+        # y_min = min(np.min(generation_logprob), np.min(prev_logprob))
+        # axes[i, 0].set_ylim(y_min - 0.5, 0)
+
+        masked_mean_diff = masked_mean(generation_logprobs - prev_logprobs, mask[i])
+        axes[i, 1].set_title(f'Sample {i} (masked_mean_diff={masked_mean_diff:.4f})', fontsize=14)
+        axes[i, 1].plot(pos, np.abs(generation_logprob - prev_logprob), alpha=0.7, label='Logprob difference', 
+                    linewidth=2, color='red', marker='.', markersize=3)
+        axes[i, 1].grid(True, linestyle='--', alpha=0.3)
+        axes[i, 1].set_xlabel('Token Position', fontsize=12)
+        axes[i, 1].set_ylabel('Log Probability Difference', fontsize=12)
+        
+
+    plt.tight_layout()  # Adjust spacing between subplots
+    fig.suptitle(f'{config["policy"]["max_total_sequence_length"]} sequence length logprob comparison (mult_prob_error={mult_prob_error:.4f})', y=1.02)
+    plt.savefig(f'/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/reinforcer/{config["policy"]["max_total_sequence_length"]}_logprob_comparison.png', 
+                bbox_inches='tight')
+    plt.close()
+    np.testing.assert_allclose(generation_logprobs.detach().cpu().numpy(), prev_logprobs.detach().cpu().numpy(), atol=1e-3, rtol=1e-3)
