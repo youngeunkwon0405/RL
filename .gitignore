@@ -15,14 +15,14 @@ apidocs/
 dist/
 *.egg-info/
 *.vscode/
+release_run*
+ckpts/
 
 # Test
 coverage.json
 .coverage*
 unit_results.json
 unit_results/
-release_run*
-ckpts/
 test_assets/
 
 # Cache

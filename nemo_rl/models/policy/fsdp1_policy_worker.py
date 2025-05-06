@@ -289,6 +289,10 @@ class FSDP1PolicyWorker:
                             logits = self.model.lm_head(outputs.last_hidden_state)
                         else:
                             logits = outputs.logits
+                    
+                    # Divide logits by temperature
+                    if "generation" in self.cfg and self.cfg["generation"] is not None:
+                        logits.div_(self.cfg["generation"]["temperature"])
 
                     loss, loss_metrics = loss_fn(logits, mb)
                     num_valid_samples = loss_metrics["num_valid_samples"]
@@ -325,8 +329,10 @@ class FSDP1PolicyWorker:
 
                     # Update parameters
                     self.optimizer.step()
-                    self.scheduler.step()
                 losses.append(torch.tensor(mb_losses).sum().item())
+
+            # increment scheduler after all batches in rollout are processed
+            self.scheduler.step()
 
             # Compute global loss across all ranks
             with torch.no_grad():
@@ -901,8 +907,6 @@ class FSDP1PolicyWorker:
         weights_path: str,
         optimizer_path: Optional[str] = None,
         tokenizer_path: Optional[str] = None,
-        save_torch_dist: bool = True,
-        save_hf: bool = False,
     ):
         """Save a checkpoint of the model.
 
@@ -912,19 +916,12 @@ class FSDP1PolicyWorker:
             __0_1.distcp
             __1_0.distcp
             ...
-        weights_path-hf/
-            config.json
-            generation_config.json
-            model-00001-of-<TOTAL_SHARDS>.safetensors
-            ...
-            model.safetensors.index.json
         optimizer_path/
             __0_0.distcp
             __1_0.distcp
             ...
 
-        the HuggingFace checkpoint is saved only if `save_hf` is True,
-        and the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
+        the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
         """
         save_checkpoint(
             model=self.model,
@@ -934,8 +931,6 @@ class FSDP1PolicyWorker:
             optimizer_path=optimizer_path,
             tokenizer=self.tokenizer if tokenizer_path else None,
             tokenizer_path=tokenizer_path,
-            save_torch_dist=save_torch_dist,
-            save_hf=save_hf,
         )
 
     def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
