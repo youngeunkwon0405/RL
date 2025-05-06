@@ -290,10 +290,6 @@ class FSDP1PolicyWorker:
                         else:
                             logits = outputs.logits
 
-                    # Divide logits by temperature
-                    if "generation" in self.cfg and self.cfg["generation"] is not None:
-                        logits.div_(self.cfg["generation"]["temperature"])
-
                     loss, loss_metrics = loss_fn(logits, mb)
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
@@ -329,10 +325,8 @@ class FSDP1PolicyWorker:
 
                     # Update parameters
                     self.optimizer.step()
+                    self.scheduler.step()
                 losses.append(torch.tensor(mb_losses).sum().item())
-
-            # increment scheduler after all batches in rollout are processed
-            self.scheduler.step()
 
             # Compute global loss across all ranks
             with torch.no_grad():
@@ -634,26 +628,17 @@ class FSDP1PolicyWorker:
                 device=return_data["left_padded_output_ids"][0].device,
             )
 
-            for idx, seq in enumerate(return_data["left_padded_output_ids"]):
+            for idx, (seq, generated_logprob) in enumerate(
+                zip(
+                    return_data["left_padded_output_ids"],
+                    return_data["generation_logprobs"],
+                )
+            ):
                 # Get only the generated part (excluding input)
                 original_length = return_data["orig_input_lengths"][idx].item()
                 seq_len = seq.size(0)
 
-                # The generated content starts after the left-padded input
-                generated_part = seq[-(seq_len - input_length) :]
-
-                eos_positions = (generated_part == self.tokenizer.eos_token_id).nonzero(
-                    as_tuple=True
-                )[0]
-                # TODO @sahilj: handle different stopping criteria
-                # Calculate generation length
-                if len(eos_positions) > 0:
-                    gen_length = (
-                        eos_positions[0].item() + 1
-                    )  # +1 to include the EOS token
-                else:
-                    gen_length = len(generated_part)
-
+                gen_length = (generated_logprob != 0).sum().item()
                 generation_lengths.append(gen_length)
 
                 valid_length = original_length + gen_length
@@ -668,7 +653,7 @@ class FSDP1PolicyWorker:
                 )
 
                 # Combine with generated part
-                valid_generated_part = generated_part[:gen_length]
+                valid_generated_part = seq[input_length : input_length + gen_length]
                 valid_tokens = torch.cat([valid_input_part, valid_generated_part])
 
                 # Place at the beginning of the right-padded sequence
@@ -916,6 +901,8 @@ class FSDP1PolicyWorker:
         weights_path: str,
         optimizer_path: Optional[str] = None,
         tokenizer_path: Optional[str] = None,
+        save_torch_dist: bool = True,
+        save_hf: bool = False,
     ):
         """Save a checkpoint of the model.
 
@@ -925,12 +912,19 @@ class FSDP1PolicyWorker:
             __0_1.distcp
             __1_0.distcp
             ...
+        weights_path-hf/
+            config.json
+            generation_config.json
+            model-00001-of-<TOTAL_SHARDS>.safetensors
+            ...
+            model.safetensors.index.json
         optimizer_path/
             __0_0.distcp
             __1_0.distcp
             ...
 
-        the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
+        the HuggingFace checkpoint is saved only if `save_hf` is True,
+        and the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
         """
         save_checkpoint(
             model=self.model,
@@ -940,6 +934,8 @@ class FSDP1PolicyWorker:
             optimizer_path=optimizer_path,
             tokenizer=self.tokenizer if tokenizer_path else None,
             tokenizer_path=tokenizer_path,
+            save_torch_dist=save_torch_dist,
+            save_hf=save_hf,
         )
 
     def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):

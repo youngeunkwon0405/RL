@@ -15,6 +15,7 @@
 """Checkpoint management utilities for HF models."""
 
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 import torch
@@ -138,6 +139,8 @@ def save_checkpoint(
     optimizer_path: Optional[str] = None,
     tokenizer: Optional[Any] = None,
     tokenizer_path: Optional[str] = None,
+    save_torch_dist: bool = True,
+    save_hf: bool = False,
 ) -> None:
     """Save a checkpoint of the model and optionally optimizer state.
 
@@ -147,17 +150,40 @@ def save_checkpoint(
         optimizer: Optional optimizer to save
         scheduler: Optional scheduler to save
         optimizer_path: Path to save optimizer state (required if optimizer provided)
+        save_torch_dist: Whether to save in PyTorch distributed format
+        save_hf: Whether to save in HuggingFace format
     """
-    model_state = {"model": ModelState(model)}
-    dcp.save(model_state, checkpoint_id=weights_path)
+    if save_hf:
+        if hasattr(model, "_fsdp_wrapped_module"):
+            model_state_dict = model._fsdp_wrapped_module.state_dict()
+        else:
+            model_state_dict = {
+                k: v.full_tensor()
+                if isinstance(v, torch.distributed.tensor.DTensor)
+                else v
+                for k, v in model.state_dict().items()
+            }
 
-    if optimizer is not None:
-        if optimizer_path is None:
-            raise ValueError(
-                "optimizer_path must be provided when saving optimizer state"
+        if torch.distributed.get_rank() == 0:
+            # Create a new path by appending "-hf" to the weights path
+            hf_weights_path = f"{Path(weights_path)}-hf"
+
+            model.save_pretrained(
+                hf_weights_path,
+                state_dict=model_state_dict,
             )
-        optimizer_state = {"optim": OptimizerState(model, optimizer, scheduler)}
-        dcp.save(optimizer_state, checkpoint_id=optimizer_path)
+
+    if save_torch_dist:
+        model_state = {"model": ModelState(model)}
+        dcp.save(model_state, checkpoint_id=weights_path)
+
+        if optimizer is not None:
+            if optimizer_path is None:
+                raise ValueError(
+                    "optimizer_path must be provided when saving optimizer state"
+                )
+            optimizer_state = {"optim": OptimizerState(model, optimizer, scheduler)}
+            dcp.save(optimizer_state, checkpoint_id=optimizer_path)
 
     if tokenizer is not None:
         if tokenizer_path is None:

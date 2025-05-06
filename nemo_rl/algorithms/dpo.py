@@ -446,6 +446,14 @@ def dpo_train(
                     % master_config["checkpointing"]["save_period"]
                     == 0
                 ):  # +1 because step is 0-indexed
+                    is_last_checkpoint = (
+                        min(
+                            len(train_dataloader) * max_num_epochs,
+                            master_config["dpo"]["max_num_steps"],
+                        )
+                        - (total_steps + 1)
+                        < master_config["checkpointing"]["save_period"]
+                    )
                     dpo_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     dpo_save_state["total_steps"] = total_steps + 1
                     dpo_save_state["epoch"] = current_epoch
@@ -462,9 +470,7 @@ def dpo_train(
                             optimizer_path=os.path.join(
                                 checkpoint_path, "policy", "optimizer"
                             ),
-                            tokenizer_path=os.path.join(
-                                checkpoint_path, "policy", "tokenizer"
-                            ),
+                            save_hf=is_last_checkpoint,
                         )
                         torch.save(
                             train_dataloader.state_dict(),

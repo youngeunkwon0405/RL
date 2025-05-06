@@ -17,7 +17,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-import yaml
 
 from nemo_rl.utils.checkpoint import CheckpointManager
 
@@ -63,8 +62,8 @@ def test_init_tmp_checkpoint(checkpoint_manager, checkpoint_dir):
         assert isinstance(saved_metadata["numpy"], (int, float))
 
     # Check if config was saved
-    with open(save_dir / "config.yaml", "r") as f:
-        saved_config = yaml.safe_load(f)
+    with open(save_dir / "config.json", "r") as f:
+        saved_config = json.load(f)
         assert saved_config == run_config
 
 
