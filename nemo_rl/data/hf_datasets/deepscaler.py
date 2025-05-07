@@ -37,9 +37,6 @@ def format_math(data):
 
 def prepare_deepscaler_dataset(seed=42):
     """Load and split the DeepScaler dataset into train and test sets."""
-    print(
-        "WARNING: For reproducible experiments, preprocess the dataset once and define your own HfDataset subclass that directly uses the preprocessed datasets."
-    )
 
     # Load the original dataset
     original_ds = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
@@ -68,18 +65,12 @@ def prepare_deepscaler_dataset(seed=42):
 
 
 class DeepScalerDataset:
-    def __init__(self, split: str = "train", seed: int = 42):
+    def __init__(self, seed: int = 42):
         """Initialize the DeepScaler dataset with train/test split.
 
         Args:
-            split: The dataset split to load
             seed: Random seed for reproducible splitting
         """
-        # train, train_1M, train_2M, and train_5M are supported splits.
-        if split not in ["train"]:
-            raise ValueError(
-                f"Invalid split: {split}. Please use 'train'."
-            )
 
         self.formatted_ds = prepare_deepscaler_dataset(
             seed=seed
