@@ -20,7 +20,7 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 
 class SimpleLoss:
-    loss_type = LossType.SAMPLE_LEVEL
+    loss_type = LossType.SEQUENCE_LEVEL
 
     def __call__(
         self,
@@ -39,7 +39,7 @@ class SimpleLoss:
 
 # Create a simple masked NLL loss function
 class SimpleNLLLoss:
-    loss_type = LossType.SAMPLE_LEVEL
+    loss_type = LossType.SEQUENCE_LEVEL
 
     def __call__(
         self,
