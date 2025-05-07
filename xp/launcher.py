@@ -37,7 +37,7 @@ def parse_args():
     parser.add_argument("--num-nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--time", type=str, default="4:0:0", help="Time limit for the job")
     parser.add_argument("--account", type=str, required=True, help="Slurm account to use")
-    parser.add_argument("--partition", type=str, required=True, help="Slurm partition to use")
+    parser.add_argument("--partition", type=str, default="batch", help="Slurm partition to use")
     parser.add_argument("--container", type=str, default=CONTAINER, help="Container to use")
     parser.add_argument("--mounts", type=str, default=MOUNTS, help="Mounts to use")
     parser.add_argument("--job-name", type=str, default=None, help="Base name for the job")
