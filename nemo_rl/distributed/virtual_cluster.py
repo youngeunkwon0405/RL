@@ -45,6 +45,9 @@ class PY_EXECUTABLES:
     # Use NeMo-RL direct dependencies and vllm.
     VLLM = "uv run --locked --extra vllm"
 
+    # Megatron-core (and nemo dependencies)
+    MCORE = "uv run --extra mcore --no-build-isolation"
+
 
 @ray.remote
 def _get_node_ip_and_free_port():
