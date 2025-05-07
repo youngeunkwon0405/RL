@@ -9,7 +9,7 @@
     - [GRPO Multi-node](#grpo-multi-node)
       - [GRPO Qwen2.5-32B](#grpo-qwen25-32b)
   - [Supervised Fine-Tuning (SFT)](#supervised-fine-tuning-sft)
-    - [Run Single Node SFT](#run-single-node-sft)
+    - [SFT Single Node](#sft-single-node)
     - [SFT Multi-node](#sft-multi-node)
   - [DPO](#dpo)
     - [DPO Single Node](#dpo-single-node)
@@ -178,7 +178,7 @@ uv run python examples/run_grpo_sliding_puzzle.py
 
 We provide an example SFT experiment using the [SQuAD dataset](https://rajpurkar.github.io/SQuAD-explorer/).
 
-### Run Single Node SFT
+### SFT Single Node
 
 The default SFT configuration is set to run on a single GPU. To start the experiment:
 
