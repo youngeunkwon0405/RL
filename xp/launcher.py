@@ -185,12 +185,15 @@ def launch_experiment(
         # If no param_overrides but we have extra_overrides, use those
         command += " " + format_parameter_override(extra_overrides)
     
+    # Escape 'command' for safe inclusion in COMMAND='...' env var setting for sbatch
+    safe_inner_command = command.replace("'", "'\''")
+    
     # Construct the sbatch command
     sbatch_cmd = [
         f"NUM_ACTOR_NODES={num_nodes}",
         f"CONTAINER={container}",
         f"MOUNTS={mounts}",
-        f"COMMAND='{command}'",
+        f"COMMAND='{safe_inner_command}'",
         "sbatch",
         f"--nodes={num_nodes}",
         f"--account={account}",
