@@ -989,9 +989,12 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         """Train the policy on a batch of data with a given loss function."""
         # Shard and replicate the batch
         shards = self.dp_size
-        sharded_data = data.shard_by_batch_size(
-            shards, batch_size=self.cfg["train_global_batch_size"]
-        )
+        # ==== [ZP] =====
+        # sharded_data = data.shard_by_batch_size(
+        #     shards, batch_size=self.cfg["train_global_batch_size"]
+        # )
+        sharded_data = data.shard_by_batch_size(shards, batch_size=None)
+        # ==== [ZP] =====
 
         # Train each shard in parallel
         futures = self.worker_group.run_all_workers_multiple_data(

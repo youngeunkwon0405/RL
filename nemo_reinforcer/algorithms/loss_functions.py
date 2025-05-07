@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Any, Tuple, TypedDict
+import random
 
 import torch
 
@@ -19,6 +20,7 @@ from nemo_reinforcer.algorithms.interfaces import LossFunction
 from nemo_reinforcer.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
+    masked_sum,
 )
 from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 
@@ -81,6 +83,7 @@ class ClippedPGLossFn(LossFunction):
         data: BatchedDataDict[ClippedPGLossDataDict],
     ) -> Tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
+        batch_size = data["input_ids"].size(0)
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
         advantages = data["advantages"][:, 1:]
@@ -109,7 +112,10 @@ class ClippedPGLossFn(LossFunction):
                 logprobs_policy=curr_logprobs,
                 logprobs_reference=reference_policy_logprobs,
             )
-            kl = masked_mean(kl, mask)
+            # ==== [ZP] =====
+            # kl = masked_mean(kl, mask)
+            kl = masked_sum(kl, mask)
+            # ==== [ZP] =====
         else:
             kl = 0
 
@@ -127,16 +133,24 @@ class ClippedPGLossFn(LossFunction):
         loss2 = -advantages * ratios_clamped
 
         if mask.sum() > 0:
-            actor_loss = masked_mean(torch.max(loss1, loss2), mask)
-            loss = actor_loss + kl
+            # ==== [ZP] =====
+            # actor_loss = masked_mean(torch.max(loss1, loss2), mask)
+            actor_loss = masked_sum(torch.max(loss1, loss2), mask)
+            # ==== [ZP] =====
+
+            # ==== [ZP] =====
+            loss = (actor_loss + kl) / (batch_size * 6144)
+            # ==== [ZP] =====
             with torch.no_grad():
                 probs_ratio = masked_mean(ratios.detach(), mask).item()
                 probs_ratio_clamped = masked_mean(ratios_clamped.detach(), mask).item()
+                mean_advantage = masked_mean(advantages.detach(), mask).item()
         else:
             # disable this update since there are no valid tokens
             loss = loss1.view(-1)[0] * 0
             probs_ratio = 0
             probs_ratio_clamped = 0
+            mean_advantage = 0
 
         return (
             loss,
@@ -146,6 +160,7 @@ class ClippedPGLossFn(LossFunction):
                 "probs_ratio_clamped": probs_ratio_clamped,
                 "kl_penalty": kl.item() / self.reference_policy_kl_penalty if kl else 0,
                 "token_mult_prob_error": mult_prob_error,
+                "mean_advantage": mean_advantage,
             },
         )
 

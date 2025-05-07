@@ -277,9 +277,10 @@ def refit_policy_generation(
     """Refit the policy generation interface with the latest policy weights."""
     policy.offload_before_refit()
     ipc_handles = policy.get_weights_ipc_handles()
-    policy_generation.prepare_for_generation()
+    policy_generation.prepare_for_generation(tags=["weights"])
     policy_generation.update_weights(ipc_handles)
     policy.offload_after_refit()
+    policy_generation.prepare_for_generation(tags=["kv_cache"])
 
 
 def generate_responses(
@@ -511,13 +512,30 @@ def grpo_train(
                     ],
                 )
                 advantages = (rewards - baseline).unsqueeze(-1)
+                zero_std_mask = std > 0
+                print(
+                    f"  • Std > 0: {zero_std_mask.sum().float().item()} / {zero_std_mask.size(0)}"
+                )
 
                 if master_config["grpo"]["normalize_rewards"]:
                     # don't sharpen the ones with no variation
-                    zero_std_mask = std > 0
                     advantages[zero_std_mask] = (
                         advantages[zero_std_mask] / std.unsqueeze(-1)[zero_std_mask]
                     )
+                non_zero_indices = torch.nonzero(zero_std_mask).squeeze()
+                zero_indices = torch.nonzero(~zero_std_mask).squeeze()
+
+                # count of selected indices must be divisible by 8, so we need to pad non zero indices
+                padding_size = 8 - non_zero_indices.size(0) % 8
+                if padding_size < 8:
+                    non_zero_indices = torch.cat(
+                        [non_zero_indices, zero_indices[:padding_size]]
+                    )
+
+                repeated_batch = repeated_batch.select(non_zero_indices)
+                advantages = advantages.index_select(0, non_zero_indices)
+                print(f"  • Advantage: {advantages[:128]}")
+                print(f"  • Mean adv.: {advantages.mean().item()}")
 
             with timer.time("data_processing"):
                 # Add loss mask and advantages to each message in LLMMessageLogType
@@ -643,6 +661,7 @@ def grpo_train(
             "loss": train_results["loss"].numpy(),
             "reward": rewards.numpy(),
         }
+        print(f"  • Original metrics: {metrics}")
         metrics.update(train_results["all_mb_metrics"])
         metrics = {k: np.mean(v).item() for k, v in metrics.items()}
         metrics.update(gen_metrics)

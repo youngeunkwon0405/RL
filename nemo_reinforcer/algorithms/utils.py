@@ -125,6 +125,12 @@ def masked_mean(values, mask, dim=None):
     return as_masked_tensor(values, mask.bool()).mean(dim=dim).to_tensor(torch.nan)
 
 
+@surpress_user_warnings
+def masked_sum(values, mask, dim=None):
+    """Masks values with mask, and computes the sum of the values using the masked values."""
+    return (values * mask).sum(dim=dim)
+
+
 def set_seed(seed: int):
     """Sets the seed for python, numpy, and pytorch."""
     random.seed(seed)

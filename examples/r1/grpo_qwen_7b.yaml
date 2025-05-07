@@ -17,7 +17,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo"
+  checkpoint_dir: "results/grpo_v2"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 10
@@ -30,7 +30,7 @@ policy:
   train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 2
-  max_total_sequence_length: 6144
+  max_total_sequence_length: 5888
   precision: "bfloat16"
 
   optimizer:
@@ -61,7 +61,7 @@ policy:
     top_k: null
     vllm_cfg:
       tensor_parallel_size: 2
-      gpu_memory_utilization: 0.6
+      gpu_memory_utilization: 0.7
       max_model_len: ${policy.max_total_sequence_length}
 
 data:
@@ -69,7 +69,7 @@ data:
   prompt_file: "examples/r1/cot.txt"
   system_prompt_file: null
   dataset_name: "math-cl"
-  
+
 env:
   math:
     num_workers: 8
@@ -82,7 +82,7 @@ logger:
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "reinforcer_grpo_qwen2_5_7b_cl"
-    name: "eos-qwen2_5_7b_grpo_cl"
+    name: "eos-qwen2_5_7b_grpo_cl_v2"
   tensorboard: {}
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
