@@ -72,7 +72,7 @@ def test_nll_loss():
     loss, metrics_dict = loss_fn(
         next_token_logits,
         data,
-        global_normalization_factor=torch.sum(
+        total_valid_tokens_or_seqs=torch.sum(
             data["token_mask"] * data["sample_mask"].unsqueeze(-1)
         ),
     )
@@ -96,7 +96,7 @@ def test_nll_loss():
     loss, metrics_dict = loss_fn(
         next_token_logits,
         data,
-        global_normalization_factor=torch.sum(
+        total_valid_tokens_or_seqs=torch.sum(
             data["token_mask"] * data["sample_mask"].unsqueeze(0)
         ),
     )
@@ -130,7 +130,7 @@ def test_dpo_loss():
     loss, metrics_dict = loss_fn(
         next_token_logits,
         data,
-        global_normalization_factor=torch.sum(data["sample_mask"]),
+        total_valid_tokens_or_seqs=torch.sum(data["sample_mask"]),
     )
 
     ## chosen and rejected errors are the same, so difference between them is 0
@@ -406,6 +406,7 @@ def test_clipped_pg_loss_ppo_clipping():
         "disable_ppo_ratio": False,
         "use_on_policy_kl_approximation": False,
         "use_importance_sampling_correction": False,
+        "token_level_loss": True,
     }
     loss_fn = ClippedPGLossFn(cfg)
 
@@ -487,6 +488,7 @@ def test_clipped_pg_loss_reinforce_mode():
         "ratio_clip_max": 0.0,  # Placeholder, ignored
         "use_on_policy_kl_approximation": False,
         "use_importance_sampling_correction": False,
+        "token_level_loss": True,
     }
     loss_fn = ClippedPGLossFn(cfg)
 
@@ -539,6 +541,7 @@ def test_clipped_pg_loss_kl_penalty():
         "disable_ppo_ratio": False,
         "use_on_policy_kl_approximation": False,
         "use_importance_sampling_correction": False,
+        "token_level_loss": True,
     }
     loss_fn = ClippedPGLossFn(cfg)
 
@@ -615,6 +618,7 @@ def test_clipped_pg_loss_masking():
         "disable_ppo_ratio": False,
         "use_on_policy_kl_approximation": False,
         "use_importance_sampling_correction": False,
+        "token_level_loss": True,
     }
     loss_fn = ClippedPGLossFn(cfg)  # Use original loss fn
 
@@ -700,6 +704,7 @@ def test_clipped_pg_loss_zero_mask():
         "disable_ppo_ratio": False,
         "use_on_policy_kl_approximation": False,
         "use_importance_sampling_correction": False,
+        "token_level_loss": True,
     }
     loss_fn = ClippedPGLossFn(cfg)  # Use original loss fn
 
@@ -730,6 +735,7 @@ def test_clipped_pg_loss_on_policy_kl_importance_sampling():
         "disable_ppo_ratio": False,
         "use_on_policy_kl_approximation": True,
         "use_importance_sampling_correction": True,
+        "token_level_loss": True,
     }
     loss_fn = ClippedPGLossFn(cfg)
 
@@ -864,17 +870,17 @@ def test_masked_mean_all_zeros():
     mask = torch.zeros_like(values)
 
     # All zeros mask should return 0
-    result = masked_mean(values, mask, torch.sum(mask))
+    result = masked_mean(values, mask)
     print(result)
     torch.testing.assert_allclose(result, torch.tensor(0.0))
 
     # With check_zero_mask=False
     mask[0] = 1
-    result = masked_mean(values, mask, torch.sum(mask))
+    result = masked_mean(values, mask)
     torch.testing.assert_allclose(result, torch.tensor(1.0))
 
     # Case 2: dim is not None
     values = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     mask = torch.zeros_like(values)
-    result = masked_mean(values, mask, torch.sum(mask))
+    result = masked_mean(values, mask)
     torch.testing.assert_allclose(result, torch.tensor((0.0)))
