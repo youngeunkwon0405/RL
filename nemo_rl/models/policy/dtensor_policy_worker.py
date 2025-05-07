@@ -364,6 +364,10 @@ class DTensorPolicyWorker:
                     else:
                         logits = outputs.logits
 
+                    # Divide logits by temperature
+                    if "generation" in self.cfg and self.cfg["generation"] is not None:
+                        logits.div_(self.cfg["generation"]["temperature"])
+
                     loss, loss_metrics = loss_fn(logits, mb, total_valid_tokens_or_seqs)
                     ## scale by the number of global batches so we get the correct
                     ## value when summing metrics across all microbatches
@@ -409,9 +413,11 @@ class DTensorPolicyWorker:
 
                     # Update parameters
                     self.optimizer.step()
-                    self.scheduler.step()
 
                 losses.append(torch.tensor(mb_losses).sum().item())
+
+            # increment scheduler after all batches in rollout are processed
+            self.scheduler.step()
 
             # Compute global loss across all ranks
             with torch.no_grad():
