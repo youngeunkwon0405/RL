@@ -1,0 +1,31 @@
+# Sample sweep configuration for GRPO math experiments
+# Each parameter can have a list of values to sweep over
+# The launcher will generate all possible combinations
+
+# Required parameter that must match the target script name
+script_name: "run_grpo_math.py"
+
+# Model configuration
+policy.model_name: ["Qwen/Qwen2.5-32B", "Qwen/Qwen2.5-1.5B"]
+policy.max_total_sequence_length: [16384, 8192]
+
+# Training configuration
+grpo.num_prompts_per_step: [32, 64]
+grpo.num_generations_per_prompt: [16, 32]
+grpo.max_num_steps: [1000000]
+
+# Distributed training configuration
+policy.dtensor_cfg.tensor_parallel_size: [8, 4]
+policy.dtensor_cfg.sequence_parallel: [true, false]
+policy.dtensor_cfg.activation_checkpointing: [true, false]
+
+# Generation configuration
+policy.generation.vllm_cfg.tensor_parallel_size: [4, 2]
+policy.generation.temperature: [1.0, 0.7]
+
+# Logging configuration
+logger.wandb_enabled: [true]
+logger.wandb.name: ["qwen2.5-32b-sweep", "qwen2.5-1.5b-sweep"]
+
+# Checkpointing configuration
+checkpointing.checkpoint_dir: ["results/qwen2.5-32b", "results/qwen2.5-1.5b"] 
