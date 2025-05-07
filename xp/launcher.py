@@ -188,8 +188,8 @@ def launch_experiment(
     # Construct the sbatch command
     sbatch_cmd = [
         f"NUM_ACTOR_NODES={num_nodes}",
-        f"CONTAINER={container}",
-        f"MOUNTS={mounts}",
+        f"CONTAINER=\"{container}\"",
+        f"MOUNTS=\"{mounts}\"",
         f"COMMAND=\"{command}\"",
         "sbatch",
         f"--nodes={num_nodes}",
