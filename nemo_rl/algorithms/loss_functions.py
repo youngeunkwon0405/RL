@@ -129,10 +129,6 @@ class ClippedPGLossFn(LossFunction):
                 global_normalization_factor=total_valid_tokens_or_seqs,
             ).item()
 
-        if mult_prob_error == 0.0:
-            # this sometimes gets 0 (everything masked/invalid). Doing this to avoid screwing up stats too much
-            mult_prob_error = 1.0
-
         next_token_logits = next_token_logits.to(torch.float32)
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
