@@ -471,8 +471,7 @@ def test_dtensor_fails_with_tp_and_tied_model(mock_2gpu_distributed_env):
 
 
 @pytest.mark.timeout(180)
-@pytest.mark.parametrize("num_gpus", [2], ids=["2gpu"])
-def test_dtensor_loss_independent_of_microbatch_size(num_gpus):
+def test_dtensor_loss_independent_of_microbatch_size_two_gpus(two_gpu_virtual_cluster):
     """Tests that changing microbatch size while keeping global batch size constant does not affect loss values in DTensor."""
     # Create test batch with global batch size of 8
     global_batch_size = 8
@@ -505,22 +504,13 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus):
         }
     )
 
-    # Create cluster
-    cluster = RayVirtualCluster(
-        name=f"test-{num_gpus}gpu",
-        bundle_ct_per_node_list=[num_gpus],
-        use_gpus=True,
-        num_gpus_per_node=num_gpus,
-        max_colocated_worker_groups=1,
-    )
-
     # Test with mbs=1, 2 microbatches per GPU
     config = create_test_config()
     tokenizer = get_tokenizer(config["tokenizer"])
 
     print("Creating training HfPolicy with mbs=1...")
     policy_mbs1 = HfPolicy(
-        cluster=cluster,
+        cluster=two_gpu_virtual_cluster,
         config=config,
         init_reference_model=False,
         tokenizer=tokenizer,
@@ -530,8 +520,8 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus):
     nll_loss_fn = NLLLoss()
     pg_loss_fn = ClippedPGLossFn(
         {
-            "ratio_eps_min": 0.2,
-            "ratio_eps_max": 0.2,
+            "ratio_clip_min": 0.2,
+            "ratio_clip_max": 0.2,
             "reference_policy_kl_penalty": 0.1,
             "disable_ppo_ratio": False,
             "use_on_policy_kl_approximation": False,
@@ -556,7 +546,7 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus):
 
     print("Creating training HfPolicy with mbs=2...")
     policy_mbs2 = HfPolicy(
-        cluster=cluster,
+        cluster=two_gpu_virtual_cluster,
         config=config,
         init_reference_model=False,
         tokenizer=tokenizer,
@@ -574,5 +564,4 @@ def test_dtensor_loss_independent_of_microbatch_size(num_gpus):
     torch.testing.assert_close(mbs1_nll_loss, mbs2_nll_loss, rtol=1e-5, atol=1e-5)
     torch.testing.assert_close(mbs1_pg_loss, mbs2_pg_loss, rtol=1e-5, atol=1e-5)
 
-    cluster.shutdown()
     policy_mbs2.worker_group.shutdown()
