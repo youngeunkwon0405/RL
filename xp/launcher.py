@@ -191,14 +191,14 @@ def launch_experiment(
         f"CONTAINER={container}",
         f"MOUNTS={mounts}",
         f"COMMAND='{command}'",
-        "sbatch \\",
-        f"    --nodes={num_nodes} \\",
-        f"    --account={account} \\",
-        f"    --job-name={job_name} \\",
-        f"    --partition={partition} \\", 
-        f"    --time={time} \\",
-         "    --gres=gpu:8 \\",
-         "    ray.sub",
+        "sbatch",
+        f"--nodes={num_nodes}",
+        f"--account={account}",
+        f"--job-name={job_name}",
+        f"--partition={partition}",
+        f"--time={time}",
+        "--gres=gpu:8",
+        "ray.sub",
     ]
     
     # Join the command
