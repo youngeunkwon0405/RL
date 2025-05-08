@@ -35,7 +35,6 @@ from nemo_rl.data.interfaces import (
 )
 from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
-    get_keys_from_message_log,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
@@ -572,7 +571,7 @@ def grpo_train(
                 metrics[k] = np.mean(v).item()
         metrics.update(rollout_metrics)
 
-        # Log conversations to W&B Table
+        # Log conversations to W&B table
         if master_config["logger"]["wandb_enabled"]:
             try:
                 conversation_table = wandb.Table(
@@ -696,7 +695,7 @@ def validate(
             "avg_length": avg_length,
         }
 
-        # Log validation conversations to W&B Table
+        # Log validation conversations to W&B table
         if master_config["logger"]["wandb_enabled"]:
             try:
                 val_conversation_table = wandb.Table(
