@@ -83,11 +83,14 @@ def get_cpu_state_dict(
     for k, v in state_generator:
         val = to_local_if_dtensor(v)
 
-        cpu_tensor = torch.empty(
-            *val.shape, device="cpu", pin_memory=pin_memory, dtype=val.dtype
-        )
-        cpu_tensor.copy_(val, non_blocking=True)
-        new_state_dict[k] = cpu_tensor
+        if len(val.shape) == 0:
+            new_state_dict[k] = val.cpu()
+        else:
+            cpu_tensor = torch.empty(
+                *val.shape, device="cpu", pin_memory=pin_memory, dtype=val.dtype
+            )
+            cpu_tensor.copy_(val, non_blocking=True)
+            new_state_dict[k] = cpu_tensor
 
     torch.cuda.synchronize()
     return new_state_dict
@@ -137,7 +140,7 @@ class DTensorPolicyWorker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
-            torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
+            torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/NeMo-RL/issues/13 is fixed
         )
         # caching since this property is not always preserved after FSDP
         self.num_tied_weights = len(find_tied_parameters(self.model))
@@ -262,7 +265,7 @@ class DTensorPolicyWorker:
             and not skip_tie_check
         ):
             raise ValueError(
-                f"Using dtensor policy with tp size {self.cfg['dtensor_cfg']['tensor_parallel_size']} for model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={self.num_tied_weights}) is not supported (https://github.com/NVIDIA/nemo-rl/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
+                f"Using dtensor policy with tp size {self.cfg['dtensor_cfg']['tensor_parallel_size']} for model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={self.num_tied_weights}) is not supported (https://github.com/NVIDIA/NeMo-RL/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
             )
 
         if gbs is None:
