@@ -157,12 +157,16 @@ def launch_experiment(
     if config:
         command += f" --config {config}"
     
+    log_dir = os.path.join(LOG_DIR, job_name)
+    checkpoint_dir = os.path.join(log_dir, "checkpoints")
+    
     # Parse extra arguments into overrides
     # Add default args before parsing extra args
     all_args = list(extra_args) if extra_args else []
     default_args = [
-        f"logger.log_dir={LOG_DIR}",
-        "logger.wandb_enabled=True"
+        f"logger.log_dir={log_dir}",
+        "logger.wandb_enabled=True",
+        f"checkpointing.checkpoint_dir={checkpoint_dir}"
     ]
     all_args.extend(default_args)
     extra_overrides = parse_extra_args(all_args)
@@ -187,6 +191,7 @@ def launch_experiment(
     
     # Construct the sbatch command
     sbatch_cmd = [
+        f"BASE_LOG_DIR={log_dir}",
         f"NUM_ACTOR_NODES={num_nodes}",
         f"CONTAINER=\"{container}\"",
         f"MOUNTS=\"{mounts}\"",
