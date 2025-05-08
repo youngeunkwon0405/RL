@@ -571,7 +571,7 @@ def grpo_train(
                 metrics[k] = np.mean(v).item()
         metrics.update(rollout_metrics)
 
-        # Log conversations to W&B table
+        # Log conversations to W&B Table
         if master_config["logger"]["wandb_enabled"]:
             try:
                 conversation_table = wandb.Table(
@@ -695,7 +695,7 @@ def validate(
             "avg_length": avg_length,
         }
 
-        # Log validation conversations to W&B table
+        # Log validation conversations to W&B Table
         if master_config["logger"]["wandb_enabled"]:
             try:
                 val_conversation_table = wandb.Table(
