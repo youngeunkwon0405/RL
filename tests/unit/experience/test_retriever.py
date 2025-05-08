@@ -14,13 +14,11 @@
 
 import pytest
 import ray
-import torch
 from transformers import AutoTokenizer
 
-from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.environments.tools.retriever import RAGEnvironment, RAGEnvConfig
+from nemo_rl.environments.tools.retriever import RAGEnvConfig, RAGEnvironment
 from nemo_rl.experience.rollouts import run_multi_turn_rollout
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
@@ -119,16 +117,22 @@ def test_vllm_retrieve(cluster, tokenizer, rag_env):
     for query in queries:
         # Tokenize the message content
         prompt = query * 4
-        token_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
-        message_logs.append([{"role": "user", "content": prompt, "token_ids": token_ids}])
+        token_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)[
+            "input_ids"
+        ][0]
+        message_logs.append(
+            [{"role": "user", "content": prompt, "token_ids": token_ids}]
+        )
 
     # Create initial batch
-    initial_batch = BatchedDataDict({
-        "message_log": message_logs,
-        "extra_env_info": [{}] * len(queries),  # No metadata needed for RAG
-        "task_name": ["document_retrieval"] * len(queries),
-        "stop_strings": [["</retrieve>"]] * len(queries),
-    })
+    initial_batch = BatchedDataDict(
+        {
+            "message_log": message_logs,
+            "extra_env_info": [{}] * len(queries),  # No metadata needed for RAG
+            "task_name": ["document_retrieval"] * len(queries),
+            "stop_strings": [["</retrieve>"]] * len(queries),
+        }
+    )
 
     # Create vLLM generation
     vllm_config = basic_vllm_test_config.copy()
@@ -156,4 +160,6 @@ def test_vllm_retrieve(cluster, tokenizer, rag_env):
         # Get the last message which should contain the result
         last_msg = msg_log[-1]
         assert last_msg["role"] == "environment"
-        assert last_msg["content"] == expected_results[i], f"Expected {expected_results[i]}, got {last_msg['content']}"
+        assert last_msg["content"] == expected_results[i], (
+            f"Expected {expected_results[i]}, got {last_msg['content']}"
+        )

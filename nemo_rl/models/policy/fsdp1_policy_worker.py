@@ -289,7 +289,7 @@ class FSDP1PolicyWorker:
                             logits = self.model.lm_head(outputs.last_hidden_state)
                         else:
                             logits = outputs.logits
-                    
+
                     # Divide logits by temperature
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])

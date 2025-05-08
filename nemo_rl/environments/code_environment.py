@@ -15,24 +15,22 @@ import ast
 import builtins
 import os
 import re
-from io import IOBase
-from types import ModuleType
-from copy import copy
-from collections.abc import Mapping, Sequence, Set
-from tempfile import TemporaryDirectory
+from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
+from copy import copy
+from io import IOBase
+from pprint import pformat
+from types import ModuleType
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import ray
 import torch
-from pprint import pformat
 
 from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES
-from nemo_rl.environments.utils import chunk_list_to_workers
 from nemo_rl.environments.interfaces import EnvironmentInterface, EnvironmentReturn
-from nemo_rl.tools.interfaces import ToolInterface
+from nemo_rl.environments.utils import chunk_list_to_workers
 
 
 class CodeEnvConfig(TypedDict):
@@ -67,16 +65,22 @@ class CodeExecutionWorker:
             # replace unpickable objects with a string representation
             return repr(obj)
         if isinstance(obj, Mapping):
-            return obj.__class__({self.sanitize(k): self.sanitize(v) for k, v in obj.items()})
+            return obj.__class__(
+                {self.sanitize(k): self.sanitize(v) for k, v in obj.items()}
+            )
         if isinstance(obj, Sequence) and not isinstance(obj, str):
             return obj.__class__(self.sanitize(v) for v in obj)
         if hasattr(obj, "__dict__"):
             new_obj = copy(obj)
-            new_obj.__dict__ = {self.sanitize(k): self.sanitize(v) for k, v in obj.__dict__.items()}
+            new_obj.__dict__ = {
+                self.sanitize(k): self.sanitize(v) for k, v in obj.__dict__.items()
+            }
             return new_obj
         return obj
 
-    def format_result(self, result: Any, code: Optional[str] = None, lookahead: Optional[str] = None) -> str:
+    def format_result(
+        self, result: Any, code: Optional[str] = None, lookahead: Optional[str] = None
+    ) -> str:
         if result is None:
             # no return value
             return ""
@@ -92,16 +96,16 @@ class CodeExecutionWorker:
             if result.startswith(lookahead):
                 # The generation may look like "</code>\n" if ">\n" is a single token.
                 # We trim \n from the result if the model has already generated it.
-                result = result[len(lookahead):]
+                result = result[len(lookahead) :]
         return result
 
     def execute(self, message_batch: str, metadata_batch: List[CodeEnvMetadata]) -> str:
         """Execute code in a sandboxed environment."""
         results = []
         terminateds = []
-        
+
         for message, metadata in zip(message_batch, metadata_batch):
-            match = re.search(rf"<code>(.*)</code>(.*)", message, re.DOTALL)
+            match = re.search(r"<code>(.*)</code>(.*)", message, re.DOTALL)
             if not match:
                 results.append("")
                 terminateds.append(False)
@@ -118,7 +122,7 @@ class CodeExecutionWorker:
                 # Silent mode
                 exec_code = code
                 eval_code = None
-            
+
             result = None
             terminated = False
             with self.chdir(metadata["working_dir"]):
@@ -131,16 +135,18 @@ class CodeExecutionWorker:
                         terminated = True
                 except Exception as err:
                     result = err
-            
+
             result = self.format_result(result, code, lookahead)
             results.append(result)
             terminateds.append(terminated)
-        
-        observations = [{"role": "environment", "content": result} for result in results]
+
+        observations = [
+            {"role": "environment", "content": result} for result in results
+        ]
         metadata_batch = self.sanitize(metadata_batch)
-        
+
         return observations, terminateds, metadata_batch
-            
+
     @contextmanager
     def chdir(self, dir: str):
         """Change to temporary directory for file operations."""
@@ -156,17 +162,24 @@ class CodeExecutionWorker:
         real_file = os.path.realpath(file)
         working_dir = os.path.realpath(os.getcwd())
         if os.path.commonpath([real_file, working_dir]) != working_dir:
-            raise PermissionError("Access beyond the temporary working directory is blocked")
+            raise PermissionError(
+                "Access beyond the temporary working directory is blocked"
+            )
         return open(file, *args, **kwargs)
 
     def safe_import(self, name: str, *args, **kwargs):
         """Safe version of import that blocks risky modules."""
         risky_modules = {
-            "os", "shutil",  # erase filesystem
-            "sys", "signal",  # exit the current program
+            "os",
+            "shutil",  # erase filesystem
+            "sys",
+            "signal",  # exit the current program
             "socket",  # network communication
-            "subprocess", "threading", "multiprocessing",  # spawn threads or processes
-            "builtins", "importlib",  # bypass current blockers
+            "subprocess",
+            "threading",
+            "multiprocessing",  # spawn threads or processes
+            "builtins",
+            "importlib",  # bypass current blockers
         }
         if name in risky_modules:
             raise PermissionError("Importing system and network modules is blocked")
@@ -196,12 +209,8 @@ class CodeEnvironment(EnvironmentInterface):
     ) -> EnvironmentReturn:
         """Process a batch of code execution steps."""
         message_batch = [ml[-1]["content"] for ml in message_log_batch]
-        chunked_message_batch = chunk_list_to_workers(
-            message_batch, self.num_workers
-        )
-        chunked_metadata_batch = chunk_list_to_workers(
-            metadata_batch, self.num_workers
-        )
+        chunked_message_batch = chunk_list_to_workers(message_batch, self.num_workers)
+        chunked_metadata_batch = chunk_list_to_workers(metadata_batch, self.num_workers)
 
         # Process each chunk in parallel
         futures = [
@@ -222,7 +231,7 @@ class CodeEnvironment(EnvironmentInterface):
             observations += obs
             terminateds += term
             new_metadata_batch += meta
-        
+
         if self.terminate_on_evaluation:
             terminated_tensor = torch.tensor(terminateds, dtype=torch.bool)
         else:
@@ -240,7 +249,7 @@ class CodeEnvironment(EnvironmentInterface):
         )
 
     def shutdown(self):
-         # shutdown all workers
+        # shutdown all workers
         for worker in self.workers:
             ray.kill(worker)
 

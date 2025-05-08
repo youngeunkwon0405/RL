@@ -12,17 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from tempfile import TemporaryDirectory
+
 import pytest
 import ray
-import torch
-from tempfile import TemporaryDirectory
-from typing import List, Dict, Any
 from transformers import AutoTokenizer
 
-from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.environments.code_environment import CodeEnvironment, CodeEnvConfig, CodeEnvMetadata
+from nemo_rl.environments.code_environment import (
+    CodeEnvConfig,
+    CodeEnvironment,
+    CodeEnvMetadata,
+)
 from nemo_rl.experience.rollouts import run_multi_turn_rollout
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
@@ -143,10 +145,8 @@ def test_untrusted_code(code_env):
         "with open('allowed_file.txt') as fin:\n"
         "    content = fin.read()\n"
         "content",
-        "with open('/etc/passwd', 'r') as fin:\n"
-        "    fin.read()",
-        "import math\n"
-        "round(math.sqrt(8))",
+        "with open('/etc/passwd', 'r') as fin:\n    fin.read()",
+        "import math\nround(math.sqrt(8))",
         "import os",
     ]
     results = [
@@ -162,8 +162,10 @@ def test_untrusted_code(code_env):
     temp_dirs = [TemporaryDirectory() for _ in codes]
     metadata_batch = [
         CodeEnvMetadata(
-            context={}, working_dir=temp_dir.name,
-        ) for temp_dir in temp_dirs
+            context={},
+            working_dir=temp_dir.name,
+        )
+        for temp_dir in temp_dirs
     ]
 
     # Execute the code
@@ -189,19 +191,25 @@ def test_vllm_execute_code(cluster, tokenizer, code_env):
     for code in codes:
         # Tokenize the message content
         prompt = code * 4
-        token_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
+        token_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)[
+            "input_ids"
+        ][0]
         temp_dir = TemporaryDirectory()
-        message_logs.append([{"role": "user", "content": prompt, "token_ids": token_ids}])
+        message_logs.append(
+            [{"role": "user", "content": prompt, "token_ids": token_ids}]
+        )
         metadata_batch.append(CodeEnvMetadata(context={}, working_dir=temp_dir.name))
         temp_dirs.append(temp_dir)
 
     # Create initial batch
-    initial_batch = BatchedDataDict({
-        "message_log": message_logs,
-        "extra_env_info": metadata_batch,
-        "task_name": ["code_execution"] * len(codes),
-        "stop_strings": [["</code>"]] * len(codes),
-    })
+    initial_batch = BatchedDataDict(
+        {
+            "message_log": message_logs,
+            "extra_env_info": metadata_batch,
+            "task_name": ["code_execution"] * len(codes),
+            "stop_strings": [["</code>"]] * len(codes),
+        }
+    )
 
     # Create vLLM generation
     vllm_config = basic_vllm_test_config.copy()
@@ -229,7 +237,9 @@ def test_vllm_execute_code(cluster, tokenizer, code_env):
         # Get the last message which should contain the result
         last_msg = msg_log[-1]
         assert last_msg["role"] == "environment"
-        assert last_msg["content"] == results[i], f"Expected {results[i]}, got {last_msg['content']}"
+        assert last_msg["content"] == results[i], (
+            f"Expected {results[i]}, got {last_msg['content']}"
+        )
 
 
 def test_hf_execute_code(cluster, tokenizer, code_env):
@@ -248,19 +258,25 @@ def test_hf_execute_code(cluster, tokenizer, code_env):
     for code in codes:
         # Tokenize the message content
         prompt = code * 4
-        token_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)["input_ids"][0]
+        token_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=False)[
+            "input_ids"
+        ][0]
         temp_dir = TemporaryDirectory()
-        message_logs.append([{"role": "user", "content": prompt, "token_ids": token_ids}])
+        message_logs.append(
+            [{"role": "user", "content": prompt, "token_ids": token_ids}]
+        )
         metadata_batch.append(CodeEnvMetadata(context={}, working_dir=temp_dir.name))
         temp_dirs.append(temp_dir)
 
     # Create initial batch
-    initial_batch = BatchedDataDict({
-        "message_log": message_logs,
-        "extra_env_info": metadata_batch,
-        "task_name": ["code_execution"] * len(codes),
-        "stop_strings": [["</code>"]] * len(codes),
-    })
+    initial_batch = BatchedDataDict(
+        {
+            "message_log": message_logs,
+            "extra_env_info": metadata_batch,
+            "task_name": ["code_execution"] * len(codes),
+            "stop_strings": [["</code>"]] * len(codes),
+        }
+    )
 
     # Create HF policy
     hf_config = basic_hf_test_config.copy()
@@ -293,6 +309,6 @@ def test_hf_execute_code(cluster, tokenizer, code_env):
         # Get the last message which should contain the result
         last_msg = msg_log[-1]
         assert last_msg["role"] == "environment"
-        assert last_msg["content"] == results[i], f"Expected {results[i]}, got {last_msg['content']}"
-
-
+        assert last_msg["content"] == results[i], (
+            f"Expected {results[i]}, got {last_msg['content']}"
+        )
