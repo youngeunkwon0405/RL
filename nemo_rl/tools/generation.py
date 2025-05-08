@@ -150,7 +150,7 @@ def generate_with_code_and_tools(
             if result is None:
                 # no return value
                 result = ""
-                new_results.append(result)
+                new_results.extend(result)
                 continue
             result = pformat(result)
             if "\n" in expr or "\n" in result:
