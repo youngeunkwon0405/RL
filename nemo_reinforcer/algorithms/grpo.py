@@ -274,6 +274,7 @@ def setup(
         else None,
         optimizer_path= None,
         init_optimizer=False,
+        init_reference_model=False
     )
 
     refit_buffer_size_gb = master_config["policy"]["refit_buffer_size_gb"]
