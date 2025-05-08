@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from typing import Any, Dict, Tuple, TypedDict, Iterable, Optional, List
-
+import copy
 import os
 from pathlib import Path
 import numpy as np
@@ -128,6 +128,7 @@ def setup(
     CheckpointManager,
     GRPOSaveState,
     MasterConfig,
+    GenerationInterface,
 ]:
     """Main entry point for running GRPO algorithm.
 
@@ -142,6 +143,9 @@ def setup(
     grpo_config = master_config["grpo"]
     logger_config = master_config["logger"]
     cluster_config = master_config["cluster"]
+
+    target_policy_config = master_config["target_policy"]
+    target_generation_config = master_config["target_policy"]["generation"]
 
 
 
@@ -230,17 +234,54 @@ def setup(
     backend = generation_config["backend"]
     generation_config["model_name"] = policy_config["model_name"]  # Needed for vLLM
 
+    bundle_indices_list = cluster.get_bundle_indices_list()
+    policy_generator_bundles = bundle_indices_list[0:len(bundle_indices_list)//2]
+    target_generator_bundles = bundle_indices_list[len(bundle_indices_list) // 2:]
+
     if backend == "hf":
         policy_generation = None
         print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
     elif backend == "vllm":
-        policy_generation = VllmGeneration(cluster=cluster, config=generation_config)
+        policy_generation = VllmGeneration(cluster=cluster, config=generation_config,bundle_indices_list=policy_generator_bundles)
         # Worker groups are not initialized until the first call to run something on workergroups.
         # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
         policy_generation.finish_generation()
         print(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
+
+
+    # target_policy_name="Qwen/Qwen2.5-1.5B"
+    # target_generation_config = copy.deepcopy(generation_config)
+    target_generation_config["model_name"] = target_policy_config["model_name"] #"nvidia/Llama-3.1-Nemotron-Nano-8B-v1" #
+    target_generation_config["max_new_tokens"] = 2*target_generation_config["max_new_tokens"]
+    target_generation_config["vllm_cfg"]["max_model_len"] = 2*target_generation_config["vllm_cfg"]["max_model_len"]
+
+
+    target_model_generation = VllmGeneration(cluster=cluster, config=target_generation_config,name_prefix='vllm_target',bundle_indices_list=target_generator_bundles)
+    target_model_generation.finish_generation()
+
+    # target_policy_config = copy.deepcopy(policy_config)
+    # target_policy_config["model_name"] = target_policy_name
+
+    target_policy = HfPolicy(
+        cluster=cluster,
+        config=target_policy_config,
+        tokenizer=tokenizer,
+        name_prefix='temp_policy',
+        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
+        if last_checkpoint_path
+        else None,
+        optimizer_path= None,
+        init_optimizer=False,
+    )
+
+    refit_buffer_size_gb = master_config["policy"]["refit_buffer_size_gb"]
+
+    refit_policy_generation(target_policy, target_model_generation, refit_buffer_size_gb)
+    target_policy.__del__()
+
+    # import pdb; pdb.set_trace()
 
     policy = HfPolicy(
         cluster=cluster,
@@ -272,6 +313,7 @@ def setup(
         checkpointer,
         grpo_save_state,
         master_config,
+        target_model_generation,
     )
 
 
@@ -331,10 +373,12 @@ def grpo_train(
     checkpointer: CheckpointManager,
     grpo_save_state: Optional[GRPOSaveState],
     master_config: MasterConfig,
+    target_model_generation: Optional[GenerationInterface],
+    target_tokenizer,
 ):
     """Run GRPO training algorithm."""
     timer = Timer()
-    NEED_REFIT = True
+    NEED_REFIT =  True
     # If policy_generation is None, use the policy as the generation interface (hf framework backend)
     if policy_generation is None:
         policy_generation = policy
@@ -353,9 +397,13 @@ def grpo_train(
         print("\n🔍 Running initial validation...")
         if NEED_REFIT and POLICY_GENERATION_STALE:
             refit_policy_generation(policy, policy_generation, refit_buffer_size_gb)
+
+
             POLICY_GENERATION_STALE = False
         else:
             policy_generation.prepare_for_generation()
+
+        target_model_generation.prepare_for_generation()
         val_metrics, validation_timings = validate(
             policy_generation,
             val_dataloader,
@@ -363,8 +411,12 @@ def grpo_train(
             val_task_to_env,
             step=0,
             master_config=master_config,
+            target_model_generation=target_model_generation,
+            target_tokenizer=target_tokenizer,
         )
         policy_generation.finish_generation()
+        target_model_generation.finish_generation()
+
         logger.log_metrics(val_metrics, step, prefix="validation")
         logger.log_metrics(validation_timings, step, prefix="timing/validation")
 
@@ -399,10 +451,12 @@ def grpo_train(
                         policy_generation,
                         refit_buffer_size_gb,
                     )
+
+                    # refit_policy_generation(policy, target_model_generation, refit_buffer_size_gb)
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
-
+                target_model_generation.prepare_for_generation()
             with timer.time("generation"):
                 repeated_batch, rollout_metrics = run_multi_turn_rollout(
                     policy_generation=policy_generation,
@@ -412,8 +466,11 @@ def grpo_train(
                     max_seq_len=master_config["policy"]["max_total_sequence_length"],
                     max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
                     greedy=False,
+                    target_model_generation=target_model_generation,
+                    target_tokenizer=target_tokenizer,
                 )
                 policy_generation.finish_generation()
+                target_model_generation.finish_generation()
 
             # Calculate rewards & advantages
             print("▶ Processing rewards...")
@@ -514,6 +571,7 @@ def grpo_train(
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
+                target_model_generation.prepare_for_generation()
                 val_metrics, validation_timings = validate(
                     policy_generation,
                     val_dataloader,
@@ -521,8 +579,12 @@ def grpo_train(
                     val_task_to_env,
                     step=step + 1,
                     master_config=master_config,
+                    target_model_generation=target_model_generation,
+                    target_tokenizer=target_tokenizer,
                 )
                 policy_generation.finish_generation()
+                target_model_generation.finish_generation()
+
                 logger.log_metrics(
                     validation_timings, step + 1, prefix="timing/validation"
                 )
@@ -628,6 +690,8 @@ def validate(
     val_task_to_env: Dict[str, EnvironmentInterface],
     step: int,
     master_config: MasterConfig,
+    target_model_generation: Optional[GenerationInterface],
+    target_tokenizer,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -659,6 +723,8 @@ def validate(
                 max_seq_len=master_config["policy"]["max_total_sequence_length"],
                 max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
                 greedy=False,
+                target_model_generation=target_model_generation,
+                target_tokenizer=target_tokenizer
             )
             rewards = val_batch["total_reward"]
 

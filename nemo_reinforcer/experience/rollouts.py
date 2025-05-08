@@ -48,6 +48,8 @@ def generate_responses(
     input_lengths: torch.Tensor,
     include_logprobs: bool = True,
     greedy: bool = False,
+    target_model_generation: Optional[GenerationInterface]=None,
+    target_tokenizer: AutoTokenizer=None,
 ) -> Tuple[BatchedDataDict[DatumSpec], List[torch.Tensor], dict]:
     """Generate responses from policy."""
     # Add stop_strings to generation_input_data if present in the batch
@@ -58,9 +60,9 @@ def generate_responses(
         generation_input_data["stop_strings"] = [None] * len(input_lengths)
 
     # Generate responses
-    generation_outputs = policy_generation.generate(
-        generation_input_data, greedy=greedy
-    )
+    generation_outputs = policy_generation.generate(generation_input_data, greedy=greedy)
+
+    # import pdb; pdb.set_trace()
 
     # Extract generated tokens
     generated_ids = []
@@ -71,6 +73,69 @@ def generate_responses(
         generated_ids.append(output_ids[input_length:total_length])
 
     generated_texts = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+
+
+    user_messages = []
+    target_model_inputs_len = []
+    for input_sample, generated_text_sample in zip(batch['message_log'], generated_texts):
+        #TODO this support only the first turn
+        problem = input_sample[0]['content']
+        thought = generated_text_sample
+        # import pdb;
+        # pdb.set_trace()
+
+        user_message = target_tokenizer.process_data(problem, thought)
+        user_messages.append(user_message)
+
+    active_flat_messages: FlatMessagesType
+    active_flat_messages, active_input_lengths = (
+        batched_message_log_to_flat_message(
+            user_messages,
+            pad_value_dict={"token_ids": target_tokenizer.pad_token_id},
+        )
+    )
+
+    # Extract input_ids and lengths from the flat messages
+    active_input_ids = active_flat_messages["token_ids"]
+    active_stop_strings = [None] * len(active_input_lengths)
+
+
+
+    target_generation_input_data = BatchedDataDict[GenerationDatumSpec](
+        {
+            "input_ids": active_input_ids,
+            "input_lengths": active_input_lengths,
+            "stop_strings": active_stop_strings,
+        }
+    )
+
+    # import pdb;
+    # pdb.set_trace()
+    target_generation_outputs = target_model_generation.generate(target_generation_input_data, greedy=greedy)
+
+    # import pdb; pdb.set_trace()
+
+    # Extract generated tokens
+    generated_ids = []
+    unpadded_sequence_lengths = target_generation_outputs["unpadded_sequence_lengths"]
+    for output_ids, input_length, total_length in zip(
+            target_generation_outputs["output_ids"], active_input_lengths, unpadded_sequence_lengths
+    ):
+        generated_ids.append(output_ids[input_length:total_length])
+
+    # import pdb;
+    # pdb.set_trace()
+
+    generated_texts = target_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+
+
+
+
+    # input_texts
+
+    # import pdb; pdb.set_trace()
+
+
 
     # Append to message log
     for i, (text, input_length, total_length) in enumerate(
@@ -204,6 +269,8 @@ def run_multi_turn_rollout(
     max_seq_len: int,
     max_rollout_turns: int = 999999,
     greedy: bool = False,
+    target_model_generation: Optional[GenerationInterface]=None,
+    target_tokenizer: AutoTokenizer=None,
 ) -> Tuple[BatchedDataDict[DatumSpec], Dict[str, Any]]:
     """Runs a multi-turn rollout loop, interacting with the environment.
 
@@ -263,6 +330,9 @@ def run_multi_turn_rollout(
         # Extract input_ids and lengths from the flat messages
         active_input_ids = active_flat_messages["token_ids"]
 
+        # import pdb;
+        # pdb.set_trace()
+
         generation_input_data = BatchedDataDict[GenerationDatumSpec](
             {
                 "input_ids": active_input_ids,
@@ -279,7 +349,11 @@ def run_multi_turn_rollout(
             tokenizer,
             active_input_lengths,
             greedy=greedy,
+            target_model_generation=target_model_generation,
+            target_tokenizer=target_tokenizer,
         )
+
+        # import pdb; pdb.set_trace()
 
         # Record token usage - assistant
         for i, global_idx in enumerate(active_indices.tolist()):

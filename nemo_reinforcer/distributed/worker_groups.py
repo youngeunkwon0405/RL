@@ -252,9 +252,11 @@ class RayWorkerGroup:
                     bundle_indices_list.append((node_idx, [local_idx]))
 
         # Create workers based on the bundle_indices_list
+        # import pdb; pdb.set_trace()
         self._create_workers_from_bundle_indices(
             remote_worker_builder, bundle_indices_list
         )
+
 
     def _create_workers_from_bundle_indices(
         self, remote_worker_builder, bundle_indices_list

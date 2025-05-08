@@ -471,6 +471,7 @@ class VllmGeneration(GenerationInterface):
         config: VllmConfig,
         name_prefix: str = "vllm_policy",
         workers_per_node: Optional[Union[int, List[int]]] = None,
+        bundle_indices_list: Optional[List[tuple]] = None,
     ):
         """Initialize a vLLM policy with distributed workers."""
         # Store config
@@ -508,6 +509,7 @@ class VllmGeneration(GenerationInterface):
                 worker_builder,
                 name_prefix=name_prefix,
                 workers_per_node=workers_per_node,
+                bundle_indices_list=bundle_indices_list,
             )
 
         # Number of data parallel groups is the number of tied worker groups

@@ -172,6 +172,35 @@ class RayVirtualCluster:
                 f"Maximum number of retries reached ({max_retries}). Cluster resources may be insufficient or cluster itself is highly unstable. Please check your cluster configuration and your cluster logs."
             )
 
+    def get_bundle_indices_list(self) -> List[int]:
+        bundle_indices_list = []
+
+        # Determine how many workers per node
+
+        workers_per_node = [
+            pg.bundle_count for pg in self.get_placement_groups()
+        ]
+
+
+        # Validate workers_per_node
+        assert len(workers_per_node) == self.node_count(), (
+            "workers_per_node_list must be the same length as the number of nodes in the virtual cluster"
+        )
+        assert all(
+            [
+                workers_per_node[i] <= pg.bundle_count
+                for i, pg in enumerate(self.get_placement_groups())
+            ]
+        ), (
+            "workers_per_node must be less than or equal to the number of bundles in the placement groups"
+        )
+
+        # Create bundle_indices_list where each worker is its own group
+        for node_idx, worker_count in enumerate(workers_per_node):
+            for local_idx in range(worker_count):
+                # Each worker is its own single-element group
+                bundle_indices_list.append((node_idx, [local_idx]))
+        return bundle_indices_list
     def _init_placement_groups(self, strategy: str):
         """Creates placement groups for each node in the cluster. Has empty groups for nodes that don't have any bundles.
 

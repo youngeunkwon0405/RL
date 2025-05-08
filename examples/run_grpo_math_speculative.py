@@ -17,6 +17,8 @@ import os
 import pprint
 from collections import defaultdict
 from typing import Any, Dict
+import copy
+from types import MethodType
 
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
@@ -50,8 +52,40 @@ def parse_args():
 # ===============================================================================
 #                             Math Data Processor
 # ===============================================================================
+TARGET_LLM_PROMPT="I give you problem and toughts I had on this problem. Please take both of them and extract a final answer problem: {} thoughts: {}"
+def process_data(self, problem,thoughts):
+    # e.g. tokenize + post-process
 
+    # problem = log[0][0]['content']
 
+    user_message = {
+        "role": "user",
+        "content": TARGET_LLM_PROMPT.format(problem,thoughts),
+    }
+    message = self.apply_chat_template(
+        [user_message],
+        tokenize=False,
+        add_generation_prompt=True,
+        add_special_tokens=False,
+    )
+
+    user_message["token_ids"] = self(message, return_tensors="pt")["input_ids"][0]
+
+    # import pdb;
+    # pdb.set_trace()
+    if len(user_message["token_ids"]) > self.max_sequence_length:
+        user_message["token_ids"] = user_message["token_ids"][0:self.max_sequence_length]
+    user_message["content"] = message
+
+    # generation_input_data = BatchedDataDict[GenerationDatumSpec](
+    #     {
+    #         "input_ids": active_input_ids,
+    #         "input_lengths": active_input_lengths,
+    #         "stop_strings": active_stop_strings,
+    #     }
+    # )
+
+    return [user_message]
 def openinstructmath2_data_processor(
     datum_dict: Dict[str, Any],
     task_data_spec: TaskDataSpec,
@@ -63,6 +97,8 @@ def openinstructmath2_data_processor(
     user_message = datum_dict["messages"]
     problem = user_message[0]["content"]
     extra_env_info = {"ground_truth": user_message[1]["content"]}
+
+    # import pdb; pdb.set_trace()
 
     message_log: LLMMessageLogType = []
     user_message = {
@@ -253,6 +289,14 @@ def main():
     config["policy"]["generation"] = configure_generation_config(
         config["policy"]["generation"], tokenizer
     )
+    target_tokenizer = get_tokenizer(config["target_policy"]["tokenizer"])
+
+    config["target_policy"]["generation"] = configure_generation_config(
+        config["target_policy"]["generation"], tokenizer
+    )
+
+    target_tokenizer.max_sequence_length = config["target_policy"]["max_total_sequence_length"]
+    target_tokenizer.process_data = MethodType(process_data, target_tokenizer)
 
     # setup data
     (
@@ -273,7 +317,18 @@ def main():
         checkpointer,
         grpo_state,
         master_config,
+        target_model_generation,
     ) = setup(config, tokenizer, dataset, val_dataset)
+
+    # task_to_env["target_model"] = target_model_generation
+    # target_config = copy.deepcopy(config)
+    # target_config["policy"]["tokenizer"]["name"] = "Qwen/Qwen2.5-1.5B" #"nvidia/Llama-3.1-Nemotron-Nano-8B-v1"#"Qwen/Qwen2.5-1.5B" #
+
+    #master_config["policy"]["max_total_sequence_length"]
+    # task_to_env["target_tokenizer"] = target_tokenizer
+
+    # val_task_to_env["target_model"] = target_model_generation
+    # val_task_to_env["target_tokenizer"] = target_tokenizer
 
     # import pdb; pdb.set_trace()
     grpo_train(
@@ -289,6 +344,9 @@ def main():
         checkpointer,
         grpo_state,
         master_config,
+        target_model_generation,
+        target_tokenizer
+
     )
 
 
