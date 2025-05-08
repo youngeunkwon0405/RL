@@ -504,8 +504,8 @@ class MegatronPolicyWorker:
                 )
                 # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
                 # so we must gather across mp ranks
-                grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
-                num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(
+                grad_norm: float = reduce_max_stat_across_model_parallel_group(grad_norm)
+                num_zeros_in_grad: float = reduce_max_stat_across_model_parallel_group(
                     num_zeros_in_grad
                 )
 
@@ -549,6 +549,7 @@ class MegatronPolicyWorker:
 
                     loss_metrics["lr"] = curr_lr
                     loss_metrics["wd"] = curr_wd
+                    loss_metrics["grad_norm"] = grad_norm
                     torch.distributed.broadcast_object_list(
                         [loss_metrics],
                         src=get_pipeline_model_parallel_last_rank(),
@@ -579,6 +580,7 @@ class MegatronPolicyWorker:
             "global_loss": loss.cpu(),
             "rank": torch.distributed.get_rank(),
             "all_mb_metrics": dict(mb_metrics),
+            "grad_norm": mb_metrics["grad_norm"][-1], # TODO @sahilj: return an average or something later
         }
         return metrics
 

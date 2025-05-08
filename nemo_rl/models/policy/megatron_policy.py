@@ -47,10 +47,6 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         optimizer_path: Optional[str] = None,
         init_reference_model: bool = True,
     ):
-        from nemo_rl.models.policy.megatron_policy_worker import (
-            MegatronPolicyWorker,
-        )
-
         if weights_path:
             weights_path = os.path.abspath(weights_path)
         if optimizer_path:
@@ -71,7 +67,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             Queue()
         )  # just for communication before torch distributed is set up
         worker_builder = RayWorkerBuilder(
-            MegatronPolicyWorker,
+            "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker",
             config,
             tokenizer=tokenizer,
             checkpoint_dir=None,
