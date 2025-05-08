@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Tuple, TypedDict
 
 import numpy as np
 import torch
+import wandb
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
@@ -571,6 +572,38 @@ def grpo_train(
                 metrics[k] = np.mean(v).item()
         metrics.update(rollout_metrics)
 
+        # Log conversations to W&B Table
+        if master_config["logger"]["wandb_enabled"]:
+            try:
+                conversation_table = wandb.Table(
+                    columns=[
+                        "step",
+                        "sample_idx",
+                        "task_name",
+                        "conversation",
+                        "total_reward",
+                    ]
+                )
+                # Use message_log directly from repeated_batch
+                for i, conversation in enumerate(repeated_batch["message_log"]):
+                    formatted_conversation = ""
+                    for msg in conversation:
+                        # The observations from the environment should have role "environment"
+                        formatted_conversation += f"**{msg['role']}**: {msg['content']}\n\n"  # prompts + responses + environment observations
+
+                    task_name = repeated_batch["task_name"][i]
+
+                    conversation_table.add_data(
+                        step + 1,
+                        i,  # index within the repeated batch
+                        task_name,
+                        formatted_conversation.strip(),
+                        repeated_batch["total_reward"][i].item(),
+                    )
+                metrics.update({"train_conversations": conversation_table})
+            except Exception as e:
+                print(f"\n  ⚠️ Error logging conversations to W&B: {str(e)}")
+
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
         print(f"  • Loss: {metrics['loss']:.4f}")
@@ -620,7 +653,10 @@ def validate(
 
         total_rewards = []
         total_lengths = []
-        all_message_logs = []  # Collect all message logs
+        # Accumulate validation conversations for W&B logging
+        val_conversations = []
+        val_task_names = []
+        val_rewards = []
 
         max_batches = (
             master_config["grpo"]["max_val_samples"]
@@ -645,11 +681,11 @@ def validate(
             total_rewards.extend(rewards.tolist())
             total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
 
-            # Collect message logs for later display
-            to_env = get_keys_from_message_log(
-                val_batch["message_log"], ["role", "content"]
-            )
-            all_message_logs.extend(to_env)
+            # Accumulate validation conversations for W&B logging
+            for i, conversation in enumerate(val_batch["message_log"]):
+                val_conversations.append(conversation)
+                val_task_names.append(val_batch["task_name"][i])
+                val_rewards.append(rewards[i])
 
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
@@ -660,14 +696,43 @@ def validate(
             "avg_length": avg_length,
         }
 
+        # Log validation conversations to W&B Table
+        if master_config["logger"]["wandb_enabled"]:
+            try:
+                val_conversation_table = wandb.Table(
+                    columns=[
+                        "step",
+                        "sample_idx",
+                        "task_name",
+                        "conversation",
+                        "total_reward",
+                    ]
+                )
+                for i, conversation in enumerate(val_conversations):
+                    formatted_conversation = ""
+                    for msg in conversation:
+                        # The observations from the environment should have role "environment"
+                        formatted_conversation += f"**{msg['role']}**: {msg['content']}\n\n"  # prompts + responses + environment observations
+
+                    val_conversation_table.add_data(
+                        step,
+                        i,  # index across all validation samples
+                        val_task_names[i],
+                        formatted_conversation.strip(),
+                        val_rewards[i],
+                    )
+                val_metrics.update({"validation_conversations": val_conversation_table})
+            except Exception as e:
+                print(f"\n  ⚠️ Error logging validation conversations to W&B: {str(e)}")
+
         # Print sample conversations only once at the end of validation
         try:
             print_message_log_samples(
-                all_message_logs,
+                val_conversations,
                 total_rewards,
                 num_samples=min(
                     master_config["logger"]["num_val_samples_to_print"],
-                    len(all_message_logs),
+                    len(val_conversations),
                 ),
                 step=step,
             )
