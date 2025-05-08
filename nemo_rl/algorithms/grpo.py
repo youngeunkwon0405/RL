@@ -17,7 +17,6 @@ from typing import Any, Dict, Optional, Tuple, TypedDict
 
 import numpy as np
 import torch
-import wandb
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
@@ -35,6 +34,7 @@ from nemo_rl.data.interfaces import (
 )
 from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
+    get_keys_from_message_log,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
@@ -344,7 +344,7 @@ def grpo_train(
             POLICY_GENERATION_STALE = False
         else:
             policy_generation.prepare_for_generation()
-        val_metrics, validation_timings = validate(
+        val_metrics, validation_timings, val_batch_data = validate(
             policy_generation,
             val_dataloader,
             tokenizer,
@@ -355,6 +355,15 @@ def grpo_train(
         policy_generation.finish_generation()
         logger.log_metrics(val_metrics, step, prefix="validation")
         logger.log_metrics(validation_timings, step, prefix="timing/validation")
+        logger.log_conversations(
+            batch_data=val_batch_data,
+            tokenizer=tokenizer,
+            step=step,
+            prefix="validation",
+            jsonl_filename=f"val_data_step{step}.jsonl"
+            if master_config["logger"]["tensorboard_enabled"]
+            else None,
+        )
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
@@ -502,7 +511,7 @@ def grpo_train(
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
-                val_metrics, validation_timings = validate(
+                val_metrics, validation_timings, val_batch_data = validate(
                     policy_generation,
                     val_dataloader,
                     tokenizer,
@@ -515,6 +524,15 @@ def grpo_train(
                     validation_timings, step + 1, prefix="timing/validation"
                 )
                 logger.log_metrics(val_metrics, step + 1, prefix="validation")
+                logger.log_conversations(
+                    batch_data=val_batch_data,
+                    tokenizer=tokenizer,
+                    step=step + 1,
+                    prefix="validation",
+                    jsonl_filename=f"val_data_step{step}.jsonl"
+                    if master_config["logger"]["tensorboard_enabled"]
+                    else None,
+                )
 
             ## Checkpointing
             consumed_samples += master_config["grpo"]["num_prompts_per_step"]
@@ -572,36 +590,15 @@ def grpo_train(
         metrics.update(rollout_metrics)
 
         # Log conversations to W&B Table
-        if master_config["logger"]["wandb_enabled"]:
-            try:
-                conversation_table = wandb.Table(
-                    columns=[
-                        "step",
-                        "sample_idx",
-                        "task_name",
-                        "conversation",
-                        "total_reward",
-                    ]
-                )
-                # Use message_log directly from repeated_batch
-                for i, conversation in enumerate(repeated_batch["message_log"]):
-                    formatted_conversation = ""
-                    for msg in conversation:
-                        # The observations from the environment should have role "environment"
-                        formatted_conversation += f"**{msg['role']}**: {msg['content']}\n\n"  # prompts + responses + environment observations
-
-                    task_name = repeated_batch["task_name"][i]
-
-                    conversation_table.add_data(
-                        step + 1,
-                        i,  # index within the repeated batch
-                        task_name,
-                        formatted_conversation.strip(),
-                        repeated_batch["total_reward"][i].item(),
-                    )
-                metrics.update({"train_conversations": conversation_table})
-            except Exception as e:
-                print(f"\n  ⚠️ Error logging conversations to W&B: {str(e)}")
+        logger.log_conversations(
+            batch_data=repeated_batch,
+            tokenizer=tokenizer,
+            step=step + 1,
+            prefix="train",
+            jsonl_filename=f"train_data_step{step}.jsonl"
+            if master_config["logger"]["tensorboard_enabled"]
+            else None,
+        )
 
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
@@ -652,10 +649,9 @@ def validate(
 
         total_rewards = []
         total_lengths = []
-        # Accumulate validation conversations for W&B logging
-        val_conversations = []
-        val_task_names = []
-        val_rewards = []
+        all_message_logs = []  # Collect all message logs
+        # Accumulate validation conversations for logging
+        all_val_batches = []
 
         max_batches = (
             master_config["grpo"]["max_val_samples"]
@@ -680,11 +676,13 @@ def validate(
             total_rewards.extend(rewards.tolist())
             total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
 
-            # Accumulate validation conversations for W&B logging
-            for i, conversation in enumerate(val_batch["message_log"]):
-                val_conversations.append(conversation)
-                val_task_names.append(val_batch["task_name"][i])
-                val_rewards.append(rewards[i])
+            # Collect message logs for later display
+            to_env = get_keys_from_message_log(
+                val_batch["message_log"], ["role", "content"]
+            )
+            all_message_logs.extend(to_env)
+
+            all_val_batches.append(val_batch.get_dict())
 
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
@@ -695,43 +693,14 @@ def validate(
             "avg_length": avg_length,
         }
 
-        # Log validation conversations to W&B Table
-        if master_config["logger"]["wandb_enabled"]:
-            try:
-                val_conversation_table = wandb.Table(
-                    columns=[
-                        "step",
-                        "sample_idx",
-                        "task_name",
-                        "conversation",
-                        "total_reward",
-                    ]
-                )
-                for i, conversation in enumerate(val_conversations):
-                    formatted_conversation = ""
-                    for msg in conversation:
-                        # The observations from the environment should have role "environment"
-                        formatted_conversation += f"**{msg['role']}**: {msg['content']}\n\n"  # prompts + responses + environment observations
-
-                    val_conversation_table.add_data(
-                        step,
-                        i,  # index across all validation samples
-                        val_task_names[i],
-                        formatted_conversation.strip(),
-                        val_rewards[i],
-                    )
-                val_metrics.update({"validation_conversations": val_conversation_table})
-            except Exception as e:
-                print(f"\n  ⚠️ Error logging validation conversations to W&B: {str(e)}")
-
         # Print sample conversations only once at the end of validation
         try:
             print_message_log_samples(
-                val_conversations,
+                all_message_logs,
                 total_rewards,
                 num_samples=min(
                     master_config["logger"]["num_val_samples_to_print"],
-                    len(val_conversations),
+                    len(all_message_logs),
                 ),
                 step=step,
             )
@@ -742,6 +711,9 @@ def validate(
     # Get timing metrics
     timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     validation_time = timing_metrics.get("total_validation_time", 0)
+
+    # Convert all_val_batches to BatchedDataDict
+    all_val_batches = BatchedDataDict.from_batches(all_val_batches)
 
     # Print summary of validation results
     print("\n📊 Validation Results:")
@@ -757,4 +729,4 @@ def validate(
     # Make sure to reset the timer after validation
     timer.reset()
 
-    return val_metrics, timing_metrics
+    return val_metrics, timing_metrics, all_val_batches
