@@ -44,6 +44,7 @@ class CheckpointingConfig(TypedDict):
     checkpoint_dir: os.PathLike
     metric_name: str
     higher_is_better: bool
+    save_period: int
     keep_top_k: Optional[int]
 
 

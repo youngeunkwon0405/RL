@@ -41,6 +41,7 @@ class PolicyConfig(TypedDict):
     precision: str
     dtensor_cfg: DTensorConfig
     make_sequence_length_divisible_by: int
+    max_total_sequence_length: int
     max_grad_norm: Optional[Union[float, int]]
     fsdp_offload_enabled: bool
     activation_checkpointing_enabled: bool

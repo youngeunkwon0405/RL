@@ -13,7 +13,7 @@
 # limitations under the License.
 import time
 from contextlib import contextmanager
-from typing import Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional, Sequence, Union
 
 import numpy as np
 
@@ -57,7 +57,7 @@ class Timer:
     """
 
     # Define valid reduction types and their corresponding NumPy functions
-    _REDUCTION_FUNCTIONS = {
+    _REDUCTION_FUNCTIONS: Dict[str, Callable[[Sequence[float]], float]] = {
         "mean": np.mean,
         "median": np.median,
         "min": np.min,
@@ -194,7 +194,7 @@ class Timer:
 
     def get_timing_metrics(
         self, reduction_op: Union[str, Dict[str, str]] = "mean"
-    ) -> Dict[str, List[float]]:
+    ) -> Dict[str, float | List[float]]:
         """Get all timing measurements with optional reduction.
 
         Args:
@@ -214,7 +214,7 @@ class Timer:
         if isinstance(reduction_op, str):
             reduction_op = {label: reduction_op for label in self._timers}
 
-        results = {}
+        results: dict[str, float | list[float]] = {}
         for label, op in reduction_op.items():
             if label not in self._timers:
                 continue

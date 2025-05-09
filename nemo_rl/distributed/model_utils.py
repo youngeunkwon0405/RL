@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Tuple
+from typing import Sequence, Tuple
 
 import torch
 
@@ -99,8 +99,9 @@ class DistributedLogprob(torch.autograd.Function):
 
     @staticmethod
     def backward(
-        ctx, grad_output: torch.Tensor
+        ctx, *grad_outputs: torch.Tensor
     ) -> Tuple[torch.Tensor, None, None, None, None, None, None]:
+        grad_output = grad_outputs[0]
         softmax, target_mask, masked_target = ctx.saved_tensors
         partition_vocab_size = softmax.size(-1)
 

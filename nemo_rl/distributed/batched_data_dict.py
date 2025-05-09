@@ -13,7 +13,7 @@
 # limitations under the License.
 from collections import UserDict
 from copy import deepcopy
-from typing import Any, Dict, Generic, Iterator, List, Optional, TypeVar, Union
+from typing import Any, Dict, Generic, Iterator, List, Mapping, Optional, TypeVar, Union
 
 import torch
 from typing_extensions import Self
@@ -23,7 +23,7 @@ from nemo_rl.distributed.collectives import (
     rebalance_nd_tensor,
 )
 
-DictT = TypeVar("DictT", bound=Dict[str, Any])
+DictT = TypeVar("DictT", bound=Mapping[str, Any])
 
 
 class BatchedDataDict(UserDict, Generic[DictT]):
@@ -325,7 +325,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             return len(self.data[key])
         return self.data[key].shape[0]
 
-    def to(self, device: torch.device) -> Self:
+    def to(self, device: str | torch.device) -> Self:
         """Move tensors in batched dict to device."""
         for k, v in self.data.items():
             if torch.is_tensor(v):

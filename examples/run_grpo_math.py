@@ -16,8 +16,9 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
+import torch
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
@@ -27,8 +28,14 @@ from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.data.hf_datasets.deepscaler import DeepScalerDataset
 from nemo_rl.data.hf_datasets.openmathinstruct2 import OpenMathInstruct2Dataset
-from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType, TaskDataSpec
+from nemo_rl.data.interfaces import (
+    DatumSpec,
+    LLMMessageLogType,
+    TaskDataProcessFnCallable,
+    TaskDataSpec,
+)
 from nemo_rl.distributed.virtual_cluster import init_ray
+from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
@@ -53,6 +60,7 @@ def parse_args():
 # ===============================================================================
 
 
+# TaskDataProcessFnCallable
 def hf_data_processor(
     datum_dict: Dict[str, Any],
     task_data_spec: TaskDataSpec,
@@ -91,7 +99,7 @@ def hf_data_processor(
             ]
         loss_multiplier = 0.0
 
-    output = {
+    output: DatumSpec = {
         "message_log": message_log,
         "length": length,
         "extra_env_info": extra_env_info,
@@ -103,6 +111,7 @@ def hf_data_processor(
 
 
 # Example of a generic math data processor
+# TaskDataProcessFnCallable
 def math_data_processor(
     datum_dict: Dict[str, Any],
     task_data_spec: TaskDataSpec,
@@ -119,17 +128,18 @@ def math_data_processor(
 
     # system prompt
     if task_data_spec.system_prompt:
-        sys_message = {"role": "system", "content": task_data_spec.system_prompt}
-        message = tokenizer.apply_chat_template(
-            [sys_message],
+        sys_prompt: dict[str, str | torch.Tensor] = {
+            "role": "system",
+            "content": task_data_spec.system_prompt,
+        }
+        sys = tokenizer.apply_chat_template(
+            [sys_prompt],
             tokenize=False,
             add_generation_prompt=False,
             add_special_tokens=False,
         )
-        sys_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][
-            0
-        ]
-        message_log.append(sys_message)
+        sys_prompt["token_ids"] = tokenizer(sys, return_tensors="pt")["input_ids"][0]
+        message_log.append(sys_prompt)
 
     # user prompt
     if task_data_spec.prompt:
@@ -156,7 +166,7 @@ def math_data_processor(
             ]
         loss_multiplier = 0.0
 
-    output = {
+    output: DatumSpec = {
         "message_log": message_log,
         "length": length,
         "extra_env_info": extra_env_info,
@@ -188,7 +198,9 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     else:
         raise ValueError(f"No processor for dataset {data_config['dataset_name']}.")
 
-    task_data_processors = defaultdict(lambda: (math_task_spec, hf_data_processor))
+    task_data_processors: Dict[str, Tuple[TaskDataSpec, TaskDataProcessFnCallable]] = (
+        defaultdict(lambda: (math_task_spec, hf_data_processor))
+    )
     task_data_processors["math"] = (math_task_spec, hf_data_processor)
 
     math_env = MathEnvironment.options(
@@ -213,7 +225,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
         max_seq_length=data_config["max_input_seq_length"],
     )
 
-    task_to_env = defaultdict(lambda: math_env)
+    task_to_env: Dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
     task_to_env["math"] = math_env
     return dataset, val_dataset, task_to_env, task_to_env
 

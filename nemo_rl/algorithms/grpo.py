@@ -66,11 +66,13 @@ class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
     max_num_steps: int
+    max_rollout_turns: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
     val_batch_size: int
     val_at_start: bool
+    max_val_samples: int
     checkpoint_dir: str
 
 
@@ -88,13 +90,17 @@ def _default_grpo_save_state() -> GRPOSaveState:
     }
 
 
+class GRPOLoggerConfig(LoggerConfig):
+    num_val_samples_to_print: int  # number of val samples to print to stdout
+
+
 class MasterConfig(TypedDict):
     policy: PolicyConfig
     loss_fn: ClippedPGLossConfig
     env_configs: Dict[str, Any]
     data: DataConfig
     grpo: GRPOConfig
-    logger: LoggerConfig
+    logger: GRPOLoggerConfig
     cluster: ClusterConfig
     checkpointing: CheckpointingConfig
 
@@ -317,7 +323,7 @@ def grpo_train(
     val_task_to_env: Optional[Dict[str, EnvironmentInterface]],
     logger: Logger,
     checkpointer: CheckpointManager,
-    grpo_save_state: Optional[GRPOSaveState],
+    grpo_save_state: GRPOSaveState,
     master_config: MasterConfig,
 ):
     """Run GRPO training algorithm."""
@@ -328,6 +334,7 @@ def grpo_train(
         policy_generation = policy
         NEED_REFIT = False
     POLICY_GENERATION_STALE = True  # tracks if generation needs a refit before running
+    assert policy_generation is not None # for mypy type check
 
     # common config/state itmes
     step = grpo_save_state["step"]
@@ -571,7 +578,7 @@ def grpo_train(
                 metrics[k] = np.sum(v).item()
         metrics.update(rollout_metrics)
 
-        timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+        timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum") # type: ignore
 
         print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
@@ -603,16 +610,16 @@ def grpo_train(
 
 def validate(
     policy_generation: GenerationInterface,
-    val_dataloader: StatefulDataLoader,
+    val_dataloader: Optional[StatefulDataLoader],
     tokenizer,
-    val_task_to_env: Dict[str, EnvironmentInterface],
+    val_task_to_env: Optional[Dict[str, EnvironmentInterface]],
     step: int,
     master_config: MasterConfig,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
         print("  ⚠️ No validation dataloader provided, skipping validation")
-        return
+        return {}, {}
 
     timer = Timer()
     with timer.time("total_validation_time"):
@@ -649,7 +656,7 @@ def validate(
             to_env = get_keys_from_message_log(
                 val_batch["message_log"], ["role", "content"]
             )
-            all_message_logs.extend(to_env)
+            all_message_logs.append(to_env)
 
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
