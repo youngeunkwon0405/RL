@@ -111,7 +111,7 @@ def generate_responses(
 
     # import pdb;
     # pdb.set_trace()
-    target_generation_outputs = target_model_generation.generate(target_generation_input_data, greedy=greedy)
+    target_generation_outputs = target_model_generation.generate(target_generation_input_data, greedy=True)
 
     # import pdb; pdb.set_trace()
 

@@ -215,12 +215,33 @@ def setup(
     # ==========================
     print("\n▶ Setting up compute cluster...")
     colocated_inference = generation_config["backend"] != "hf"
+    # cluster = RayVirtualCluster(
+    #     name="grpo_policy_cluster",
+    #     bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
+    #     * cluster_config["num_nodes"],
+    #     use_gpus=True,
+    #     num_gpus_per_node=cluster_config["gpus_per_node"],
+    #     max_colocated_worker_groups=2 if colocated_inference else 1,
+    # )
+
+    nodes_for_each_cluster = cluster_config["num_nodes"] #if cluster_config["num_nodes"]==1 else cluster_config["num_nodes"]//2
+    gpus_for_each_cluster = cluster_config["gpus_per_node"]//2 #if cluster_config["num_nodes"]==1 else cluster_config["gpus_per_node"]
+
     cluster = RayVirtualCluster(
         name="grpo_policy_cluster",
-        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
-        * cluster_config["num_nodes"],
+        bundle_ct_per_node_list=[gpus_for_each_cluster]
+                                * nodes_for_each_cluster,
         use_gpus=True,
-        num_gpus_per_node=cluster_config["gpus_per_node"],
+        num_gpus_per_node=gpus_for_each_cluster,
+        max_colocated_worker_groups=2 if colocated_inference else 1,
+    )
+
+    cluster2 = RayVirtualCluster(
+        name="grpo_target_policy_cluster",
+        bundle_ct_per_node_list=[gpus_for_each_cluster]
+                                * nodes_for_each_cluster,
+        use_gpus=True,
+        num_gpus_per_node=gpus_for_each_cluster,
         max_colocated_worker_groups=2 if colocated_inference else 1,
     )
     print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
@@ -234,15 +255,15 @@ def setup(
     backend = generation_config["backend"]
     generation_config["model_name"] = policy_config["model_name"]  # Needed for vLLM
 
-    bundle_indices_list = cluster.get_bundle_indices_list()
-    policy_generator_bundles = bundle_indices_list[0:len(bundle_indices_list)//2]
-    target_generator_bundles = bundle_indices_list[len(bundle_indices_list) // 2:]
+    # bundle_indices_list = cluster.get_bundle_indices_list()
+    # policy_generator_bundles = bundle_indices_list[0:len(bundle_indices_list)//2]
+    # target_generator_bundles = bundle_indices_list[len(bundle_indices_list) // 2:]
 
     if backend == "hf":
         policy_generation = None
         print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
     elif backend == "vllm":
-        policy_generation = VllmGeneration(cluster=cluster, config=generation_config,bundle_indices_list=policy_generator_bundles)
+        policy_generation = VllmGeneration(cluster=cluster, config=generation_config)#,bundle_indices_list=policy_generator_bundles)
         # Worker groups are not initialized until the first call to run something on workergroups.
         # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
         policy_generation.finish_generation()
@@ -258,14 +279,14 @@ def setup(
     target_generation_config["vllm_cfg"]["max_model_len"] = 2*target_generation_config["vllm_cfg"]["max_model_len"]
 
 
-    target_model_generation = VllmGeneration(cluster=cluster, config=target_generation_config,name_prefix='vllm_target',bundle_indices_list=target_generator_bundles)
+    target_model_generation = VllmGeneration(cluster=cluster2, config=target_generation_config,name_prefix='vllm_target')#,bundle_indices_list=target_generator_bundles)
     target_model_generation.finish_generation()
 
     # target_policy_config = copy.deepcopy(policy_config)
     # target_policy_config["model_name"] = target_policy_name
 
     target_policy = HfPolicy(
-        cluster=cluster,
+        cluster=cluster2,
         config=target_policy_config,
         tokenizer=tokenizer,
         name_prefix='temp_policy',

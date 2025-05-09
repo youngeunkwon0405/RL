@@ -1,5 +1,5 @@
 # Run from the root of NeMo-Reinforcer repo
-NUM_ACTOR_NODES=16
+NUM_ACTOR_NODES=32
 
 # Set up virtual environment directory
 VENV_DIR="$PWD/reinforcer_venv"
@@ -14,7 +14,7 @@ export VENV_DIR=$VENV_DIR
 export VLLM_PORT_RANGE="20000-30000"
 
 # grpo_math_8b uses Llama-3.1-8B-Instruct model
-COMMAND="uv run ./examples/run_grpo_math.py --config examples/configs/grpo_math_1B.yaml cluster.num_nodes=${NUM_ACTOR_NODES}" \
+COMMAND="uv run ./examples/run_grpo_math_speculative.py --config examples/configs/grpo_math_1B.yaml cluster.num_nodes=${NUM_ACTOR_NODES}" \
 CONTAINER='gitlab-master.nvidia.com/deci/research/lit-llama/rl_uv_amnon:latest' \
 MOUNTS="/lustre:/lustre,$VENV_DIR:/opt/reinforcer_venv,$UV_CACHE_DIR:/home/ray/.cache/uv" \
 sbatch \
