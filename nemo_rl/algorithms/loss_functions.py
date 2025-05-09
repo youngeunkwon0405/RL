@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+import time
 from typing import Any, Tuple, TypedDict
 
 import torch
@@ -85,6 +87,8 @@ class ClippedPGLossFn(LossFunction):
         self.use_importance_sampling_correction = cfg[
             "use_importance_sampling_correction"
         ]
+
+        self.dump_dir = cfg["dump"]
 
     def __call__(
         self,
@@ -178,6 +182,25 @@ class ClippedPGLossFn(LossFunction):
         with torch.no_grad():
             probs_ratio = masked_mean(ratios.detach(), mask).item()
             probs_ratio_clamped = masked_mean(ratios_clamped.detach(), mask).item()
+
+        if mult_prob_error > 1.2:
+            to_save = {
+                "data": data,
+                "next_token_logits": next_token_logits,
+                "mask": mask,
+                "sample_mask": sample_mask,
+                "advantages": advantages,
+                "prev_logprobs": prev_logprobs,
+                "generation_logprobs": generation_logprobs,
+                "reference_policy_logprobs": reference_policy_logprobs,
+            }
+            torch.save(
+                to_save,
+                os.path.join(
+                    self.dump_dir,
+                    f"high_error_rank_{torch.distributed.get_rank()}_time_{time.time()}.pt",
+                ),
+            )
 
         return (
             loss,

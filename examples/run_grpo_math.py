@@ -76,7 +76,9 @@ class MathLengthControlDataset:
                 for _ in range(v):
                     self.true_ds.append((i, k))
 
-    def __getitem__(self, idx):
+        self.__getitem__(0, to_print=True)
+
+    def __getitem__(self, idx, to_print=False):
         i, reasoning_effort = self.true_ds[idx]
         item = self.ds[i]
         user_message = deepcopy(item["messages"])
@@ -97,7 +99,7 @@ class MathLengthControlDataset:
             "content": f"Use {reasoning_effort} effort to solve the problem. This should control how much you want to spend doing reasoning.",
         }
         message = self.tokenizer.apply_chat_template(
-            [user_message, system_message],
+            [system_message, user_message],
             tokenize=False,
             add_generation_prompt=True,
             add_special_tokens=False,
@@ -107,6 +109,10 @@ class MathLengthControlDataset:
         ][0]
         user_message["content"] = message
         message_log.append(user_message)
+
+        if to_print:
+            print("### PRINTING THE FIRST PROMPT")
+            print(message)
 
         length = sum(len(m["token_ids"]) for m in message_log)
 
