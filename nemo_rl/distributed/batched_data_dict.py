@@ -13,7 +13,18 @@
 # limitations under the License.
 from collections import UserDict
 from copy import deepcopy
-from typing import Any, Dict, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+)
 
 import torch
 from typing_extensions import Self

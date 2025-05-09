@@ -20,13 +20,18 @@ from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.models.generation.interfaces import GenerationDatumSpec
 
+
 class LogprobOutputSpec(TypedDict):
     """logprobs: Tensor of log probabilities."""
+
     logprobs: torch.Tensor
+
 
 class ReferenceLogprobOutputSpec(TypedDict):
     """logprobs: Tensor of log probabilities."""
+
     reference_logprobs: torch.Tensor
+
 
 class PolicyInterface(ABC):
     """Abstract base class defining the interface for RL policies."""
