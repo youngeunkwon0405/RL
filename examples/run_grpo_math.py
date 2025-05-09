@@ -76,9 +76,7 @@ class MathLengthControlDataset:
                 for _ in range(v):
                     self.true_ds.append((i, k))
 
-        self.__getitem__(0, to_print=True)
-
-    def __getitem__(self, idx, to_print=False):
+    def __getitem__(self, idx):
         i, reasoning_effort = self.true_ds[idx]
         item = self.ds[i]
         user_message = deepcopy(item["messages"])
@@ -109,10 +107,6 @@ class MathLengthControlDataset:
         ][0]
         user_message["content"] = message
         message_log.append(user_message)
-
-        if to_print:
-            print("### PRINTING THE FIRST PROMPT")
-            print(message)
 
         length = sum(len(m["token_ids"]) for m in message_log)
 
