@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Optional, TypedDict, Union
+from typing import Any, NotRequired, Optional, TypedDict, Union
 
 from nemo_rl.models.generation.interfaces import GenerationConfig
 
@@ -28,6 +28,11 @@ class DTensorConfig(TypedDict):
 class TokenizerConfig(TypedDict):
     name: str
     chat_template: str
+
+
+class PytorchOptimizerConfig(TypedDict):
+    name: str
+    kwargs: dict[str, Any]
 
 
 class PolicyConfig(TypedDict):
@@ -46,3 +51,4 @@ class PolicyConfig(TypedDict):
     fsdp_offload_enabled: bool
     activation_checkpointing_enabled: bool
     refit_buffer_size_gb: int
+    optimizer: NotRequired[PytorchOptimizerConfig] = None

@@ -42,6 +42,10 @@ from nemo_rl.models.dtensor.parallelize import (
     to_local_if_dtensor,
 )
 from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.interfaces import (
+    LogprobOutputSpec,
+    ReferenceLogprobOutputSpec,
+)
 from nemo_rl.models.policy.utils import (
     get_gpu_info,
     import_class_from_path,
@@ -452,7 +456,7 @@ class DTensorPolicyWorker:
 
     def get_logprobs(
         self, data: BatchedDataDict, micro_batch_size: int = None
-    ) -> BatchedDataDict:
+    ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a batch of data.
 
         Uses the configured logprob_batch_size to do microbatching.
@@ -586,7 +590,7 @@ class DTensorPolicyWorker:
 
     def get_reference_policy_logprobs(
         self, data: BatchedDataDict, micro_batch_size: int = None
-    ) -> BatchedDataDict:
+    ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs from the reference policy for a batch of data.
 
         Returns:

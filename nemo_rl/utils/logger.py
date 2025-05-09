@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, TypedDict
+from typing import Any, Dict, List, Mapping, Optional, TypedDict
 
 import ray
 import requests
@@ -562,7 +562,7 @@ class Logger(LoggerInterface):
         for logger in self.loggers:
             logger.log_metrics(metrics, step, prefix, step_metric)
 
-    def log_hyperparams(self, params: Dict[str, Any]) -> None:
+    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
         """Log hyperparameters to all enabled backends.
 
         Args:

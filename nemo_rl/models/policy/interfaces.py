@@ -12,12 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, Dict
+from typing import Any, Dict, TypedDict
+
+import torch
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.models.generation.interfaces import GenerationDatumSpec
 
+class LogprobOutputSpec(TypedDict):
+    """logprobs: Tensor of log probabilities."""
+    logprobs: torch.Tensor
+
+class ReferenceLogprobOutputSpec(TypedDict):
+    """logprobs: Tensor of log probabilities."""
+    reference_logprobs: torch.Tensor
 
 class PolicyInterface(ABC):
     """Abstract base class defining the interface for RL policies."""
@@ -25,7 +34,7 @@ class PolicyInterface(ABC):
     @abstractmethod
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
-    ) -> BatchedDataDict:
+    ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get logprobs of actions from observations.
 
         Args:
@@ -40,7 +49,7 @@ class PolicyInterface(ABC):
     @abstractmethod
     def get_reference_policy_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
-    ) -> BatchedDataDict:
+    ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get logprobs of actions from observations.
 
         Args:

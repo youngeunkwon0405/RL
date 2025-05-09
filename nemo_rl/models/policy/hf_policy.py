@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from collections import defaultdict
-from typing import List, Optional, Union
+from typing import List, Optional, Type, Union
 
 import ray
 from transformers import AutoTokenizer
@@ -27,10 +27,14 @@ from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
     GenerationOutputSpec,
 )
-from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from nemo_rl.models.policy.fsdp1_policy_worker import FSDP1PolicyWorker
+from nemo_rl.models.policy.interfaces import (
+    LogprobOutputSpec,
+    PolicyInterface,
+    ReferenceLogprobOutputSpec,
+)
 
 
 class HfPolicy(PolicyInterface, GenerationInterface):
@@ -55,11 +59,11 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         self.tensor_parallel_size = 1
 
         if config["dtensor_cfg"]["enabled"]:
-            worker_builder_cls = DTensorPolicyWorker
+            worker_builder_cls: Type = DTensorPolicyWorker
             self.tensor_parallel_size = config["dtensor_cfg"]["tensor_parallel_size"]
             node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
         else:
-            worker_builder_cls = FSDP1PolicyWorker
+            worker_builder_cls: Type = FSDP1PolicyWorker
 
         worker_builder = RayWorkerBuilder(
             worker_builder_cls,
@@ -111,7 +115,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
-    ) -> BatchedDataDict:
+    ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a data dict.
 
         Returns:
@@ -123,14 +127,16 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         futures = self.worker_group.run_all_workers_multiple_data(
             "get_logprobs", sharded_data, only_on="all_tied_workers"
         )
-        logprobs = BatchedDataDict.from_batches(
+        logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
         )
         return logprobs
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict[GenerationDatumSpec], micro_batch_size: int = None
-    ) -> BatchedDataDict:
+        self,
+        data: BatchedDataDict[GenerationDatumSpec],
+        micro_batch_size: Optional[int] = None,
+    ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs of the reference policy for a data dict.
 
         Returns: Identical to get_logprobs.
@@ -142,8 +148,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             common_kwargs={"micro_batch_size": micro_batch_size},
             only_on="all_tied_workers",
         )
-        logprobs = BatchedDataDict.from_batches(
-            self.worker_group.get_all_worker_results(futures)
+        logprobs: BatchedDataDict[ReferenceLogprobOutputSpec] = (
+            BatchedDataDict.from_batches(
+                self.worker_group.get_all_worker_results(futures)
+            )
         )
         return logprobs
 
@@ -210,7 +218,8 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             common_kwargs={"greedy": greedy},
             only_on="all_tied_workers",
         )
-        result = BatchedDataDict.from_batches(
+        assert self.cfg["generation"] is not None, "Generation config is not set"
+        result: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures),
             pad_value_dict={"output_ids": self.cfg["generation"]["pad_token_id"]},
         )

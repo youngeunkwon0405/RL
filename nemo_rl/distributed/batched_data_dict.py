@@ -13,7 +13,7 @@
 # limitations under the License.
 from collections import UserDict
 from copy import deepcopy
-from typing import Any, Dict, Generic, Iterator, List, Mapping, Optional, TypeVar, Union
+from typing import Any, Dict, Generic, Iterator, List, Mapping, Optional, Type, TypeVar, Union
 
 import torch
 from typing_extensions import Self
@@ -29,7 +29,7 @@ DictT = TypeVar("DictT", bound=Mapping[str, Any])
 class BatchedDataDict(UserDict, Generic[DictT]):
     @classmethod
     def from_batches(
-        cls: Self,
+        cls: Type[Self],
         batches: List[Dict],
         pad_value_dict: Optional[Dict[str, int]] = None,
     ) -> Self:
@@ -44,7 +44,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         Returns:
             BatchedDataDict: A new BatchedDataDict containing the stacked data.
         """
-        stacked_dict = cls()
+        stacked_dict: Self = cls()
         pad_value_dict = pad_value_dict or {}
 
         for k in sorted(batches[0]):

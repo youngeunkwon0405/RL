@@ -141,6 +141,10 @@ def setup(
     logger_config = master_config["logger"]
     cluster_config = master_config["cluster"]
 
+    assert generation_config is not None, (
+        "A generation config in the PolicyConfig is required for GRPO"
+    )
+
     # ==========================
     #         Logger
     # ==========================
@@ -334,7 +338,7 @@ def grpo_train(
         policy_generation = policy
         NEED_REFIT = False
     POLICY_GENERATION_STALE = True  # tracks if generation needs a refit before running
-    assert policy_generation is not None # for mypy type check
+    assert policy_generation is not None  # for mypy type check
 
     # common config/state itmes
     step = grpo_save_state["step"]
@@ -578,7 +582,7 @@ def grpo_train(
                 metrics[k] = np.sum(v).item()
         metrics.update(rollout_metrics)
 
-        timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum") # type: ignore
+        timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore
 
         print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
