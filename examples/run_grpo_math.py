@@ -16,20 +16,27 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Dict
 
 from omegaconf import OmegaConf
+from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import DataConfig
-from nemo_rl.data.datasets import AllTaskProcessedDataset
-from nemo_rl.data.hf_datasets.deepscaler import DeepScalerDataset
+from nemo_rl.data.hf_datasets.deepscaler import (
+    DeepScalerDataset,
+)
 from nemo_rl.data.hf_datasets.openmathinstruct2 import OpenMathInstruct2Dataset
 from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType, TaskDataSpec
 from nemo_rl.distributed.virtual_cluster import init_ray
-from nemo_rl.environments.math_environment import MathEnvironment
+from nemo_rl.environments.math_environment import (
+    MathEnvironment,
+    MathLengthControlEnvironment,
+)
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -51,6 +58,71 @@ def parse_args():
 # ===============================================================================
 #                             Math Data Processor
 # ===============================================================================
+
+
+@dataclass
+class MathLengthControlDataset:
+    ds: Dataset
+    effort_count: Dict[str, int]
+    tokenizer: AutoTokenizer
+    max_seq_length: int
+    prompt_format: str
+
+    def __post_init__(self):
+        self.true_ds = []
+
+        for i in range(len(self.ds)):
+            for k, v in self.effort_count.items():
+                for _ in range(v):
+                    self.true_ds.append((i, k))
+
+    def __getitem__(self, idx):
+        i, reasoning_effort = self.true_ds[idx]
+        item = self.ds[i]
+        user_message = deepcopy(item["messages"])
+
+        message_log: LLMMessageLogType = []
+        problem = user_message[0]["content"]
+        extra_env_info = {
+            "ground_truth": user_message[1]["content"],
+            "effort": reasoning_effort,
+        }
+
+        user_message = {
+            "role": "user",
+            "content": self.prompt_format.format(problem),
+        }
+        system_message = {
+            "role": "system",
+            "content": f"Use {reasoning_effort} effort to solve the problem. This should control how much you want to spend doing reasoning.",
+        }
+        message = self.tokenizer.apply_chat_template(
+            [user_message, system_message],
+            tokenize=False,
+            add_generation_prompt=True,
+            add_special_tokens=False,
+        )
+        user_message["token_ids"] = self.tokenizer(message, return_tensors="pt")[
+            "input_ids"
+        ][0]
+        user_message["content"] = message
+        message_log.append(user_message)
+
+        length = sum(len(m["token_ids"]) for m in message_log)
+
+        output = {
+            "message_log": message_log,
+            "length": length,
+            "extra_env_info": extra_env_info,
+            "loss_multiplier": 1.0,  # todo filter during init
+            "idx": idx,
+            "task_name": "MathLengthControl",
+        }
+
+        return output
+
+    def __len__(self):
+        return len(self.true_ds)
 
 
 def hf_data_processor(
@@ -176,11 +248,13 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
         system_prompt_file=data_config["system_prompt_file"],
     )
 
+    task_data_processors = defaultdict(lambda: (math_task_spec, hf_data_processor))
+
     # Load OpenMathInstruct2Dataset using nemo rl datasets
     if data_config["dataset_name"] == "OpenMathInstruct-2":
         print("Loading nvidia/OpenMathInstruct2Dataset for training and validation")
         data = OpenMathInstruct2Dataset()
-    elif data_config["dataset_name"] == "DeepScaler":
+    elif data_config["dataset_name"] in {"DeepScaler", "DeepScaler-LengthControl"}:
         print(
             "Loading agentica-org/DeepScaleR-Preview-Dataset for training and validation"
         )
@@ -188,7 +262,6 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     else:
         raise ValueError(f"No processor for dataset {data_config['dataset_name']}.")
 
-    task_data_processors = defaultdict(lambda: (math_task_spec, hf_data_processor))
     task_data_processors["math"] = (math_task_spec, hf_data_processor)
 
     math_env = MathEnvironment.options(
@@ -197,24 +270,33 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }
     ).remote(env_configs["math"])
-    dataset = AllTaskProcessedDataset(
-        data.formatted_ds["train"],
-        tokenizer,
-        math_task_spec,
-        task_data_processors,
+
+    dataset = MathLengthControlDataset(
+        ds=data.formatted_ds["train"],
+        effort_count=data_config["effort_count"],
+        tokenizer=tokenizer,
         max_seq_length=data_config["max_input_seq_length"],
+        prompt_format=math_task_spec.prompt,
     )
 
-    val_dataset = AllTaskProcessedDataset(
-        data.formatted_ds["validation"],
-        tokenizer,
-        math_task_spec,
-        task_data_processors,
+    val_dataset = MathLengthControlDataset(
+        ds=data.formatted_ds["validation"],
+        effort_count=data_config["effort_count"],
+        tokenizer=tokenizer,
         max_seq_length=data_config["max_input_seq_length"],
+        prompt_format=math_task_spec.prompt,
     )
+
+    math_length_control_env = MathLengthControlEnvironment.options(
+        runtime_env={
+            "py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE,
+            "env_vars": dict(os.environ),  # Pass thru all user environment variables
+        }
+    ).remote(env_configs["MathLengthControl"], tokenizer)
 
     task_to_env = defaultdict(lambda: math_env)
     task_to_env["math"] = math_env
+    task_to_env["MathLengthControl"] = math_length_control_env
     return dataset, val_dataset, task_to_env, task_to_env
 
 

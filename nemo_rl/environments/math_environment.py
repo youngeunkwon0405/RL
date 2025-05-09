@@ -228,3 +228,155 @@ class MathEnvironment(EnvironmentInterface):
         }
 
         return batch, metrics
+
+
+@ray.remote
+class MathLengthControlEnvironment(EnvironmentInterface):
+    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
+
+    def __init__(self, cfg: MathEnvConfig, tokenizer):
+        self.cfg = cfg
+        self.num_workers = cfg["num_workers"]
+        self.tokenizer = tokenizer
+        self.workers = [
+            HFVerifyWorker.options(
+                runtime_env={"py_executable": HFVerifyWorker.DEFAULT_PY_EXECUTABLE}
+            ).remote()
+            for _ in range(self.num_workers)
+        ]
+        self.max_length = cfg["max_length"]
+        self.effort_to_beta_map = cfg["betas"]
+
+    def shutdown(self):
+        # shutdown all workers
+        for worker in self.workers:
+            ray.kill(worker)
+
+    def step(
+        self,
+        message_log_batch: List[List[Dict[str, str]]],
+        metadata: List[MathEnvironmentMetadata],
+    ) -> EnvironmentReturn:
+        """Runs a step in the math environment.
+
+        Args:
+            message_log: List[List[Dict[str, str]]]. A batch of OpenAI-API-like message logs that represent interactions with the LLM.
+            metadata: List[MathEnvironmentMetadata]. The grader will use the 'ground_truth' key to evaluate correctness.
+
+        Returns:
+            EnvironmentReturn: A tuple containing:
+                - List[Dict[str, str]]: Observations/responses batch
+                - List[Dict]: Updated metadata
+                - List[str]: Next stop strings for the next turn
+                - Tensor: Rewards tensor
+                - Tensor: Done flags tensor
+        """
+        # Extract the assistant's responses from the message history
+        # Each message list should have at least one assistant response
+        assistant_response_batch = []
+        for conversation in message_log_batch:
+            assistant_responses = [
+                interaction["content"]
+                for interaction in conversation
+                if interaction["role"] == "assistant"
+            ]
+            assistant_response_batch.append("".join(assistant_responses))
+
+        ground_truths = [g["ground_truth"] for g in metadata]
+
+        chunked_assistant_response_batch = chunk_list_to_workers(
+            assistant_response_batch, self.num_workers
+        )
+        chunked_ground_truths = chunk_list_to_workers(ground_truths, self.num_workers)
+
+        # # Process each chunk in parallel
+        futures = [
+            self.workers[i].verify.remote(chunk, ground_truth_chunk)
+            for i, (chunk, ground_truth_chunk) in enumerate(
+                zip(chunked_assistant_response_batch, chunked_ground_truths)
+            )
+        ]
+
+        results = ray.get(futures)
+
+        # flatten the results
+        results = [item for sublist in results for item in sublist]
+        observations = [
+            {
+                "role": "environment",
+                "content": "Environment: correct"
+                if result
+                else "Environment: incorrect",
+            }
+            for result in results
+        ]
+
+        # create a tensor of rewards and done flags
+        rewards = torch.tensor(results).cpu()
+
+        length_rewards = torch.as_tensor(
+            [
+                len(self.tokenizer.encode(x)) / self.max_length
+                for x in assistant_response_batch
+            ],
+            dtype=torch.float32,
+        )
+        betas = torch.as_tensor(
+            [self.effort_to_beta_map[g["effort"]] for g in metadata],
+            dtype=torch.float32,
+        )
+        length_rewards = length_rewards * betas
+
+        correct_rewards: torch.Tensor = rewards > 0
+        rewards[correct_rewards] = (
+            rewards[correct_rewards] - length_rewards[correct_rewards]
+        )
+        done = torch.ones_like(rewards).cpu()
+
+        next_stop_strings = [None] * len(message_log_batch)
+
+        return EnvironmentReturn(
+            observations=observations,
+            metadata=metadata,
+            next_stop_strings=next_stop_strings,
+            rewards=rewards,
+            terminateds=done,
+        )
+
+    def global_post_process_and_metrics(
+        self, batch: BatchedDataDict
+    ) -> Tuple[BatchedDataDict, dict]:
+        """Computes metrics for this environment given a global rollout batch.
+
+        Every rank will run this function, so you're free to use distributed
+        calculations if you'd prefer for heavy metrics.
+        """
+        batch["rewards"] = (
+            batch["rewards"] * batch["is_end"]
+        )  # set a reward of 0 for any incorrectly ended sequences
+        if (batch["rewards"] == 1).float().sum() > 0:
+            correct_solution_generation_lengths = (
+                (batch["generation_lengths"] - batch["prompt_lengths"])[
+                    batch["rewards"] == 1
+                ]
+                .float()
+                .mean()
+                .item()
+            )
+        else:
+            correct_solution_generation_lengths = 0
+
+        metrics = {
+            # "table": table, TODO @sahilj WIP
+            "accuracy": batch["rewards"].mean().item(),
+            "pass@samples_per_prompt": calculate_pass_rate_per_prompt(
+                batch["text"], batch["rewards"]
+            ),
+            "fraction_of_samples_properly_ended": batch["is_end"].float().mean().item(),
+            "num_problems_in_batch": batch["is_end"].shape[0],
+            "generation_lengths": batch["generation_lengths"].float().mean().item(),
+            "prompt_lengths": batch["prompt_lengths"].float().mean().item(),
+            "correct_solution_generation_lengths": correct_solution_generation_lengths,
+        }
+
+        return batch, metrics
