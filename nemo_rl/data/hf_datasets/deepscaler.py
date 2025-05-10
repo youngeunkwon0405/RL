@@ -14,6 +14,9 @@
 
 
 from datasets import load_dataset
+from datasets.arrow_dataset import Dataset
+from datasets.dataset_dict import DatasetDict, IterableDatasetDict
+from datasets.iterable_dataset import IterableDataset
 
 from nemo_rl.data.interfaces import TaskDataSpec
 
@@ -35,13 +38,17 @@ def format_math(data):
     }
 
 
-def prepare_deepscaler_dataset(seed=42):
+def prepare_deepscaler_dataset(seed=42, num_epochs=1):
     """Load and split the DeepScaler dataset into train and test sets."""
     # Load the original dataset
-    original_ds = load_dataset("agentica-org/DeepScaleR-Preview-Dataset", split="train")
-
+    original_ds = load_dataset(
+        "agentica-org/DeepScaleR-Preview-Dataset", split="train"
+    ).repeat(num_epochs)
     # Shuffle the dataset with the specified seed
-    shuffled_ds = original_ds.shuffle(seed=seed)
+    # Set repeat=True to allow the dataset to be iterated over multiple times (epochs)
+    shuffled_ds: DatasetDict | Dataset | IterableDataset | IterableDatasetDict = (
+        original_ds.shuffle(seed=seed)
+    )
 
     # Take 128 samples for test set
     test_ds = shuffled_ds.select(range(128))
@@ -60,13 +67,13 @@ def prepare_deepscaler_dataset(seed=42):
 
 
 class DeepScalerDataset:
-    def __init__(self, seed: int = 42):
+    def __init__(self, seed: int = 42, num_epochs: int = 1):
         """Initialize the DeepScaler dataset with train/test split.
 
         Args:
             seed: Random seed for reproducible splitting
         """
-        self.formatted_ds = prepare_deepscaler_dataset(seed=seed)
+        self.formatted_ds = prepare_deepscaler_dataset(seed=seed, num_epochs=num_epochs)
 
         self.task_spec = TaskDataSpec(
             task_name="DeepScaler",

@@ -258,7 +258,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
         print(
             "Loading agentica-org/DeepScaleR-Preview-Dataset for training and validation"
         )
-        data = DeepScalerDataset()
+        data = DeepScalerDataset(num_epochs=data_config["num_epochs"])
     else:
         raise ValueError(f"No processor for dataset {data_config['dataset_name']}.")
 

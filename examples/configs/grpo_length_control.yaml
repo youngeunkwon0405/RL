@@ -100,6 +100,7 @@ data:
   prompt_file: "examples/prompts/cot.txt"
   system_prompt_file: null
   dataset_name: "DeepScaler-LengthControl"
+  num_epochs: 6
   
   effort_count:
     unlimited: 1
