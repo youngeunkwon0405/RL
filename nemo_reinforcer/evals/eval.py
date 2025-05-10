@@ -28,7 +28,7 @@ from nemo_reinforcer.environments.math_environment import MathEnvConfig
 from nemo_reinforcer.models.generation.interfaces import GenerationConfig
 from nemo_reinforcer.models.generation.vllm import VllmGeneration
 
-
+import sys
 # ===============================================================================
 # Configuration
 # ===============================================================================
@@ -82,7 +82,6 @@ def setup(
         collate_fn=eval_collate_fn,
     )
     print(f"  ✓ Evaluation dataset loaded with {len(dataset)} samples")
-
     # ==========================
     #          Cluster
     # ==========================
@@ -126,8 +125,9 @@ def setup(
 # Evaluation
 # ===============================================================================
 
-
-def run_env_eval(vllm_generation, dataloader, env, master_config):
+# To run statistics on the generated responses, we can pass a generation_callback function to 
+# the run_env_eval function.
+def run_env_eval(vllm_generation, dataloader, env, master_config, generation_callback=None):
     """Main entry point for running evaluation using environment.
 
     Generates model responses and evaluates them by env.
@@ -169,6 +169,9 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
 
         score += env_return.rewards.sum().item()
         count += len(env_return.rewards)
+
+        if generation_callback is not None:
+            generation_callback(batch, env_return)  
 
     # Cleanup before printing results
     ray.get(env.shutdown.remote())

@@ -37,6 +37,35 @@ import random
 import numpy as np
 import torch
 
+import numpy as np
+
+class OnlineStats:
+    def __init__(self):
+        self.n = 0
+        self.mean = 0.0
+        self.M2 = 0.0  # sum of squares of differences from the mean
+
+    def update(self, x):
+        x = float(x)
+        self.n += 1
+        delta = x - self.mean
+        self.mean += delta / self.n
+        delta2 = x - self.mean
+        self.M2 += delta * delta2
+
+    def get_mean(self):
+        return self.mean
+
+    def get_std(self):
+        return np.sqrt(self.M2 / self.n) if self.n > 0 else float('nan')
+
+def set_seed(seed: int):
+    """Sets the seed for python, numpy, and pytorch."""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -64,12 +93,19 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
 
     # load dataset
     
+    #print (f"Loading dataset {data_config['dataset_name']} with key {data_config['dataset_key']}")
+    #import sys; sys.exit()
+    
     base_dataset = load_dataset(data_config["dataset_name"])
     if data_config["dataset_key"] is not None:
         base_dataset = base_dataset[data_config["dataset_key"]]
     
+    #for datapoint in base_dataset:
+    #    print (datapoint)
+    #import sys; sys.exit()
     
     # remap problem and solution keys
+    print ("********** 1 ***")
 
     remapped_dataset = remap_dataset_keys(
         base_dataset,
@@ -91,10 +127,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
         max_seq_length=data_config["max_input_seq_length"],
     )
 
-    #for datapoint in dataset:
-    #    print (datapoint)
     return dataset, math_env, tokenizer
-
 
 def main():
     """Main entry point."""
@@ -141,14 +174,27 @@ def main():
         master_config,
     ) = setup(config, tokenizer, dataset)
 
+    
+    online_stats_len = OnlineStats()
+    def generation_callback(batch, env_return):
+        for i in range(len(batch["message_log"])):
+            for message in batch["message_log"][i]:
+                if message["role"] == "assistant":
+                    content = message["content"]
+                    content_tokens = tokenizer.encode(content)
+                    online_stats_len.update(len(content_tokens))
+                    #print (f"Content length: {len(content_tokens)}")
     # Run evaluation
     run_env_eval(
         vllm_generation,
         dataloader,
         math_env,
-        master_config
+        master_config,
+        generation_callback=generation_callback
     )
 
+    print (f"Mean length: {online_stats_len.get_mean()}")
+    print (f"Std length: {online_stats_len.get_std()}")
 
 if __name__ == "__main__":
     main()
