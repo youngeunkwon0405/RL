@@ -1887,11 +1887,8 @@ build = [
     { name = "torch" },
 ]
 dev = [
-    { name = "mypy" },
     { name = "pre-commit" },
     { name = "ruff" },
-    { name = "types-pyyaml" },
-    { name = "types-requests" },
 ]
 docs = [
     { name = "myst-parser" },
@@ -1903,9 +1900,12 @@ docs = [
     { name = "sphinx-copybutton" },
 ]
 test = [
+    { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
+    { name = "types-pyyaml" },
+    { name = "types-requests" },
 ]
 
 [package.metadata]
@@ -1937,11 +1937,8 @@ build = [
     { name = "torch", specifier = "==2.6.0" },
 ]
 dev = [
-    { name = "mypy" },
     { name = "pre-commit", specifier = "==3.6.0" },
     { name = "ruff", specifier = "==0.9.9" },
-    { name = "types-pyyaml" },
-    { name = "types-requests" },
 ]
 docs = [
     { name = "myst-parser" },
@@ -1952,9 +1949,12 @@ docs = [
     { name = "sphinx-copybutton" },
 ]
 test = [
+    { name = "mypy" },
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-cov" },
     { name = "pytest-timeout" },
+    { name = "types-pyyaml" },
+    { name = "types-requests" },
 ]
 
 [[package]]
