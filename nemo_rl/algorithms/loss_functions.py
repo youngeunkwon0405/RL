@@ -26,6 +26,8 @@ from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
 )
 
+Tensor = torch.Tensor
+
 
 class LossType(enum.Enum):
     TOKEN_LEVEL = "token_level"
@@ -45,13 +47,13 @@ class ClippedPGLossConfig(TypedDict):
 class ClippedPGLossDataDict(TypedDict):
     """Required keys for the Clipped Policy Gradient loss function."""
 
-    input_ids: torch.Tensor
-    advantages: torch.Tensor
-    prev_logprobs: torch.Tensor
-    generation_logprobs: torch.Tensor
-    reference_policy_logprobs: torch.Tensor
-    token_mask: torch.Tensor
-    sample_mask: torch.Tensor
+    input_ids: Tensor
+    advantages: Tensor
+    prev_logprobs: Tensor
+    generation_logprobs: Tensor
+    reference_policy_logprobs: Tensor
+    token_mask: Tensor
+    sample_mask: Tensor
     __extra__: Any
 
 
@@ -111,10 +113,10 @@ class ClippedPGLossFn(LossFunction):
 
     def __call__(
         self,
-        next_token_logits: torch.Tensor,
+        next_token_logits: Tensor,
         data: BatchedDataDict[ClippedPGLossDataDict],
         total_valid_tokens_or_seqs: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict]:
+    ) -> tuple[Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
@@ -289,12 +291,12 @@ class NLLLoss(LossFunction):
 
     def __call__(
         self,
-        next_token_logits: torch.Tensor,
+        next_token_logits: Tensor,
         data: BatchedDataDict,
         total_valid_tokens_or_seqs: torch.Tensor,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
-    ) -> tuple[torch.Tensor, dict]:
+    ) -> tuple[Tensor, dict]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         token_mask = data["token_mask"][:, 1:]
@@ -352,10 +354,10 @@ class DPOLossConfig(TypedDict):
 class DPOLossDataDict(TypedDict):
     """Required keys for the DPO loss function."""
 
-    input_ids: torch.Tensor
-    reference_policy_logprobs: torch.Tensor
-    token_mask: torch.Tensor
-    sample_mask: torch.Tensor
+    input_ids: Tensor
+    reference_policy_logprobs: Tensor
+    token_mask: Tensor
+    sample_mask: Tensor
 
 
 class DPOLossFn(LossFunction):
@@ -424,15 +426,15 @@ class DPOLossFn(LossFunction):
 
         self.loss_type = LossType.SEQUENCE_LEVEL
 
-    def split_output_tensor(self, tensor: torch.Tensor):
+    def split_output_tensor(self, tensor: Tensor):
         return tensor[::2], tensor[1::2]
 
-    def preference_loss(
+    def _preference_loss(
         self,
-        next_token_logits: torch.Tensor,
+        next_token_logits: Tensor,
         data: BatchedDataDict[DPOLossDataDict],
-        total_valid_tokens_or_seqs: torch.Tensor,
-    ) -> torch.Tensor:
+        total_valid_tokens_or_seqs: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         ## TODO(@ashors): there's some duplicate code here with the NLLLoss function. We should refactor
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
@@ -496,10 +498,10 @@ class DPOLossFn(LossFunction):
 
     def __call__(
         self,
-        next_token_logits: torch.Tensor,
+        next_token_logits: Tensor,
         data: BatchedDataDict[DPOLossDataDict],
-        total_valid_tokens_or_seqs: torch.Tensor,
-    ) -> tuple[torch.Tensor, dict]:
+        total_valid_tokens_or_seqs: Tensor,
+    ) -> tuple[Tensor, dict]:
         sft_loss_chosen = torch.tensor(0.0)
         if self.sft_loss_weight > 0:
             sft_loss, _ = self.sft_loss(
@@ -521,7 +523,7 @@ class DPOLossFn(LossFunction):
             accuracy,
             rewards_chosen_mean,
             rewards_rejected_mean,
-        ) = self.preference_loss(next_token_logits, data, total_valid_tokens_or_seqs)
+        ) = self._preference_loss(next_token_logits, data, total_valid_tokens_or_seqs)
 
         dpo_loss = (
             self.sft_loss_weight * sft_loss_chosen

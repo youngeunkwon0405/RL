@@ -18,7 +18,11 @@ import time
 from typing import Optional, TypedDict
 
 import ray
-from ray.util.placement_group import placement_group, remove_placement_group
+from ray.util.placement_group import (
+    PlacementGroup,
+    placement_group,
+    remove_placement_group,
+)
 from ray.util.scheduling_strategies import PlacementGroupSchedulingStrategy
 
 logging.basicConfig(level=logging.INFO)
@@ -188,7 +192,7 @@ class RayVirtualCluster:
         """
         self._bundle_ct_per_node_list = bundle_ct_per_node_list
         self._world_size = sum(self._bundle_ct_per_node_list)
-        self._node_placement_groups = None
+        self._node_placement_groups: Optional[list[PlacementGroup]] = None
 
         self.num_gpus_per_node = num_gpus_per_node
         self.use_gpus = use_gpus
@@ -302,6 +306,9 @@ class RayVirtualCluster:
         Returns:
             List of placement groups that have at least one bundle
         """
+        assert self._node_placement_groups is not None, (
+            "Placement groups must be initialized before calling get_placement_groups"
+        )
         return [pg for pg in self._node_placement_groups if pg.bundle_specs]
 
     def world_size(self):
@@ -417,7 +424,7 @@ class RayVirtualCluster:
 
             # Initialize worker cells arrays (one per worker group)
             for i in range(len(worker_groups)):
-                node_row["worker_cells"].append([])
+                node_row["worker_cells"].append([])  # type: ignore
 
             # Process each GPU position in the row
             for gpu_idx in range(max_gpus_per_node):
@@ -435,10 +442,10 @@ class RayVirtualCluster:
                     worker_cells = [" " * cell_width] * len(worker_groups)
 
                 # Add cells to the row
-                node_row["gpu_cells"].append(gpu_cell)
+                node_row["gpu_cells"].append(gpu_cell)  # type: ignore
                 for i, cell in enumerate(worker_cells):
-                    if i < len(node_row["worker_cells"]):
-                        node_row["worker_cells"][i].append(cell)
+                    if i < len(node_row["worker_cells"]):  # type: ignore
+                        node_row["worker_cells"][i].append(cell)  # type: ignore
 
             # Add the completed row to the grid
             grid_data["rows"].append(node_row)

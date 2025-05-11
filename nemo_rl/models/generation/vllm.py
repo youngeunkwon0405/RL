@@ -203,9 +203,6 @@ class VllmGenerationWorker:
             **vllm_kwargs,
         )
 
-    def llm(self):
-        return self.llm
-
     def is_alive(self):
         """Check if the worker is alive."""
         return True
@@ -242,7 +239,7 @@ class VllmGenerationWorker:
         input_lengths = data["input_lengths"]
         # this function requires all generations have the same stop strings, so we collect all here
         batch_stop_strings: list = data.get("stop_strings", [])
-        stop_strings = set()
+        stop_strings: set[str] = set()
         for sample_stop_strings in batch_stop_strings:
             if sample_stop_strings:
                 stop_strings.update(sample_stop_strings)
@@ -251,7 +248,7 @@ class VllmGenerationWorker:
         if self.cfg.get("stop_strings", None):
             stop_strings.update(self.cfg["stop_strings"])
 
-        stop_strings = list(stop_strings)
+        stop_strings: list[str] = list(stop_strings)
 
         # verify inputs have correct padding
         verify_right_padding(data, pad_value=self.cfg["pad_token_id"])
@@ -289,6 +286,9 @@ class VllmGenerationWorker:
         )
 
         # Generate outputs
+        assert self.llm is not None, (
+            "Attempting to generate with either an uninitialized vLLM or non-model-owner"
+        )
         outputs = self.llm.generate(prompts, sampling_params)
 
         # Process the outputs - but preserve the original input padding structure
@@ -380,7 +380,7 @@ class VllmGenerationWorker:
         )
 
         # This function requires all generations have the same stop strings, so we collect all here
-        stop_strings = set()
+        stop_strings: set[str] = set()
         for sample_stop_strings in batch_stop_strings:
             if sample_stop_strings:
                 stop_strings.update(sample_stop_strings)
@@ -389,7 +389,9 @@ class VllmGenerationWorker:
         if self.cfg.get("stop_strings", None):
             stop_strings.update(self.cfg["stop_strings"])
 
-        stop_strings = list(stop_strings) if len(stop_strings) > 0 else None
+        stop_strings: Optional[list[str]] = (
+            list(stop_strings) if len(stop_strings) > 0 else None
+        )
 
         # Read generation parameters from config
         top_k = self.cfg["top_k"] if self.cfg["top_k"] is not None else -1
@@ -404,6 +406,9 @@ class VllmGenerationWorker:
         )
 
         # Generate outputs
+        assert self.llm is not None, (
+            "Attempting to generate with either an uninitialized vLLM or non-model-owner"
+        )
         outputs = self.llm.generate(data["prompts"], sampling_params)
         texts = [output.outputs[0].text for output in outputs]
 
@@ -430,6 +435,9 @@ class VllmGenerationWorker:
             return False
 
     def report_device_id(self) -> str:
+        assert self.llm is not None, (
+            "Attempting to report device id with either an uninitialized vLLM or non-model-owner"
+        )
         return self.llm.collective_rpc("report_device_id", args=tuple())[0]
 
     def update_weights_from_ipc_handles(self, ipc_handles):
@@ -442,6 +450,9 @@ class VllmGenerationWorker:
             bool: True if weights were successfully updated, False otherwise.
         """
         try:
+            assert self.llm is not None, (
+                "Attempting to update weights with either an uninitialized vLLM or non-model-owner"
+            )
             # Use collective_rpc to delegate to the UpdatableVllmInternalWorker implementation
             self.llm.collective_rpc(
                 "update_weights_from_ipc_handles", args=(ipc_handles,)
@@ -452,6 +463,9 @@ class VllmGenerationWorker:
             return False
 
     def sleep(self):
+        assert self.llm is not None, (
+            "Attempting to sleep with either an uninitialized vLLM or non-model-owner"
+        )
         # Reset the prefix cache to ensure that prefix cache is not reused after weights are updated
         self.llm.llm_engine.reset_prefix_cache()
         self.llm.sleep(level=1)
@@ -459,6 +473,9 @@ class VllmGenerationWorker:
         torch.cuda.empty_cache()
 
     def wake_up(self, **kwargs):
+        assert self.llm is not None, (
+            "Attempting to wake up with either an uninitialized vLLM or non-model-owner"
+        )
         # tags like ["weights", "kv_cache"]
         # We can call this function with just tags=["weights"] while doing refit to
         # avoid spiking memory with the kv_cache while the training fwk is awake.
