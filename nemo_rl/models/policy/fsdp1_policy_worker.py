@@ -17,7 +17,7 @@ import os
 import warnings
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import ray
 import torch
@@ -43,6 +43,10 @@ from nemo_rl.models.generation.interfaces import (
     verify_right_padding,
 )
 from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.interfaces import (
+    LogprobOutputSpec,
+    ReferenceLogprobOutputSpec,
+)
 from nemo_rl.models.policy.utils import (
     get_gpu_info,
     import_class_from_path,
@@ -196,7 +200,7 @@ class FSDP1PolicyWorker:
                             "unknown scheduler config: ",
                             scheduler_cfg,
                         )
-                        milestones = scheduler_cfg["milestones"]
+                        milestones: list[int] = scheduler_cfg["milestones"]
 
                 self.scheduler = torch.optim.lr_scheduler.SequentialLR(
                     self.optimizer, schedulers, milestones
@@ -236,7 +240,7 @@ class FSDP1PolicyWorker:
         eval_mode: bool = False,
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
         skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
@@ -250,7 +254,7 @@ class FSDP1PolicyWorker:
         if mbs is None:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // torch.distributed.get_world_size()
-        dataset_size = data.get("input_ids").shape[0]
+        dataset_size = data["input_ids"].shape[0]
         num_global_batches = dataset_size // local_gbs
 
         if eval_mode:
@@ -302,9 +306,9 @@ class FSDP1PolicyWorker:
                 num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
 
                 for mb in global_batch.make_microbatch_iterator(mbs):
-                    input_ids = mb.get("input_ids")
+                    input_ids = mb["input_ids"]
 
-                    input_lengths = mb.get("input_lengths")
+                    input_lengths = mb["input_lengths"]
                     batch_size, seq_len = input_ids.shape
                     attention_mask = torch.ones(
                         (batch_size, seq_len), dtype=torch.long, device=input_ids.device
@@ -355,7 +359,7 @@ class FSDP1PolicyWorker:
                         all_mb_metrics.append(loss_metrics)
 
                 # Clip gradients
-                grad_norm = None
+                grad_norm: Optional[torch.Tensor] = None
                 if not eval_mode:
                     if isinstance(self.model, FullyShardedDataParallel):
                         # when using FSDP1, use FSDP's clip_grad_norm_
@@ -398,8 +402,8 @@ class FSDP1PolicyWorker:
             return metrics
 
     def get_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: int = None
-    ) -> BatchedDataDict:
+        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
+    ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a batch of data.
 
         If no micro-batch size is provided, uses the configured logprob_batch_size to do microbatching.
@@ -424,11 +428,11 @@ class FSDP1PolicyWorker:
         with torch.no_grad():
             data.to("cuda")
             for lp_batch in data.make_microbatch_iterator(logprob_batch_size):
-                input_ids = lp_batch.get("input_ids")
+                input_ids = lp_batch["input_ids"]
                 batch_size, seq_len = input_ids.shape
 
                 # Create attention mask
-                input_lengths = lp_batch.get("input_lengths")
+                input_lengths = lp_batch["input_lengths"]
 
                 # Create attention mask for right-padded data
                 attention_mask = torch.zeros(
@@ -473,7 +477,7 @@ class FSDP1PolicyWorker:
                 all_log_probs.append(token_logprobs)
 
         # Concatenate all batches
-        return_data = BatchedDataDict()
+        return_data = BatchedDataDict[LogprobOutputSpec]()
         return_data["logprobs"] = torch.cat(all_log_probs, dim=0).cpu()
 
         return return_data
@@ -511,8 +515,8 @@ class FSDP1PolicyWorker:
             torch.cuda.empty_cache()
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: int = None
-    ) -> BatchedDataDict:
+        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
+    ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs from the reference policy for a batch of data.
 
         Returns:
@@ -523,7 +527,7 @@ class FSDP1PolicyWorker:
         with self.use_reference_model():
             reference_logprobs = self.get_logprobs(data, micro_batch_size)
 
-        return_data = BatchedDataDict()
+        return_data = BatchedDataDict[ReferenceLogprobOutputSpec]()
         return_data["reference_logprobs"] = reference_logprobs["logprobs"].cpu()
         return return_data
 
@@ -564,6 +568,9 @@ class FSDP1PolicyWorker:
         ):
             # Get generation config from self.cfg
             generation_batch_size = self.cfg["generation_batch_size"]
+            assert self.cfg["generation"] is not None, (
+                "Generation config is not set while trying to generate"
+            )
             gen_cfg = self.cfg["generation"]
 
             micro_batches = []
@@ -572,8 +579,8 @@ class FSDP1PolicyWorker:
             max_length = 0
             for gen_batch in data.make_microbatch_iterator(generation_batch_size):
                 # Create attention mask from input_lengths if needed for the model
-                input_ids = gen_batch.get("input_ids").cuda()
-                input_lengths = gen_batch.get("input_lengths").cuda()
+                input_ids = gen_batch["input_ids"].cuda()
+                input_lengths = gen_batch["input_lengths"].cuda()
                 batch_size, seq_len = input_ids.shape
 
                 # Convert right padding to left padding
@@ -650,17 +657,19 @@ class FSDP1PolicyWorker:
                 micro_batches.append(mb)
 
             # Get lengths, pad, and concatenate all batches
-            return_data = BatchedDataDict.from_batches(
-                micro_batches,
-                pad_value_dict={
-                    "left_padded_output_ids": self.cfg["generation"]["pad_token_id"]
-                },
+            return_data: BatchedDataDict[GenerationOutputSpec] = (
+                BatchedDataDict.from_batches(
+                    micro_batches,
+                    pad_value_dict={
+                        "left_padded_output_ids": self.cfg["generation"]["pad_token_id"]
+                    },
+                )
             )
 
             # Calculate the lengths of generations for each sequence by finding stop tokens
             generation_lengths = []
             unpadded_sequence_lengths = []
-            input_length = data.get("input_ids").size(1)
+            input_length = data["input_ids"].size(1)
 
             # Convert left-padded outputs back to right-padded format
             batch_size = len(return_data["left_padded_output_ids"])
@@ -823,6 +832,10 @@ class FSDP1PolicyWorker:
     def get_weights_ipc_handles(self, keys):
         from torch.distributed.tensor import DTensor
         from torch.multiprocessing.reductions import reduce_tensor
+
+        assert self._held_sharded_state_dict_reference is not None, (
+            "prepare_weights_for_ipc must be called before get_weights_ipc_handles"
+        )
 
         converted_params = {}
         for key in keys:

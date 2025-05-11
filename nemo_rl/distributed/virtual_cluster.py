@@ -15,7 +15,7 @@ import logging
 import os
 import sys
 import time
-from typing import List, Optional, TypedDict
+from typing import Optional, TypedDict
 
 import ray
 from ray.util.placement_group import placement_group, remove_placement_group
@@ -168,7 +168,7 @@ class RayVirtualCluster:
 
     def __init__(
         self,
-        bundle_ct_per_node_list: List[int],
+        bundle_ct_per_node_list: list[int],
         use_gpus: bool = True,
         max_colocated_worker_groups: int = 1,
         num_gpus_per_node: int = 8,

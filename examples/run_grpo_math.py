@@ -16,7 +16,7 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import torch
 from omegaconf import OmegaConf
@@ -62,7 +62,7 @@ def parse_args():
 
 # TaskDataProcessFnCallable
 def hf_data_processor(
-    datum_dict: Dict[str, Any],
+    datum_dict: dict[str, Any],
     task_data_spec: TaskDataSpec,
     tokenizer,
     max_seq_length: int,
@@ -113,7 +113,7 @@ def hf_data_processor(
 # Example of a generic math data processor
 # TaskDataProcessFnCallable
 def math_data_processor(
-    datum_dict: Dict[str, Any],
+    datum_dict: dict[str, Any],
     task_data_spec: TaskDataSpec,
     tokenizer,
     max_seq_length: int,
@@ -198,7 +198,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     else:
         raise ValueError(f"No processor for dataset {data_config['dataset_name']}.")
 
-    task_data_processors: Dict[str, Tuple[TaskDataSpec, TaskDataProcessFnCallable]] = (
+    task_data_processors: dict[str, tuple[TaskDataSpec, TaskDataProcessFnCallable]] = (
         defaultdict(lambda: (math_task_spec, hf_data_processor))
     )
     task_data_processors["math"] = (math_task_spec, hf_data_processor)
@@ -225,7 +225,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
         max_seq_length=data_config["max_input_seq_length"],
     )
 
-    task_to_env: Dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
+    task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
     task_to_env["math"] = math_env
     return dataset, val_dataset, task_to_env, task_to_env
 

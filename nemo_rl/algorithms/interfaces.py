@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Dict, Protocol, Tuple
+from typing import Any, Protocol
 
 import torch
 
@@ -28,7 +28,7 @@ class LossFunction(Protocol):
 
     def __call__(
         self, next_token_logits: torch.Tensor, data: BatchedDataDict
-    ) -> Tuple[torch.Tensor, Dict[str, Any]]:
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         """Compute loss and metrics from logprobs and other data.
 
         Args:

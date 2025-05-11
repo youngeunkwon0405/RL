@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Mapping, Optional, TypedDict
+from typing import Any, Mapping, Optional, TypedDict
 
 import ray
 import requests
@@ -72,7 +72,7 @@ class LoggerInterface(ABC):
     @abstractmethod
     def log_metrics(
         self,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         step: int,
         prefix: Optional[str] = "",
         step_metric: Optional[str] = None,
@@ -81,7 +81,7 @@ class LoggerInterface(ABC):
         pass
 
     @abstractmethod
-    def log_hyperparams(self, params: Dict[str, Any]) -> None:
+    def log_hyperparams(self, params: dict[str, Any]) -> None:
         """Log dictionary of hyperparameters."""
         pass
 
@@ -95,7 +95,7 @@ class TensorboardLogger(LoggerInterface):
 
     def log_metrics(
         self,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         step: int,
         prefix: Optional[str] = "",
         step_metric: Optional[str] = None,  # ignored in TensorBoard
@@ -113,7 +113,7 @@ class TensorboardLogger(LoggerInterface):
                 name = f"{prefix}/{name}"
             self.writer.add_scalar(name, value, step)
 
-    def log_hyperparams(self, params: Dict[str, Any]) -> None:
+    def log_hyperparams(self, params: dict[str, Any]) -> None:
         """Log hyperparameters to Tensorboard.
 
         Args:
@@ -147,7 +147,7 @@ class WandbLogger(LoggerInterface):
 
     def log_metrics(
         self,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         step: int,
         prefix: Optional[str] = "",
         step_metric: Optional[str] = None,
@@ -174,7 +174,7 @@ class WandbLogger(LoggerInterface):
         else:
             self.run.log(metrics, step=step)
 
-    def log_hyperparams(self, params: Dict[str, Any]) -> None:
+    def log_hyperparams(self, params: dict[str, Any]) -> None:
         """Log hyperparameters to wandb.
 
         Args:
@@ -185,7 +185,7 @@ class WandbLogger(LoggerInterface):
 
 class GpuMetricSnapshot(TypedDict):
     step: int
-    metrics: Dict[str, Any]
+    metrics: dict[str, Any]
 
 
 class RayGpuMonitorLogger:
@@ -284,7 +284,7 @@ class RayGpuMonitorLogger:
                 )
                 time.sleep(self.collection_interval)  # Continue despite errors
 
-    def _parse_gpu_metric(self, sample: Sample, node_idx: int) -> Dict[str, Any]:
+    def _parse_gpu_metric(self, sample: Sample, node_idx: int) -> dict[str, Any]:
         """Parse a GPU metric sample into a standardized format.
 
         Args:
@@ -318,7 +318,7 @@ class RayGpuMonitorLogger:
         metric_name = f"node.{node_idx}.gpu.{index}.{metric_name}"
         return {metric_name: value}
 
-    def _parse_gpu_sku(self, sample: Sample, node_idx: int) -> Dict[str, str]:
+    def _parse_gpu_sku(self, sample: Sample, node_idx: int) -> dict[str, str]:
         """Parse a GPU metric sample into a standardized format.
 
         Args:
@@ -352,7 +352,7 @@ class RayGpuMonitorLogger:
         metric_name = f"node.{node_idx}.gpu.{index}.type"
         return {metric_name: value}
 
-    def _collect_gpu_sku(self) -> Dict[str, str]:
+    def _collect_gpu_sku(self) -> dict[str, str]:
         """Collect GPU SKU from all Ray nodes.
 
         Note: This is an internal API and users are not expected to call this.
@@ -365,7 +365,7 @@ class RayGpuMonitorLogger:
         #       be the same
         return self._collect(sku=True)
 
-    def _collect_metrics(self) -> Dict[str, Any]:
+    def _collect_metrics(self) -> dict[str, Any]:
         """Collect GPU metrics from all Ray nodes.
 
         Returns:
@@ -373,7 +373,7 @@ class RayGpuMonitorLogger:
         """
         return self._collect(metrics=True)
 
-    def _collect(self, metrics: bool = False, sku: bool = False) -> Dict[str, Any]:
+    def _collect(self, metrics: bool = False, sku: bool = False) -> dict[str, Any]:
         """Collect GPU metrics from all Ray nodes.
 
         Returns:
@@ -545,7 +545,7 @@ class Logger(LoggerInterface):
 
     def log_metrics(
         self,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         step: int,
         prefix: Optional[str] = "",
         step_metric: Optional[str] = None,
@@ -572,7 +572,7 @@ class Logger(LoggerInterface):
             logger.log_hyperparams(params)
 
     def log_batched_dict_as_jsonl(
-        self, to_log: BatchedDataDict | Dict[str, Any], filename: str
+        self, to_log: BatchedDataDict | dict[str, Any], filename: str
     ) -> None:
         """Log a list of dictionaries to a JSONL file.
 
@@ -603,7 +603,7 @@ class Logger(LoggerInterface):
             self.gpu_monitor.stop()
 
 
-def flatten_dict(d: Dict[str, Any], sep: str = ".") -> Dict[str, Any]:
+def flatten_dict(d: dict[str, Any], sep: str = ".") -> dict[str, Any]:
     """Flatten a nested dictionary.
 
     Handles nested dictionaries and lists by creating keys with separators.
@@ -690,8 +690,8 @@ def configure_rich_logging(
 
 
 def print_message_log_samples(
-    message_logs: List[LLMMessageLogType],
-    rewards: List[float],
+    message_logs: list[LLMMessageLogType],
+    rewards: list[float],
     num_samples: int = 5,
     step: int = 0,
 ) -> None:

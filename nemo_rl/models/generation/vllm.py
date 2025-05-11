@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import copy
 import gc
 import os
-from typing import List, Optional, TypedDict, Union
+from typing import NotRequired, Optional, TypedDict, Union
 
 import ray
 import torch
@@ -45,6 +46,7 @@ class VllmSpecificArgs(TypedDict):
 
 class VllmConfig(GenerationConfig):
     vllm_cfg: VllmSpecificArgs
+    vllm_kwargs: NotRequired[dict]
 
 
 @ray.remote
@@ -158,7 +160,7 @@ class VllmGenerationWorker:
                 "vLLM is not installed. Please check that VllmGenerationWorker.DEFAULT_PY_EXECUTABLE covers the vllm dependency. "
                 "If you are working interactively, you can install by running  `uv sync --extra vllm` anywhere in the repo."
             )
-        vllm_kwargs = self.cfg.get("vllm_kwargs", {}).copy()
+        vllm_kwargs: dict = copy.deepcopy(self.cfg.get("vllm_kwargs", {}))
 
         # Special handling for tensor parallel case
         if self.tensor_parallel_size > 1:
@@ -172,6 +174,7 @@ class VllmGenerationWorker:
             )
 
             # Set bundle indices for tensor parallelism workers
+            assert bundle_indices is not None
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = ",".join(map(str, bundle_indices))
 
             # Use Ray for distributed execution in TP mode
@@ -238,7 +241,7 @@ class VllmGenerationWorker:
         input_ids = data["input_ids"]
         input_lengths = data["input_lengths"]
         # this function requires all generations have the same stop strings, so we collect all here
-        batch_stop_strings = data.get("stop_strings", [])
+        batch_stop_strings: list = data.get("stop_strings", [])
         stop_strings = set()
         for sample_stop_strings in batch_stop_strings:
             if sample_stop_strings:
@@ -405,7 +408,9 @@ class VllmGenerationWorker:
         texts = [output.outputs[0].text for output in outputs]
 
         # Convert to BatchedDataDict
-        return_data = BatchedDataDict({"texts": texts})
+        return_data: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict(
+            {"texts": texts}
+        )
         return return_data
 
     def shutdown(self):
@@ -469,7 +474,7 @@ class VllmGeneration(GenerationInterface):
         cluster: RayVirtualCluster,
         config: VllmConfig,
         name_prefix: str = "vllm_policy",
-        workers_per_node: Optional[Union[int, List[int]]] = None,
+        workers_per_node: Optional[Union[int, list[int]]] = None,
     ):
         """Initialize a vLLM policy with distributed workers."""
         # Store config
@@ -565,7 +570,7 @@ class VllmGeneration(GenerationInterface):
         results = self.worker_group.get_all_worker_results(future_bundle)
 
         # Combine results from all tied worker groups
-        combined = BatchedDataDict.from_batches(
+        combined: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict.from_batches(
             results, pad_value_dict={"output_ids": self.cfg["pad_token_id"]}
         )
 
@@ -608,7 +613,7 @@ class VllmGeneration(GenerationInterface):
         results = self.worker_group.get_all_worker_results(future_bundle)
 
         # Combine results from all tied worker groups
-        combined = BatchedDataDict.from_batches(
+        combined: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict.from_batches(
             results, pad_value_dict={"output_ids": self.cfg["pad_token_id"]}
         )
 

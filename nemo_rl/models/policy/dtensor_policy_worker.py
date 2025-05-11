@@ -15,8 +15,8 @@
 import gc
 import os
 from collections import defaultdict
-from contextlib import contextmanager, nullcontext
-from typing import Any, Dict, Iterable, Optional, Tuple, Union
+from contextlib import AbstractContextManager, contextmanager, nullcontext
+from typing import Any, Iterable, Optional, Union
 
 import ray
 import torch
@@ -73,20 +73,20 @@ def unshard_fsdp2_model(model: nn.Module):
 
 @torch.no_grad()
 def get_cpu_state_dict(
-    state_generator: Iterable[Tuple[str, Union[torch.Tensor, DTensor]]],
+    state_generator: Iterable[tuple[str, Union[torch.Tensor, DTensor]]],
     pin_memory: bool = False,
-) -> Dict[str, torch.Tensor]:
+) -> dict[str, torch.Tensor]:
     """Copy the state dict generator to CPU memory.
 
     Args:
-        state_generator (Iterable[Tuple[str, Union[torch.Tensor, DTensor]]]):
+        state_generator (Iterable[tuple[str, Union[torch.Tensor, DTensor]]]):
             An iterable that yields (key, tensor) pairs from a model state.
         pin_memory (bool, optional):
             Whether to allocate the CPU tensors in pinned memory for faster GPU transfer.
             Defaults to False.
 
     Returns:
-        Dict[str, torch.Tensor]: A dictionary mapping parameter names to CPU tensors.
+        dict[str, torch.Tensor]: A dictionary mapping parameter names to CPU tensors.
     """
     new_state_dict = {}
     for k, v in state_generator:
@@ -231,7 +231,7 @@ class DTensorPolicyWorker:
                             "unknown scheduler config: ",
                             scheduler_cfg,
                         )
-                        milestones = scheduler_cfg["milestones"]
+                        milestones: list[int] = scheduler_cfg["milestones"]
 
                 self.scheduler = torch.optim.lr_scheduler.SequentialLR(
                     self.optimizer, schedulers, milestones
@@ -268,7 +268,7 @@ class DTensorPolicyWorker:
         eval_mode: bool = False,
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
         skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
         if (
@@ -285,11 +285,11 @@ class DTensorPolicyWorker:
         if mbs is None:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
-        dataset_size = data.get("input_ids").shape[0]
+        dataset_size = data["input_ids"].shape[0]
         num_global_batches = dataset_size // local_gbs
 
         if eval_mode:
-            ctx = torch.no_grad()
+            ctx: AbstractContextManager[Any] = torch.no_grad()
             self.model.eval()
         else:
             ctx = nullcontext()
@@ -341,9 +341,9 @@ class DTensorPolicyWorker:
                 num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
 
                 for mb in global_batch.make_microbatch_iterator(mbs):
-                    input_ids = mb.get("input_ids").cuda()
+                    input_ids = mb["input_ids"].cuda()
 
-                    input_lengths = mb.get("input_lengths")
+                    input_lengths = mb["input_lengths"]
                     batch_size, seq_len = input_ids.shape
 
                     attention_mask = torch.zeros(
@@ -407,7 +407,7 @@ class DTensorPolicyWorker:
                         mb_losses.append(loss.item())
                         all_mb_metrics.append(loss_metrics)
 
-                grad_norm = None
+                grad_norm: Optional[float | torch.Tensor] = None
                 if not eval_mode:
                     with torch.no_grad():
                         grad_norm = get_grad_norm(
@@ -455,7 +455,7 @@ class DTensorPolicyWorker:
             return metrics
 
     def get_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: int = None
+        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a batch of data.
 
@@ -480,12 +480,12 @@ class DTensorPolicyWorker:
         with unshard_fsdp2_model(self.model), torch.no_grad():
             data.to("cuda")
             for lp_batch in data.make_microbatch_iterator(logprob_batch_size):
-                input_ids = lp_batch.get("input_ids")
+                input_ids = lp_batch["input_ids"]
 
                 batch_size, seq_len = input_ids.shape
 
                 # Create attention mask
-                input_lengths = lp_batch.get("input_lengths")
+                input_lengths = lp_batch["input_lengths"]
 
                 # Create attention mask for right-padded data
                 attention_mask = torch.zeros(
@@ -548,7 +548,7 @@ class DTensorPolicyWorker:
                 all_log_probs.append(token_logprobs)
 
         # Concatenate all batches
-        return_data = BatchedDataDict()
+        return_data = BatchedDataDict[LogprobOutputSpec]()
         return_data["logprobs"] = torch.cat(all_log_probs, dim=0).cpu()
 
         return return_data
@@ -589,7 +589,7 @@ class DTensorPolicyWorker:
                     val.copy_(curr_buffers[k])
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: int = None
+        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs from the reference policy for a batch of data.
 
@@ -601,7 +601,7 @@ class DTensorPolicyWorker:
         with self.use_reference_model():
             reference_logprobs = self.get_logprobs(data, micro_batch_size)
 
-        return_data = BatchedDataDict()
+        return_data = BatchedDataDict[ReferenceLogprobOutputSpec]()
         return_data["reference_logprobs"] = reference_logprobs["logprobs"].cpu()
         return return_data
 
@@ -640,8 +640,12 @@ class DTensorPolicyWorker:
         return state_dict_info
 
     @torch.no_grad()
-    def get_weights_ipc_handles(self, keys):
+    def get_weights_ipc_handles(self, keys: Iterable[str]):
         from torch.multiprocessing.reductions import reduce_tensor
+
+        assert self._held_sharded_state_dict_reference is not None, (
+            "prepare_weights_for_ipc must be called before get_weights_ipc_handles"
+        )
 
         converted_params = {}
         for key in keys:

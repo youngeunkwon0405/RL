@@ -13,26 +13,26 @@
 # limitations under the License.
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, NotRequired, Optional, Protocol, TypedDict, Union
+from typing import Any, NotRequired, Optional, Protocol, TypedDict, Union
 
 import torch
 
 # OpenAI-API-like message log, but every messsage may contain associated tensors (i.e. tokenized strings and logprobs) in addition to the original "content" string
-LLMMessageLogType = List[Dict[str, Union[str, torch.Tensor]]]
+LLMMessageLogType = list[dict[str, Union[str, torch.Tensor]]]
 
 # Flattened message log where all tensors and data are concatenated together for a conversation
 # Converts a conversation from list-of-turns format to key-value format with concatenated tensors
-FlatMessagesType = Dict[str, Union[List[str], torch.Tensor]]
+FlatMessagesType = dict[str, Union[list[str], torch.Tensor]]
 
 
 class DatumSpec(TypedDict):
     message_log: LLMMessageLogType
     length: int  # total (concatenated) length of the message tensors
-    extra_env_info: Dict[str, Any]
+    extra_env_info: dict[str, Any]
     loss_multiplier: float  # multiplier for the loss for this datum. 0 to mask out (say the sample is invalid)
     idx: int
     task_name: NotRequired[str] = "default"
-    stop_strings: NotRequired[List[str]] = None  # Optional stop strings for generation
+    stop_strings: NotRequired[list[str]] = None  # Optional stop strings for generation
     __extra__: NotRequired[Any]  # This allows additional fields of any type
 
 
@@ -78,7 +78,7 @@ class TaskDataProcessFnCallable(Protocol):
 
     def __call__(
         self,
-        datum_dict: Dict[str, Any],
+        datum_dict: dict[str, Any],
         task_data_spec: TaskDataSpec,
         tokenizer,
         max_seq_length: int,

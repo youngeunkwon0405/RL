@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, TypedDict
+from typing import Any, Optional, TypedDict
 
 import numpy as np
 import torch
@@ -97,7 +97,7 @@ class GRPOLoggerConfig(LoggerConfig):
 class MasterConfig(TypedDict):
     policy: PolicyConfig
     loss_fn: ClippedPGLossConfig
-    env_configs: Dict[str, Any]
+    env_configs: dict[str, Any]
     data: DataConfig
     grpo: GRPOConfig
     logger: GRPOLoggerConfig
@@ -115,7 +115,7 @@ def setup(
     tokenizer: AutoTokenizer,
     dataset: AllTaskProcessedDataset,
     val_dataset: Optional[AllTaskProcessedDataset],
-) -> Tuple[
+) -> tuple[
     PolicyInterface,
     GenerationInterface,
     RayVirtualCluster,
@@ -323,8 +323,8 @@ def grpo_train(
     val_dataloader: Optional[StatefulDataLoader],
     tokenizer,
     loss_fn: LossFunction,
-    task_to_env: Dict[str, EnvironmentInterface],
-    val_task_to_env: Optional[Dict[str, EnvironmentInterface]],
+    task_to_env: dict[str, EnvironmentInterface],
+    val_task_to_env: Optional[dict[str, EnvironmentInterface]],
     logger: Logger,
     checkpointer: CheckpointManager,
     grpo_save_state: GRPOSaveState,
@@ -616,10 +616,10 @@ def validate(
     policy_generation: GenerationInterface,
     val_dataloader: Optional[StatefulDataLoader],
     tokenizer,
-    val_task_to_env: Optional[Dict[str, EnvironmentInterface]],
+    val_task_to_env: Optional[dict[str, EnvironmentInterface]],
     step: int,
     master_config: MasterConfig,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
         print("  ⚠️ No validation dataloader provided, skipping validation")

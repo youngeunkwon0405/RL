@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Union
 
 import torch
 from datasets import Dataset
@@ -49,7 +49,7 @@ class AllTaskProcessedDataset:
         tokenizer,
         default_task_data_spec: TaskDataSpec,
         task_data_processors: Union[
-            Dict[str, Tuple[TaskDataSpec, TaskDataProcessFnCallable]],
+            dict[str, tuple[TaskDataSpec, TaskDataProcessFnCallable]],
             TaskDataProcessFnCallable,
         ],
         max_seq_length=None,
@@ -71,7 +71,7 @@ class AllTaskProcessedDataset:
     def __len__(self):
         return len(self.dataset)
 
-    def encode_single(self, text: Union[str, List[str]]) -> Tuple[List[int], int]:
+    def encode_single(self, text: Union[str, list[str]]) -> tuple[list[int], int]:
         """Takes either a single string or a list of strings that represent multiple turns for the same conversation.
 
         Returns a single (concatenated) list of tokenized ids and the length of the tokenized ids.
@@ -108,7 +108,7 @@ class AllTaskProcessedDataset:
         return datum_spec
 
 
-def rl_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
+def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict:
     """Collate function for RL training."""
     message_log = [datum_spec["message_log"] for datum_spec in data_batch]
     length = torch.tensor([datum_spec["length"] for datum_spec in data_batch])
@@ -140,7 +140,7 @@ def rl_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
     return output
 
 
-def eval_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
+def eval_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict:
     """Collate function for evaluation.
 
     Takes a list of data samples and combines them into a single batched dictionary
@@ -192,7 +192,7 @@ def eval_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
 
 
 def dpo_collate_fn(
-    data_batch: List[DatumSpec], tokenizer, make_sequence_length_divisible_by: int
+    data_batch: list[DatumSpec], tokenizer, make_sequence_length_divisible_by: int
 ) -> BatchedDataDict:
     """Collate function for DPO training.
 

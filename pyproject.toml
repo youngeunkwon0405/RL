@@ -64,6 +64,10 @@ test = [
     "pytest>=7.0.0",
     "pytest-timeout",
     "pytest-cov",
+    "mypy",
+]
+types = [
+    "types-PyYAML",
 ]
 
 

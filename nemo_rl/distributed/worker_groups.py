@@ -15,7 +15,7 @@ import os
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import ray
 from ray.util.placement_group import PlacementGroup
@@ -30,8 +30,8 @@ from nemo_rl.utils.venvs import create_local_venv
 class MultiWorkerFuture:
     """Container for Ray futures with associated worker information."""
 
-    futures: List[ray.ObjectRef]
-    used_workers: List[int]
+    futures: list[ray.ObjectRef]
+    used_workers: list[int]
     respect_tied_workers: bool = True
 
     def get_results(self, worker_group):
@@ -92,7 +92,7 @@ class RayWorkerBuilder:
         placement_group_bundle_index: int,
         num_gpus: int,
         bundle_indices: Optional[tuple] = None,
-        **extra_options: Dict[str, Any],
+        **extra_options: dict[str, Any],
     ):
         """Create a Ray worker with the specified configuration.
 
@@ -187,9 +187,9 @@ class RayWorkerGroup:
         self,
         cluster: RayVirtualCluster,
         remote_worker_builder: RayWorkerBuilder,
-        workers_per_node: Optional[Union[int, List[int]]] = None,
+        workers_per_node: Optional[Union[int, list[int]]] = None,
         name_prefix: str = "",
-        bundle_indices_list: Optional[List[tuple]] = None,
+        bundle_indices_list: Optional[list[tuple]] = None,
     ):
         """Initialize a group of distributed Ray workers.
 
@@ -367,8 +367,8 @@ class RayWorkerGroup:
     def run_all_workers_multiple_data(
         self,
         method_name: str,
-        data: List[SlicedDataDict],
-        common_kwargs: Optional[Dict[str, Any]] = None,
+        data: list[SlicedDataDict],
+        common_kwargs: Optional[dict[str, Any]] = None,
         only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
     ):
         """Run a method on all workers in parallel with different data.
@@ -470,7 +470,7 @@ class RayWorkerGroup:
             *args, **kwargs: Arguments to pass to the method
 
         Returns:
-            List[ray.ObjectRef]: A list of ray futures
+            list[ray.ObjectRef]: A list of ray futures
         """
         futures = []
 

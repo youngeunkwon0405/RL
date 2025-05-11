@@ -14,7 +14,7 @@
 import os
 import warnings
 from pathlib import Path
-from typing import Optional, Tuple, TypedDict
+from typing import Optional, TypedDict
 
 import numpy as np
 import torch
@@ -87,7 +87,7 @@ def setup(
     tokenizer: AutoTokenizer,
     train_dataset: AllTaskProcessedDataset,
     val_dataset: AllTaskProcessedDataset,
-) -> Tuple[
+) -> tuple[
     HfPolicy,
     RayVirtualCluster,
     StatefulDataLoader,

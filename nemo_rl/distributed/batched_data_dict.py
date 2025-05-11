@@ -15,10 +15,8 @@ from collections import UserDict
 from copy import deepcopy
 from typing import (
     Any,
-    Dict,
     Generic,
     Iterator,
-    List,
     Mapping,
     Optional,
     Type,
@@ -41,16 +39,16 @@ class BatchedDataDict(UserDict, Generic[DictT]):
     @classmethod
     def from_batches(
         cls: Type[Self],
-        batches: List[Dict],
-        pad_value_dict: Optional[Dict[str, int]] = None,
+        batches: list[dict],
+        pad_value_dict: Optional[dict[str, int]] = None,
     ) -> Self:
         """Given a list of batches, stack the tensors/lists within and put them in a single dictionary.
 
         Pad sequences to the max length in the batch using either 0(default) or a non-default value for a given key provided in pad_value_dict.
 
         Args:
-            batches (List[Dict]): A list of dictionaries, each containing a batch of data.
-            pad_value_dict (Optional[Dict[str, int]]): An optional dict mapping keys to non-default(0) padding values.
+            batches (list[Dict]): A list of dictionaries, each containing a batch of data.
+            pad_value_dict (Optional[dict[str, int]]): An optional dict mapping keys to non-default(0) padding values.
 
         Returns:
             BatchedDataDict: A new BatchedDataDict containing the stacked data.
@@ -62,9 +60,11 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             list_of_tensors = [item[k] for item in batches]
 
             if isinstance(list_of_tensors[0], list):
-                tensor = [item for sublist in list_of_tensors for item in sublist]
+                tensor_or_list: list | torch.Tensor = [
+                    item for sublist in list_of_tensors for item in sublist
+                ]
             elif all(x.ndim == 1 for x in list_of_tensors):
-                tensor = torch.cat(list_of_tensors)
+                tensor_or_list: torch.Tensor = torch.cat(list_of_tensors)
             elif isinstance(list_of_tensors[0], torch.Tensor):
                 pad_value = pad_value_dict.get(k, 0)
 
@@ -72,7 +72,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                     row.flatten() for tensor in list_of_tensors for row in tensor
                 ]
                 # TODO: can we avoid padding locally then padding globally?
-                tensor = torch.nn.utils.rnn.pad_sequence(
+                tensor_or_list: torch.Tensor = torch.nn.utils.rnn.pad_sequence(
                     list_of_tensors, batch_first=True, padding_value=pad_value
                 )
             else:
@@ -82,7 +82,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                         "Please provide either a tensor or a list of picklable objects."
                     )
                 )
-            stacked_dict[k] = tensor
+            stacked_dict[k] = tensor_or_list
 
         return stacked_dict
 
@@ -92,7 +92,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         If using reshard, it will treat PP as DP ranks.
         Works with data that is either tensors or string lists.
         """
-        global_rollout_batch = type(self)()
+        global_rollout_batch: Self = type(self)()
 
         for k, value in self.data.items():
             if isinstance(value, torch.Tensor):
@@ -152,7 +152,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         shards: int,
         batch_size: Optional[int] = None,
         allow_uneven_shards: bool = False,
-    ) -> List["SlicedDataDict"]:
+    ) -> list["SlicedDataDict"]:
         """Shards a batch by first dividing it into chunks of size batch_size, then further dividing each chunk into shards equal parts. Finally aggregates the sub-shards by their position.
 
         If batch_size is None, there will be no chunking beforehand (will default to the total batch size).
@@ -168,7 +168,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                                         If True, the last shard may be smaller than the others.
 
         Returns:
-            List[BatchedDataDict]: A list of BatchedDataDicts, length equal to shards.
+            list[BatchedDataDict]: A list of BatchedDataDicts, length equal to shards.
 
         Examples:
         ```{doctest}
@@ -301,7 +301,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         i.e:
         {"key": torch.tensor([1, 2, 3]), "other_key": [1, 2, 3]} -> {"key": torch.tensor([1, 1, 2, 2, 3, 3]), "other_key": [1, 1, 2, 2, 3, 3]}
         """
-        repeated_batch = BatchedDataDict()
+        repeated_batch: Self = BatchedDataDict()
         for k, v in self.data.items():
             if torch.is_tensor(v):
                 # For tensors, use repeat_interleave to repeat each element
@@ -344,7 +344,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         return self
 
     def select_indices(
-        self, indices: Union[List[int], torch.Tensor]
+        self, indices: Union[list[int], torch.Tensor]
     ) -> "BatchedDataDict":
         """Selects specific rows from the batch based on indices.
 

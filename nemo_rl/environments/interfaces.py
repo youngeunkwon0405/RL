@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import abc
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import NamedTuple, Optional
 
 from torch import Tensor
 
@@ -37,9 +37,9 @@ class EnvironmentReturn(NamedTuple):
     terminateds: whether the episode ended this turn.
     """
 
-    observations: List[Dict[str, str]]
-    metadata: List[Optional[dict]]
-    next_stop_strings: List[Optional[List[str]]]
+    observations: list[dict[str, str]]
+    metadata: list[Optional[dict]]
+    next_stop_strings: list[Optional[list[str]]]
     rewards: Tensor
     terminateds: Tensor
 
@@ -48,15 +48,15 @@ class EnvironmentInterface(abc.ABC):
     @abc.abstractmethod
     def step(
         self,
-        message_log_batch: List[LLMMessageLogType],
-        metadata: List[Optional[dict]],
+        message_log_batch: list[LLMMessageLogType],
+        metadata: list[Optional[dict]],
         *args,
         **kwargs,
     ) -> EnvironmentReturn:
         """Runs a step in the environment. Allows for asynchrony with remote servers, but it's not required (this function is a ray remote).
 
         message_log_batch: batch of OpenAI-API-like message logs that represent interactions with the LLM.
-                  Each element is a List[Dict[str, Union[str, torch.Tensor]]].
+                  Each element is a list[dict[str, Union[str, torch.Tensor]]].
                   For example, if this were a Math Environment, then the message log
                   would be
                   [
@@ -81,5 +81,5 @@ class EnvironmentInterface(abc.ABC):
     @abc.abstractmethod
     def global_post_process_and_metrics(
         self, batch: BatchedDataDict
-    ) -> Tuple[BatchedDataDict, dict]:
+    ) -> tuple[BatchedDataDict, dict]:
         """Post processing function after all rollouts are done for the batch and returns metrics."""

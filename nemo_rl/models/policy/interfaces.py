@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, Dict, TypedDict
+from typing import Any, TypedDict
 
 import torch
 
@@ -67,7 +67,7 @@ class PolicyInterface(ABC):
         pass
 
     @abstractmethod
-    def train(self, data: BatchedDataDict, loss_fn: LossFunction) -> Dict[str, Any]:
+    def train(self, data: BatchedDataDict, loss_fn: LossFunction) -> dict[str, Any]:
         """Train the policy on a global batch of data.
 
         Args:

@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from collections import defaultdict
-from typing import List, Optional, Type, Union
+from typing import Optional, Type, Union
 
 import ray
 from transformers import AutoTokenizer
@@ -44,7 +44,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         config: PolicyConfig,
         tokenizer: AutoTokenizer,
         name_prefix: str = "hf_policy",
-        workers_per_node: Optional[Union[int, List[int]]] = None,
+        workers_per_node: Optional[Union[int, list[int]]] = None,
         init_optimizer: bool = True,
         weights_path: Optional[str] = None,
         optimizer_path: Optional[str] = None,

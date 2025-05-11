@@ -15,7 +15,7 @@
 # Generate rollouts for arbitrary environments
 # Supports multi-turn rollouts and many simultaneous environments (E.g. you can train on math, code, multi-turn games and more at once)
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import ray
 import torch
@@ -48,7 +48,7 @@ def generate_responses(
     input_lengths: torch.Tensor,
     include_logprobs: bool = True,
     greedy: bool = False,
-) -> Tuple[BatchedDataDict[DatumSpec], List[torch.Tensor], dict]:
+) -> tuple[BatchedDataDict[DatumSpec], list[torch.Tensor], dict]:
     """Generate responses from policy."""
     # Add stop_strings to generation_input_data if present in the batch
     if "stop_strings" in batch:
@@ -102,7 +102,7 @@ def generate_responses(
 
 def calculate_rewards(
     batch: BatchedDataDict[DatumSpec],
-    task_to_env: Dict[str, EnvironmentInterface],
+    task_to_env: dict[str, EnvironmentInterface],
 ) -> EnvironmentReturn:
     """Calculate rewards for generated responses and get environment feedback.
 
@@ -200,11 +200,11 @@ def run_multi_turn_rollout(
     policy_generation: GenerationInterface,
     input_batch: BatchedDataDict[DatumSpec],
     tokenizer: AutoTokenizer,
-    task_to_env: Dict[str, EnvironmentInterface],
+    task_to_env: dict[str, EnvironmentInterface],
     max_seq_len: int,
     max_rollout_turns: int = 999999,
     greedy: bool = False,
-) -> Tuple[BatchedDataDict[DatumSpec], Dict[str, Any]]:
+) -> tuple[BatchedDataDict[DatumSpec], dict[str, Any]]:
     """Runs a multi-turn rollout loop, interacting with the environment.
 
     Args:

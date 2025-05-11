@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import warnings
-from typing import Dict, List
+from typing import cast
 
 import torch
 from datasets import Dataset
@@ -58,13 +58,13 @@ def message_log_to_flat_messages(
     tensor([1, 2, 3, 4, 5, 6, 7])
     ```
     """
-    result = {}
+    result: dict[str, list] = {}
 
     if len(message_log) == 0:
-        return result
+        return cast(FlatMessagesType, result)
 
     # Get all unique keys across all messages
-    all_keys = set()
+    all_keys: set[str] = set()
     for msg in message_log:
         all_keys.update(msg.keys())
 
@@ -79,22 +79,23 @@ def message_log_to_flat_messages(
                 result[key].append(msg[key])
 
     # Concatenate tensors for each key
+    concat: FlatMessagesType = {}
     for key in result:
         if result[key] and isinstance(result[key][0], torch.Tensor):
             try:
-                result[key] = torch.cat(result[key])
+                concat[key] = torch.cat(result[key])
             except RuntimeError as e:
                 if "same number of dimensions" in str(e):
                     raise RuntimeError(
                         f"tensors for {key=} must have same number of dimensions: {[t.shape for t in result[key]]}"
                     ) from e
                 raise
-
-    return result
+    output: FlatMessagesType = {**result, **concat}
+    return output
 
 
 def get_keys_from_message_log(
-    message_log: LLMMessageLogType, keys: List[str]
+    message_log: LLMMessageLogType, keys: list[str]
 ) -> LLMMessageLogType:
     """Return a new LLMMessageLogType containing only the specified keys from each message.
 
@@ -108,36 +109,32 @@ def get_keys_from_message_log(
 
 
 def add_loss_mask_to_message_log(
-    message_log: LLMMessageLogType,
-    roles_to_train_on: List[str] = ["assistant"],
+    batch_message_log: list[LLMMessageLogType],
+    roles_to_train_on: list[str] = ["assistant"],
     only_unmask_final: bool = False,
 ) -> None:
     """Add token-level loss masks to each message in a message log.
 
     Args:
         message_log (LLMMessageLogType): List of message dictionaries containing token IDs and metadata
-        roles_to_train_on (List[str]): List of strings indicating which speakers to unmask. Default: ["assistant"]
+        roles_to_train_on (list[str]): List of strings indicating which speakers to unmask. Default: ["assistant"]
         only_unmask_final (bool): If True, only unmask the final message in the log. Default: False
     """
     for i, role in enumerate(roles_to_train_on):
         roles_to_train_on[i] = role.lower()
 
-    for message in message_log:
-        for i, sentence in enumerate(message):
+    for message_log in batch_message_log:
+        for i, message in enumerate(message_log):
             if only_unmask_final:
-                if i == len(message) - 1:
-                    sentence["token_loss_mask"] = torch.ones_like(sentence["token_ids"])
+                if i == len(message_log) - 1:
+                    message["token_loss_mask"] = torch.ones_like(message["token_ids"])
                 else:
-                    sentence["token_loss_mask"] = torch.zeros_like(
-                        sentence["token_ids"]
-                    )
+                    message["token_loss_mask"] = torch.zeros_like(message["token_ids"])
             else:
-                if sentence["role"] in roles_to_train_on:
-                    sentence["token_loss_mask"] = torch.ones_like(sentence["token_ids"])
+                if message["role"] in roles_to_train_on:
+                    message["token_loss_mask"] = torch.ones_like(message["token_ids"])
                 else:
-                    sentence["token_loss_mask"] = torch.zeros_like(
-                        sentence["token_ids"]
-                    )
+                    message["token_loss_mask"] = torch.zeros_like(message["token_ids"])
 
 
 def _pad_tensor(
@@ -172,7 +169,7 @@ def _pad_tensor(
     )
 
 
-def _validate_tensor_consistency(tensors: List[torch.Tensor]) -> None:
+def _validate_tensor_consistency(tensors: list[torch.Tensor]) -> None:
     """Validate that all tensors have consistent dtypes and devices.
 
     Args:
@@ -196,8 +193,8 @@ def _validate_tensor_consistency(tensors: List[torch.Tensor]) -> None:
 
 
 def batched_message_log_to_flat_message(
-    message_log_batch: List[LLMMessageLogType],
-    pad_value_dict: Dict[str, int] = None,
+    message_log_batch: list[LLMMessageLogType],
+    pad_value_dict: dict[str, int] = None,
     make_sequence_length_divisible_by: int = 1,
 ) -> tuple[BatchedDataDict[FlatMessagesType], torch.Tensor]:
     """Process and pad a batch of message logs for model input.
@@ -329,7 +326,7 @@ def batched_message_log_to_flat_message(
     return result, input_lengths_tensor
 
 
-def message_log_shape(message_log: LLMMessageLogType) -> List[Dict[str, List[int]]]:
+def message_log_shape(message_log: LLMMessageLogType) -> list[dict[str, list[int]]]:
     """Get the shape of the tensors in the message log.
 
     This utility function examines each message in the message log and reports
@@ -437,7 +434,7 @@ def get_formatted_message_log(
 
 def remap_dataset_keys(
     dataset: Dataset,
-    mapping_dict: Dict[str, str],
+    mapping_dict: dict[str, str],
 ) -> Dataset:
     """Remap dataset keys as per mapping.
 

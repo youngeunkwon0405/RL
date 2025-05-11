@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import enum
-from typing import Any, Tuple, TypedDict
+from typing import Any, TypedDict
 
 import torch
 
@@ -114,7 +114,7 @@ class ClippedPGLossFn(LossFunction):
         next_token_logits: torch.Tensor,
         data: BatchedDataDict[ClippedPGLossDataDict],
         total_valid_tokens_or_seqs: torch.Tensor,
-    ) -> Tuple[torch.Tensor, dict]:
+    ) -> tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
@@ -155,7 +155,7 @@ class ClippedPGLossFn(LossFunction):
             next_token_logprobs = torch.nn.functional.log_softmax(
                 next_token_logits, dim=-1
             )
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
+            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
@@ -294,7 +294,7 @@ class NLLLoss(LossFunction):
         total_valid_tokens_or_seqs: torch.Tensor,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
-    ) -> Tuple[torch.Tensor, dict]:
+    ) -> tuple[torch.Tensor, dict]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         token_mask = data["token_mask"][:, 1:]
@@ -309,7 +309,7 @@ class NLLLoss(LossFunction):
                 next_token_logits, data["input_ids"]
             )
         else:
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
+            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
             next_token_logprobs = torch.nn.functional.log_softmax(
                 next_token_logits, dim=-1
             )
@@ -343,10 +343,10 @@ class NLLLoss(LossFunction):
 
 class DPOLossConfig(TypedDict):
     reference_policy_kl_penalty: float
-    preference_loss_weight: float = 1.0
-    sft_loss_weight: float = 0.0
-    preference_average_log_probs: bool = False
-    sft_average_log_probs: bool = False
+    preference_loss_weight: float
+    sft_loss_weight: float
+    preference_average_log_probs: bool
+    sft_average_log_probs: bool
 
 
 class DPOLossDataDict(TypedDict):
@@ -405,7 +405,7 @@ class DPOLossFn(LossFunction):
             - sft_average_log_probs (bool): Whether to average log probs across tokens in SFT loss
 
     Returns:
-        Tuple[torch.Tensor, dict]: A tuple containing:
+        tuple[torch.Tensor, dict]: A tuple containing:
             - The total loss value
             - A dictionary with metrics including:
                 - loss: Total loss value
@@ -443,7 +443,7 @@ class DPOLossFn(LossFunction):
                 next_token_logits, data["input_ids"]
             )
         else:
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
+            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
             next_token_logprobs = torch.nn.functional.log_softmax(
                 next_token_logits, dim=-1
             )
@@ -499,7 +499,7 @@ class DPOLossFn(LossFunction):
         next_token_logits: torch.Tensor,
         data: BatchedDataDict[DPOLossDataDict],
         total_valid_tokens_or_seqs: torch.Tensor,
-    ) -> Tuple[torch.Tensor, dict]:
+    ) -> tuple[torch.Tensor, dict]:
         sft_loss_chosen = torch.tensor(0.0)
         if self.sft_loss_weight > 0:
             sft_loss, _ = self.sft_loss(

@@ -35,6 +35,14 @@ class PytorchOptimizerConfig(TypedDict):
     kwargs: dict[str, Any]
 
 
+class SinglePytorchSchedulerConfig(TypedDict):
+    name: str
+    kwargs: dict[str, Any]
+
+
+SchedulerMilestones = dict[str, list[int]]
+
+
 class PolicyConfig(TypedDict):
     model_name: str
     tokenizer: TokenizerConfig
@@ -52,3 +60,6 @@ class PolicyConfig(TypedDict):
     activation_checkpointing_enabled: bool
     refit_buffer_size_gb: int
     optimizer: NotRequired[PytorchOptimizerConfig] = None
+    scheduler: NotRequired[list[SinglePytorchSchedulerConfig] | SchedulerMilestones] = (
+        None
+    )

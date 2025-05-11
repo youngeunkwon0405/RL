@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, List, Optional, Tuple, TypedDict, Union
+from typing import Any, Optional, TypedDict, Union
 
 import torch
 from transformers import AutoTokenizer
@@ -26,7 +26,7 @@ def verify_right_padding(
     ],
     pad_value: int = 0,
     raise_error: bool = True,
-) -> Tuple[bool, Union[str, None]]:
+) -> tuple[bool, Union[str, None]]:
     """Verify that a tensor is right-padded according to the provided lengths.
 
     Arguments:
@@ -108,7 +108,7 @@ class GenerationConfig(TypedDict):
     top_p: float
     top_k: int
     model_name: str
-    stop_token_ids: List[int]
+    stop_token_ids: list[int]
     pad_token_id: int
 
 
@@ -166,7 +166,7 @@ class GenerationDatumSpec(TypedDict):
 
     input_ids: torch.Tensor
     input_lengths: torch.Tensor
-    stop_strings: Optional[List[str]] = None
+    stop_strings: Optional[list[str]] = None
     __extra__: Any
 
 
