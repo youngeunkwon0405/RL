@@ -267,16 +267,16 @@ def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config:
         system_prompt_file=data_config["system_prompt_file"],
     )
     data_processor = TASK_TO_DATA_PROCESSOR[task_name]
-    task_data_processors = defaultdict(
-        lambda: (task_spec, data_processor)
-    )
-    task_data_processors[task_name] = (task_spec, data_processor)
+    # task_data_processors = defaultdict(
+    #     lambda: (task_spec, data_processor)
+    # )
+    # task_data_processors[task_name] = (task_spec, data_processor)
 
     dataset = AllTaskProcessedDataset(
         data,
         tokenizer,
         task_spec,
-        task_data_processors,
+        data_processor,
         max_seq_length=data_config["max_input_seq_length"],
     )
 
