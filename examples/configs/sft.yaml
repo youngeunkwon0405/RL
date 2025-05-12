@@ -28,7 +28,7 @@ sft:
   seed: 42
 
 checkpointing:
-  enabled: true
+  enabled: false
   checkpoint_dir: "/results/reinforcer/sft/checkpoints"
   metric_name: "val_loss"
   higher_is_better: false
@@ -88,8 +88,8 @@ logger:
   tensorboard_enabled: true
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
-    project: "sft-dev"
-    name: "sft-dev-${data.dataset_name}"
+    project: "akiswani_test_workspace"
+    name: "sft-dev-${data.dataset_name}-${seq_pack.train.enabled}"
   tensorboard:
     log_dir: "tb_logs-sft-dev-${data.dataset_name}"
   gpu_monitoring:
