@@ -18,7 +18,7 @@ from typing import Optional
 
 import numpy as np
 import torch
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizerBase
 
 from nemo_rl.data import hf_datasets
 from nemo_rl.models.policy import TokenizerConfig
@@ -142,7 +142,7 @@ def set_seed(seed: int):
     torch.cuda.manual_seed_all(seed)
 
 
-def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
+def get_tokenizer(tokenizer_config: TokenizerConfig) -> PreTrainedTokenizerBase:
     """Get the tokenizer and set pad token to eos token if it is not already set.
 
     This function initializes a tokenizer from the Hugging Face transformers library
@@ -160,7 +160,7 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
                     If not specified, the tokenizer's default template will be used.
 
     Returns:
-        AutoTokenizer: The configured tokenizer instance
+        PreTrainedTokenizerBase: The configured tokenizer instance
 
     Examples:
         ```{doctest}

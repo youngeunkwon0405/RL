@@ -20,7 +20,7 @@ from typing import Any
 
 import torch
 from omegaconf import OmegaConf
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
@@ -58,7 +58,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
 # ===============================================================================
 #                             Math Data Processor
 # ===============================================================================
-TokenizerType = AutoTokenizer
+TokenizerType = PreTrainedTokenizerBase
 
 # TaskDataProcessFnCallable
 def hf_data_processor(
@@ -78,7 +78,7 @@ def hf_data_processor(
         "role": "user",
         "content": task_data_spec.prompt.format(problem),
     }
-    message = tokenizer.apply_chat_template(
+    message: list[str] = tokenizer.apply_chat_template(  # type: ignore
         [user_message],
         tokenize=False,
         add_generation_prompt=True,
@@ -93,8 +93,8 @@ def hf_data_processor(
     loss_multiplier = 1.0
     if length > max_seq_length:
         # make smaller and mask out
-        for message in message_log:
-            message["token_ids"] = message["token_ids"][
+        for chat_message in message_log:
+            chat_message["token_ids"] = chat_message["token_ids"][
                 : min(4, max_seq_length // len(message_log))
             ]
         loss_multiplier = 0.0

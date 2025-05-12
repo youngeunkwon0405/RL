@@ -18,7 +18,7 @@ from typing import Any, Optional, TypedDict
 import numpy as np
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.loss_functions import (
@@ -60,7 +60,7 @@ from nemo_rl.utils.timer import Timer
 # ===============================================================================
 # Configuration
 # ===============================================================================
-
+TokenizerType = PreTrainedTokenizerBase
 
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
@@ -112,7 +112,7 @@ class MasterConfig(TypedDict):
 
 def setup(
     master_config: MasterConfig,
-    tokenizer: AutoTokenizer,
+    tokenizer: TokenizerType,
     dataset: AllTaskProcessedDataset,
     val_dataset: Optional[AllTaskProcessedDataset],
 ) -> tuple[
