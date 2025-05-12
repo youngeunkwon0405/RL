@@ -17,13 +17,12 @@ from typing import Any, Dict, Optional, Tuple, TypedDict
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.loss_functions import NLLLoss
-from nemo_rl.algorithms.utils import calculate_baseline_and_std_per_prompt
 from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import rl_collate_fn
 from nemo_rl.data.interfaces import (
@@ -59,6 +58,7 @@ from nemo_rl.utils.logger import (
     print_message_log_samples,
 )
 from nemo_rl.utils.timer import Timer
+from nemo_rl.metrics.metrics_utils import combine_metrics
 
 # ===============================================================================
 # Configuration
@@ -387,12 +387,6 @@ def quack_train(
                 repeated_batch: BatchedDataDict[DatumSpec] = batch.repeat_interleave(
                     master_config["quack"]["num_generations_per_prompt"]
                 )
-                # Convert LLMMessageLogType to FlatMessagesType for generation
-                batched_flat, input_lengths = batched_message_log_to_flat_message(
-                    repeated_batch["message_log"],
-                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
-                )
-                input_ids = batched_flat["token_ids"]
 
             # Generate responses - this updates the LLMMessageLogType in repeated_batch
             print(f"▶ Generating *ANSWERS* for batch of size {repeated_batch.size}...")
@@ -421,11 +415,23 @@ def quack_train(
                 buffer_items = convert_actor_rollouts_to_buffer_items(repeated_batch)
                 replay_buffer.push_batch(buffer_items)
             
+            # check if we have enough samples in the replay buffer
+            # we also make sure critic is refitted on the first step
+            if not replay_buffer.can_sample(master_config["quack"]["train_dataset_size"]) and CRITIC_GENERATION_STALE(step):
+                print(f"  ⚠️ Not enough samples in replay buffer, skipping training for now...")
+                continue
+            
             # get train dataset batch from replay buffer
             with timer.time("sampling_from_buffer"):
                 critic_dataset = replay_buffer.sample(master_config["quack"]["train_dataset_size"])
                 critic_dataset = setup_data(critic_dataset, tokenizer, master_config["critic_data"], "critic")
-                critic_batch = rl_collate_fn(critic_dataset)    # NOTE: we assuem critic dataset is small enough to fit into memory
+                critic_iterator = DataLoader(
+                    critic_dataset, 
+                    batch_size=master_config["quack"]["critic_inference_batch_size"], 
+                    shuffle=False, 
+                    collate_fn=rl_collate_fn
+                )
+                # critic_batch = rl_collate_fn(critic_dataset)    # NOTE: we assuem critic dataset is small enough to fit into memory
 
             print(f"▶ Generating *CRITIQUES* for batch of size {critic_batch.size}...")
             with timer.time("prepare_critic_for_generation"):
@@ -440,15 +446,19 @@ def quack_train(
 
             with timer.time("critic_generation"):
                 critic_generation.prepare_for_generation()
-                critic_batch, rollout_metrics_critic = run_multi_turn_rollout(
-                    policy_generation=critic_generation,
-                    input_batch=critic_batch,
-                    tokenizer=tokenizer,
-                    task_to_env=task_to_env,
-                    max_seq_len=master_config["critic"]["generation"]["max_new_tokens"],
-                    max_rollout_turns=master_config["quack"]["max_rollout_turns"],
-                    greedy=False,
-                )
+                critic_micro_batch_list = []
+                for critic_micro_batch in critic_iterator:
+                    critic_micro_batch, rollout_metrics_critic = run_multi_turn_rollout(
+                        policy_generation=critic_generation,
+                        input_batch=critic_micro_batch,
+                        tokenizer=tokenizer,
+                        task_to_env=task_to_env,
+                        max_seq_len=master_config["critic"]["generation"]["max_new_tokens"],
+                        max_rollout_turns=master_config["quack"]["max_rollout_turns"],
+                        greedy=False,
+                    )
+                    critic_micro_batch_list.append(critic_batch)
+                critic_batch = BatchedDataDict.from_batches(critic_micro_batch_list)
                 critic_generation.finish_generation()
                 
             with timer.time("data_processing"):
@@ -484,7 +494,13 @@ def quack_train(
 
             print("▶ Training actor...")
             with timer.time("actor_training"):
-                train_results = actor.train(train_data, loss_fn)
+                train_results_list = []
+                for train_micro_batch in train_data.make_microbatch_iterator(master_config["quack"]["train_dataset_batch_size"]):
+                    train_results = actor.train(train_micro_batch, loss_fn)
+                    train_results_list.append(train_results)
+
+                # Combine results from all microbatches
+                train_results = combine_metrics(train_results_list)
 
             # Run validation if it's a validation step
             if val_period > 0 and (step + 1) % val_period == 0:

@@ -1,14 +1,13 @@
 # QUACK Algorithm Configuration
 quack:
   train_dataset_size: 1024
+  critic_inference_batch_size: 256
   train_dataset_batch_size: 32
   num_prompts_per_step: 32
   num_generations_per_prompt: 16
   critic_refit_period: 10
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
   max_num_steps: 1000000
-  normalize_rewards: true
-  use_leave_one_out_baseline: true
   val_period: 10
   val_at_start: false
   max_val_samples: 256
