@@ -178,7 +178,7 @@ def setup(
         * cluster_config["num_nodes"],
         use_gpus=True,
         num_gpus_per_node=cluster_config["gpus_per_node"],
-        max_colocated_worker_groups=2 if colocated_inference else 1,
+        max_colocated_worker_groups=3,  # 3 worker groups for hf actor, vllm actor, and vllm critic
     )
     print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
 
