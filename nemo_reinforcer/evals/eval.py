@@ -237,8 +237,8 @@ def run_env_eval(vllm_generation, dataloader, env, master_config,target_vllm_gen
         # import pdb;
         # pdb.set_trace()
 
-        import pdb;
-        pdb.set_trace()
+        # import pdb;
+        # pdb.set_trace()
 
         outputs = target_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
