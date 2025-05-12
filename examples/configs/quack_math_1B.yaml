@@ -74,7 +74,7 @@ actor:
 
   generation:
     backend: "vllm"
-    max_new_tokens: ${actor.max_total_sequence_length}
+    max_new_tokens: 150
     temperature: 1.0
     top_p: 1.0
     top_k: null
@@ -91,7 +91,7 @@ actor:
 critic:
   generation:
     backend: "vllm"
-    max_new_tokens: ${actor.max_total_sequence_length}
+    max_new_tokens: 150
     temperature: 1.0
     top_p: 1.0
     top_k: null
