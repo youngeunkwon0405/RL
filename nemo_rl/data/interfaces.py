@@ -36,6 +36,15 @@ class DatumSpec(TypedDict):
     __extra__: NotRequired[Any]  # This allows additional fields of any type
 
 
+class DPODatumSpec(TypedDict):
+    message_log_chosen: LLMMessageLogType
+    message_log_rejected: LLMMessageLogType
+    length_chosen: int
+    length_rejected: int
+    loss_multiplier: float
+    idx: int
+
+
 @dataclass
 class TaskDataSpec:
     task_name: Optional[str] = None

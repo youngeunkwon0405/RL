@@ -86,7 +86,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
         return stacked_dict
 
-    def all_gather(self, group: torch.distributed.ProcessGroup) -> "BatchedDataDict":
+    def all_gather(self, group: torch.distributed.ProcessGroup) -> Self:
         """Gathers batches with possibly jagged leading dimensions across the DP ranks.
 
         If using reshard, it will treat PP as DP ranks.
@@ -294,14 +294,14 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             sliced_batch[k] = self.data[k][start:end]
         return sliced_batch
 
-    def repeat_interleave(self, num_repeats: int) -> "BatchedDataDict":
+    def repeat_interleave(self, num_repeats: int) -> Self:
         """Repeats the batch num_repeats times.
 
         For each element in the batch, repeat each value num_repeats times.
         i.e:
         {"key": torch.tensor([1, 2, 3]), "other_key": [1, 2, 3]} -> {"key": torch.tensor([1, 1, 2, 2, 3, 3]), "other_key": [1, 1, 2, 2, 3, 3]}
         """
-        repeated_batch: Self = BatchedDataDict()
+        repeated_batch: Self = type(self)()
         for k, v in self.data.items():
             if torch.is_tensor(v):
                 # For tensors, use repeat_interleave to repeat each element
@@ -343,9 +343,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                 self.data[k] = v.to(device)
         return self
 
-    def select_indices(
-        self, indices: Union[list[int], torch.Tensor]
-    ) -> "BatchedDataDict":
+    def select_indices(self, indices: Union[list[int], torch.Tensor]) -> Self:
         """Selects specific rows from the batch based on indices.
 
         Args:
@@ -354,7 +352,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         Returns:
             BatchedDataDict: A new BatchedDataDict containing only the selected rows.
         """
-        selected_batch = BatchedDataDict()
+        selected_batch: Self = type(self)()
         for k, v in self.data.items():
             if torch.is_tensor(v):
                 selected_batch[k] = v[indices]

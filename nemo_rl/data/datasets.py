@@ -18,6 +18,7 @@ from datasets import Dataset
 
 from nemo_rl.data.interfaces import (
     DatumSpec,
+    DPODatumSpec,
     TaskDataProcessFnCallable,
     TaskDataSpec,
 )
@@ -127,7 +128,7 @@ def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict:
     # Extract stop_strings if present
     stop_strings = [datum.get("stop_strings", None) for datum in data_batch]
 
-    output = BatchedDataDict(
+    output: BatchedDataDict = BatchedDataDict(
         message_log=message_log,
         length=length,
         loss_multiplier=loss_multiplier,
@@ -183,7 +184,7 @@ def eval_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict:
     extra_env_info = [datum_spec["extra_env_info"] for datum_spec in data_batch]
     idx = [datum_spec["idx"] for datum_spec in data_batch]
 
-    output = BatchedDataDict(
+    output: BatchedDataDict = BatchedDataDict(
         message_log=message_log,
         extra_env_info=extra_env_info,
         idx=idx,
@@ -192,7 +193,7 @@ def eval_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict:
 
 
 def dpo_collate_fn(
-    data_batch: list[DatumSpec], tokenizer, make_sequence_length_divisible_by: int
+    data_batch: list[DPODatumSpec], tokenizer, make_sequence_length_divisible_by: int
 ) -> BatchedDataDict:
     """Collate function for DPO training.
 
@@ -214,15 +215,15 @@ def dpo_collate_fn(
         loss_multiplier.extend([datum_spec["loss_multiplier"]] * 2)
         idx.extend([datum_spec["idx"]] * 2)
         task_names.extend([datum_spec.get("task_name", None)] * 2)
-    length = torch.tensor(length)
-    loss_multiplier = torch.tensor(loss_multiplier)
+    length_batch: torch.Tensor = torch.tensor(length)
+    loss_multiplier_batch: torch.Tensor = torch.tensor(loss_multiplier)
 
-    batch_max_length = torch.ones_like(length) * length.max()
+    batch_max_length = torch.ones_like(length_batch) * length_batch.max()
 
-    batch = BatchedDataDict(
+    batch: BatchedDataDict = BatchedDataDict(
         message_log=message_log,
-        length=length,
-        loss_multiplier=loss_multiplier,
+        length=length_batch,
+        loss_multiplier=loss_multiplier_batch,
         task_name=task_names,
         idx=idx,
         batch_max_length=batch_max_length,
@@ -245,7 +246,7 @@ def dpo_collate_fn(
             "input_ids": cat_and_padded["token_ids"],
             "input_lengths": input_lengths,
             "token_mask": cat_and_padded["token_loss_mask"],
-            "sample_mask": loss_multiplier,
+            "sample_mask": loss_multiplier_batch,
         }
     )
 

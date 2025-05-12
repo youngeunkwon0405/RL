@@ -51,6 +51,9 @@ class PolicyConfig(TypedDict):
     learning_rate: float
     logprob_batch_size: int
     generation: Optional[GenerationConfig]
+    generation_batch_size: NotRequired[
+        int
+    ]  # used in static batched (framework) generation
     precision: str
     dtensor_cfg: DTensorConfig
     make_sequence_length_divisible_by: int

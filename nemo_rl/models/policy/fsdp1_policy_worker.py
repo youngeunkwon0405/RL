@@ -16,7 +16,7 @@ import gc
 import os
 import warnings
 from collections import defaultdict
-from contextlib import contextmanager, nullcontext
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from typing import Any, Optional
 
 import ray
@@ -168,7 +168,7 @@ class FSDP1PolicyWorker:
         self.model = self.manual_load_to_gpu(self.model)
 
         # used for streaming update inference engine weights
-        self._held_sharded_state_dict_reference = None
+        self._held_sharded_state_dict_reference: Optional[dict[str, Any]] = None
         self._held_streamed_param_reference = None
 
         # register_fsdp_forward_method(self.model, "generate")
@@ -258,7 +258,7 @@ class FSDP1PolicyWorker:
         num_global_batches = dataset_size // local_gbs
 
         if eval_mode:
-            ctx = torch.no_grad()
+            ctx: AbstractContextManager = torch.no_grad()
             self.model.eval()
         else:
             ctx = nullcontext()
@@ -359,23 +359,27 @@ class FSDP1PolicyWorker:
                         all_mb_metrics.append(loss_metrics)
 
                 # Clip gradients
-                grad_norm: Optional[torch.Tensor] = None
                 if not eval_mode:
+                    if self.cfg["max_grad_norm"] is None:
+                        max_grad_norm = 9999999999.0
+                    else:
+                        max_grad_norm = self.cfg["max_grad_norm"]
+
                     if isinstance(self.model, FullyShardedDataParallel):
                         # when using FSDP1, use FSDP's clip_grad_norm_
                         # to ensure grad norm is being computed over all parameters
                         # see https://pytorch.org/docs/stable/fsdp.html#torch.distributed.fsdp.FullyShardedDataParallel.clip_grad_norm_
-                        grad_norm = self.model.clip_grad_norm_(
-                            max_norm=self.cfg["max_grad_norm"]
-                        )
+                        grad_norm = self.model.clip_grad_norm_(max_norm=max_grad_norm)
                     else:
                         grad_norm = torch.nn.utils.clip_grad_norm_(
-                            self.model.parameters(), max_norm=self.cfg["max_grad_norm"]
+                            self.model.parameters(), max_norm=max_grad_norm
                         )
                     grad_norm = grad_norm.cpu()
 
                     # Update parameters
                     self.optimizer.step()
+                else:
+                    grad_norm = None
                 losses.append(torch.tensor(mb_losses).sum().item())
 
             # increment scheduler after all batches in rollout are processed
@@ -598,7 +602,7 @@ class FSDP1PolicyWorker:
                     left_padded_attention_mask[i, seq_len - length :] = 1
 
                 # this function requires all generations have the same stop strings, so we collect all here
-                batch_stop_strings = gen_batch.get("stop_strings", [])
+                batch_stop_strings: list[list[str]] = gen_batch.get("stop_strings", [])
                 stop_strings = set()
                 for sample_stop_strings in batch_stop_strings:
                     if sample_stop_strings:
@@ -608,7 +612,9 @@ class FSDP1PolicyWorker:
                 if gen_cfg.get("stop_strings", None):
                     stop_strings.update(gen_cfg["stop_strings"])
 
-                stop_strings = list(stop_strings) if len(stop_strings) > 0 else None
+                stop_strings: list[str] | None = (
+                    list(stop_strings) if len(stop_strings) > 0 else None
+                )
 
                 if isinstance(
                     self.model, torch.distributed.fsdp.FullyShardedDataParallel

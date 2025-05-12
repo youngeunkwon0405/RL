@@ -107,7 +107,7 @@ class MathEnvironment(EnvironmentInterface):
         self.cfg = cfg
         self.num_workers = cfg["num_workers"]
         self.workers = [
-            HFVerifyWorker.options(
+            HFVerifyWorker.options(  # type: ignore # (decorated with @ray.remote)
                 runtime_env={"py_executable": HFVerifyWorker.DEFAULT_PY_EXECUTABLE}
             ).remote()
             for _ in range(self.num_workers)
@@ -118,7 +118,7 @@ class MathEnvironment(EnvironmentInterface):
         for worker in self.workers:
             ray.kill(worker)
 
-    def step(
+    def step(  # type: ignore[override]
         self,
         message_log_batch: list[list[dict[str, str]]],
         metadata: list[MathEnvironmentMetadata],

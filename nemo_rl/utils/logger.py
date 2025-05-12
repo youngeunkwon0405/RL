@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Mapping, Optional, TypedDict
+from typing import Any, Mapping, Optional, TypedDict, cast
 
 import ray
 import requests
@@ -81,7 +81,7 @@ class LoggerInterface(ABC):
         pass
 
     @abstractmethod
-    def log_hyperparams(self, params: dict[str, Any]) -> None:
+    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
         """Log dictionary of hyperparameters."""
         pass
 
@@ -113,7 +113,7 @@ class TensorboardLogger(LoggerInterface):
                 name = f"{prefix}/{name}"
             self.writer.add_scalar(name, value, step)
 
-    def log_hyperparams(self, params: dict[str, Any]) -> None:
+    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
         """Log hyperparameters to Tensorboard.
 
         Args:
@@ -174,7 +174,7 @@ class WandbLogger(LoggerInterface):
         else:
             self.run.log(metrics, step=step)
 
-    def log_hyperparams(self, params: dict[str, Any]) -> None:
+    def log_hyperparams(self, params: Mapping[str, Any]) -> None:
         """Log hyperparameters to wandb.
 
         Args:
@@ -217,7 +217,7 @@ class RayGpuMonitorLogger:
         ] = []  # Store metrics with timestamps
         self.last_flush_time = time.time()
         self.is_running = False
-        self.collection_thread = None
+        self.collection_thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
 
     def start(self):
@@ -501,7 +501,7 @@ class Logger(LoggerInterface):
                 - gpu_collection_interval
                 - gpu_flush_interval
         """
-        self.loggers = []
+        self.loggers: list[LoggerInterface] = []
         self.wandb_logger = None
 
         self.base_log_dir = cfg["log_dir"]
@@ -603,7 +603,7 @@ class Logger(LoggerInterface):
             self.gpu_monitor.stop()
 
 
-def flatten_dict(d: dict[str, Any], sep: str = ".") -> dict[str, Any]:
+def flatten_dict(d: Mapping[str, Any], sep: str = ".") -> dict[str, Any]:
     """Flatten a nested dictionary.
 
     Handles nested dictionaries and lists by creating keys with separators.
@@ -827,7 +827,7 @@ def print_message_log_samples(
         # Format each message in the conversation
         message_parts = []
         for msg in message_log:
-            role = msg.get("role", "unknown").upper()
+            role = cast(str, msg.get("role", "unknown")).upper()
             content = msg.get("content", "")
 
             # Choose color based on role - using muted, elegant colors

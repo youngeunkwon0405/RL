@@ -34,7 +34,7 @@ class MultiWorkerFuture:
     used_workers: list[int]
     respect_tied_workers: bool = True
 
-    def get_results(self, worker_group):
+    def get_results(self, worker_group) -> list[Any]:
         """Get results from the futures, optionally respecting tied workers.
 
         When respect_tied_workers is True, this method deduplicates results by returning
@@ -60,7 +60,7 @@ class MultiWorkerFuture:
             return all_results
 
         # Create tied worker sets based on used workers
-        active_tied_workers = {}
+        active_tied_workers: dict[int, list[int]] = {}
         for i, worker_idx in enumerate(self.used_workers):
             tied_worker_idx = worker_group.worker_to_tied_group_index.get(worker_idx)
             if tied_worker_idx is None:
@@ -117,7 +117,7 @@ class RayWorkerBuilder:
         # Set up worker arguments and resources
         worker_class = self.ray_actor_class
         worker_kwargs = dict(self.kwargs)
-        options = deepcopy(extra_options)
+        options: dict[str, Any] = deepcopy(extra_options)
 
         # Use the worker's configuration interface if available
         if hasattr(worker_class, "configure_worker"):
@@ -162,13 +162,16 @@ class RayWorkerBuilder:
             #  local venv first and then replace the py_executable with the local venv's python.
             #  The directory the venv will be created in is controlled by the env var
             #  NEMO_RL_VENV_DIR and defaults to $GIT_ROOT/venvs/.
+            assert hasattr(worker_class, "__ray_actor_class__"), (
+                "Worker class must be decorated with @ray.remote"
+            )
             unwrapped_cls = worker_class.__ray_actor_class__
             venv_python = create_local_venv(
                 py_executable=options["runtime_env"]["py_executable"],
                 venv_name=f"{unwrapped_cls.__module__}.{unwrapped_cls.__name__}",
             )
             options["runtime_env"]["py_executable"] = venv_python
-        return worker_class.options(**options).remote(*self.args, **worker_kwargs)
+        return worker_class.options(**options).remote(*self.args, **worker_kwargs)  # type: ignore
 
 
 class RayWorkerGroup:
@@ -203,15 +206,15 @@ class RayWorkerGroup:
                                Each tuple defines a tied group of workers placed on the same node.
                                If provided, workers_per_node is ignored.
         """
-        self._workers = []
-        self._worker_metadata = []
+        self._workers: list[ray.ObjectRef] = []
+        self._worker_metadata: list[dict[str, Any]] = []
         self.cluster = cluster
         self.name_prefix = name_prefix
-        self.tied_workers_groups = []
+        self.tied_workers_groups: list[list[int]] = []
         # Maps worker indices to their corresponding tied group index
         # For example, if worker with index 3 belongs to tied worker group 1,
         # then worker_to_tied_group_index[3] = 1
-        self.worker_to_tied_group_index = {}
+        self.worker_to_tied_group_index: dict[int, int] = {}
 
         # If explicit bundle indices are provided, use those
         if bundle_indices_list is None:

@@ -16,7 +16,6 @@ from typing import NamedTuple, Optional
 
 from torch import Tensor
 
-from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 
@@ -48,7 +47,7 @@ class EnvironmentInterface(abc.ABC):
     @abc.abstractmethod
     def step(
         self,
-        message_log_batch: list[LLMMessageLogType],
+        message_log_batch: list[list[dict[str, str]]],
         metadata: list[Optional[dict]],
         *args,
         **kwargs,
