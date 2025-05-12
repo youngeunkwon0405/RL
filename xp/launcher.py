@@ -34,14 +34,14 @@ def parse_args():
     parser.add_argument("--script", type=str, help="Path to the Python script to run")
     parser.add_argument("--config", type=str, help="Path to the base YAML config file")
     parser.add_argument("--sweep", type=str, help="Path to the sweep config YAML file")
-    parser.add_argument("--num-nodes", type=int, default=1, help="Number of nodes to use")
+    parser.add_argument("--nodes", type=int, default=1, help="Number of nodes to use")
     parser.add_argument("--time", type=str, default="4:0:0", help="Time limit for the job")
     parser.add_argument("--account", type=str, default=ACCOUNT, help="Slurm account to use")
     parser.add_argument("--partition", type=str, default="batch", help="Slurm partition to use")
     parser.add_argument("--container", type=str, default=CONTAINER, help="Container to use")
     parser.add_argument("--mounts", type=str, default=MOUNTS, help="Mounts to use")
-    parser.add_argument("--job-name", type=str, default=None, help="Base name for the job")
-    parser.add_argument("--dry-run", action="store_true", help="Print commands without executing them")
+    parser.add_argument("--jobname", type=str, default=None, help="Base name for the job")
+    parser.add_argument("--dry", action="store_true", help="Print commands without executing them")
     args, extra_args = parser.parse_known_args()
     return args, extra_args
 
@@ -170,7 +170,7 @@ def launch_experiment(
     script: str,
     config: Optional[str],
     param_overrides: str,
-    num_nodes: int,
+    nodes: int,
     time: str,
     account: str,
     partition: str,
@@ -221,12 +221,12 @@ def launch_experiment(
     # Construct the sbatch command
     sbatch_cmd = [
         f"BASE_LOG_DIR={log_dir}",
-        f"NUM_ACTOR_NODES={num_nodes}",
+        f"NUM_ACTOR_NODES={nodes}",
         f"CONTAINER=\"{container}\"",
         f"MOUNTS=\"{mounts}\"",
         f"COMMAND=\"{command}\"",
         "sbatch",
-        f"--nodes={num_nodes}",
+        f"--nodes={nodes}",
         f"--account={account}",
         f"--job-name={job_name}",
         f"--partition={partition}",
@@ -279,7 +279,7 @@ def main():
         param_combinations = generate_parameter_combinations(sweep_config)
     
     # Print header
-    mode = "DRY RUN" if args.dry_run else "SUBMITTING"
+    mode = "DRY RUN" if args.dry else "SUBMITTING"
     print(f"\n=== {mode} - Experiments ===\n")
     
     # Launch experiments
@@ -288,7 +288,7 @@ def main():
         param_overrides = format_parameter_override(params)
         
         # Generate job name if not provided
-        job_name = args.job_name or os.path.splitext(os.path.basename(script_path))[0]
+        job_name = args.jobname or os.path.splitext(os.path.basename(script_path))[0]
         if len(param_combinations) > 1:
             job_name = f"{job_name}_sweep_{i+1}"
         
@@ -297,14 +297,14 @@ def main():
             script=script_path,
             config=config_path,
             param_overrides=param_overrides,
-            num_nodes=args.num_nodes,
+            nodes=args.nodes,
             time=args.time,
             account=args.account,
             partition=args.partition,
             container=args.container,
             mounts=args.mounts,
             job_name=job_name,
-            dry_run=args.dry_run,
+            dry_run=args.dry,
             extra_args=extra_args,
         )
         
@@ -314,7 +314,7 @@ def main():
             params=params,
             cmd=cmd,
             job_id=job_id,
-            dry_run=args.dry_run,
+            dry_run=args.dry,
         )
 
 
