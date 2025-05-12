@@ -58,7 +58,7 @@ from nemo_rl.utils.logger import (
     print_message_log_samples,
 )
 from nemo_rl.utils.timer import Timer
-from nemo_rl.metrics.metrics_utils import combine_metrics
+# from nemo_rl.metrics.metrics_utils import combine_metrics
 
 # ===============================================================================
 # Configuration
@@ -496,13 +496,14 @@ def quack_train(
 
             print("▶ Training actor...")
             with timer.time("actor_training"):
-                train_results_list = []
-                for train_micro_batch in train_data.make_microbatch_iterator(master_config["quack"]["train_dataset_batch_size"]):
-                    train_results = actor.train(train_micro_batch, loss_fn)
-                    train_results_list.append(train_results)
+                train_results = actor.train(train_data, loss_fn)
+                # train_results_list = []
+                # for train_micro_batch in train_data.make_microbatch_iterator(master_config["quack"]["train_dataset_batch_size"]):
+                #     train_results = actor.train(train_micro_batch, loss_fn)
+                #     train_results_list.append(train_results)
 
-                # Combine results from all microbatches
-                train_results = combine_metrics(train_results_list)
+                # # Combine results from all microbatches
+                # train_results = combine_metrics(train_results_list)
 
             # Run validation if it's a validation step
             if val_period > 0 and (step + 1) % val_period == 0:
