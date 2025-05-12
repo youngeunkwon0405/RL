@@ -11,11 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional, TypeVar, cast
+from typing import Optional, TypeVar
 
 import torch
 
-T = TypeVar('T')
+T = TypeVar("T")
+
 
 def rebalance_nd_tensor(
     tensor: torch.Tensor, group: Optional[torch.distributed.ProcessGroup] = None

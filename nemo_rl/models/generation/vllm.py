@@ -15,7 +15,7 @@
 import copy
 import gc
 import os
-from typing import NotRequired, Optional, TypedDict, Union
+from typing import Any, NotRequired, Optional, TypedDict, Union
 
 import ray
 import torch
@@ -498,7 +498,7 @@ class VllmGeneration(GenerationInterface):
         self.cfg = config
         # Ensure all required VllmConfig fields are present
         missing_keys = [
-            key for key in VllmConfig.__annotations__ if key not in self.cfg
+            key for key in VllmConfig.__required_keys__ if key not in self.cfg
         ]
         assert not missing_keys, (
             f"VLLM Configuration Error: Missing required keys in VllmConfig.\n"
@@ -644,8 +644,8 @@ class VllmGeneration(GenerationInterface):
 
         return combined
 
-    def prepare_for_generation(self, *args, **kwargs):
-        """Abstract method that must be implemented by subclasses."""
+    def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
+        """Wake workers up"""
         try:
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(
@@ -658,8 +658,8 @@ class VllmGeneration(GenerationInterface):
             print(f"Error during policy preparation: {e}")
             return False
 
-    def finish_generation(self, *args, **kwargs):
-        """Abstract method that must be implemented by subclasses."""
+    def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
+        """Sleep workers"""
         try:
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(

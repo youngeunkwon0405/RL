@@ -76,37 +76,33 @@ class PolicyInterface(ABC):
         pass
 
     @abstractmethod
-    def prepare_for_training(self, *args, **kwargs):
+    def prepare_for_training(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     @abstractmethod
-    def finish_training(self, *args, **kwargs):
+    def finish_training(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     @abstractmethod
-    def save_checkpoint(self, *args, **kwargs):
+    def save_checkpoint(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     @abstractmethod
-    def load_checkpoint(self, *args, **kwargs):
-        pass
-
-    @abstractmethod
-    def shutdown(self):
+    def shutdown(self) -> bool:
         pass
 
 
 class ColocatablePolicyInterface(PolicyInterface):
     @abstractmethod
-    def offload_before_refit(self):
+    def offload_before_refit(self) -> None:
         pass
 
     @abstractmethod
-    def offload_after_refit(self):
+    def offload_after_refit(self) -> None:
         pass
 
     @abstractmethod
-    def prepare_weights_for_ipc(self, *args, **kwargs):
+    def prepare_weights_for_ipc(self, *args: Any, **kwargs: Any) -> dict[str, int]:
         pass
 
     @abstractmethod

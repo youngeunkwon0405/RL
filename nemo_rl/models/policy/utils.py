@@ -34,7 +34,7 @@ def import_class_from_path(name: str) -> Any:
     return cls_instance
 
 
-def get_gpu_info(model: torch.nn.Module) -> dict:
+def get_gpu_info(model: torch.nn.Module) -> dict[str, Any]:
     """Return information about the GPU being used by this worker."""
     import torch
 
@@ -100,7 +100,7 @@ def get_gpu_info(model: torch.nn.Module) -> dict:
     }
 
 
-def sliding_window_overwrite(model_name: str) -> dict:
+def sliding_window_overwrite(model_name: str) -> dict[str, Any]:
     """Returns configuration overrides to handle sliding window settings based on model rules.
 
     Args:

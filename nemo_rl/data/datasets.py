@@ -72,7 +72,9 @@ class AllTaskProcessedDataset:
     def __len__(self):
         return len(self.dataset)
 
-    def encode_single(self, text: Union[str, list[str]]) -> tuple[list[int] | torch.Tensor, int]:
+    def encode_single(
+        self, text: Union[str, list[str]]
+    ) -> tuple[list[int] | torch.Tensor, int]:
         """Takes either a single string or a list of strings that represent multiple turns for the same conversation.
 
         Returns a single (concatenated) list of tokenized ids and the length of the tokenized ids.

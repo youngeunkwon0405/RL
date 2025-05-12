@@ -20,6 +20,7 @@ from nemo_rl.models.generation.vllm import VllmConfig
 
 TokenizerType = PreTrainedTokenizerBase
 
+
 def configure_generation_config(
     config: GenerationConfig, tokenizer: TokenizerType, is_eval=False
 ):

@@ -45,10 +45,10 @@ from nemo_rl.experience.rollouts import run_multi_turn_rollout
 from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
-from nemo_rl.models.generation.vllm import VllmGeneration, VllmConfig
-from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
+from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import (
     Logger,
@@ -61,6 +61,7 @@ from nemo_rl.utils.timer import Timer
 # Configuration
 # ===============================================================================
 TokenizerType = PreTrainedTokenizerBase
+
 
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
@@ -117,7 +118,7 @@ def setup(
     val_dataset: Optional[AllTaskProcessedDataset],
 ) -> tuple[
     ColocatablePolicyInterface,
-    GenerationInterface,
+    Optional[GenerationInterface],
     RayVirtualCluster,
     StatefulDataLoader,
     Optional[StatefulDataLoader],
@@ -196,7 +197,9 @@ def setup(
     val_dataloader: Optional[StatefulDataLoader] = None
     # If validation is enabled, load the validation dataloader
     if grpo_config["val_period"] > 0 or grpo_config["val_at_start"]:
-        assert val_dataset is not None, "Validation dataset is required if validation is enabled"
+        assert val_dataset is not None, (
+            "Validation dataset is required if validation is enabled"
+        )
         val_dataloader = StatefulDataLoader(
             val_dataset,
             batch_size=grpo_config["val_batch_size"],
@@ -284,16 +287,17 @@ def refit_policy_generation(
     policy: ColocatablePolicyInterface,
     policy_generation: GenerationInterface,
     refit_buffer_size_gb: int,  # GB
-):
+) -> None:
     """Refit the policy generation interface with the latest policy weights."""
     policy.offload_before_refit()
     policy_generation.prepare_for_generation(tags=["weights"])
     # Streaming update weights to save memory
-    state_dict_info = policy.prepare_weights_for_ipc()
+    state_dict_info: dict[str, int] = policy.prepare_weights_for_ipc()
     # group keys to save time
     available_bytes = refit_buffer_size_gb * (1024**3)
-    split_keys, keys = [], []
-    for key, size_in_bytes in state_dict_info:
+    split_keys: list[list[str]] = []
+    keys: list[str] = []
+    for key, size_in_bytes in state_dict_info.items():
         if size_in_bytes > available_bytes:
             if keys:
                 split_keys.append(keys)
@@ -323,7 +327,7 @@ def grpo_train(
     policy_generation: Optional[GenerationInterface],
     dataloader: StatefulDataLoader,
     val_dataloader: Optional[StatefulDataLoader],
-    tokenizer,
+    tokenizer: TokenizerType,
     loss_fn: LossFunction,
     task_to_env: dict[str, EnvironmentInterface],
     val_task_to_env: Optional[dict[str, EnvironmentInterface]],
@@ -331,13 +335,13 @@ def grpo_train(
     checkpointer: CheckpointManager,
     grpo_save_state: GRPOSaveState,
     master_config: MasterConfig,
-):
+) -> None:
     """Run GRPO training algorithm."""
     timer = Timer()
     NEED_REFIT = True
     # If policy_generation is None, use the policy as the generation interface (hf framework backend)
     if policy_generation is None:
-        policy_generation = policy
+        policy_generation = policy  # type: ignore
         NEED_REFIT = False
     POLICY_GENERATION_STALE = True  # tracks if generation needs a refit before running
     assert policy_generation is not None  # for mypy type check

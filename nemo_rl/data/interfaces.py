@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, NotRequired, Optional, Protocol, TypedDict, Union
 
 import torch
+from transformers import PreTrainedTokenizerBase
 
 # OpenAI-API-like message log, but every messsage may contain associated tensors (i.e. tokenized strings and logprobs) in addition to the original "content" string
 LLMMessageLogType = list[dict[str, Union[str, torch.Tensor]]]
@@ -24,6 +25,8 @@ LLMMessageLogType = list[dict[str, Union[str, torch.Tensor]]]
 # Converts a conversation from list-of-turns format to key-value format with concatenated tensors
 FlatMessagesType = dict[str, Union[list[str], torch.Tensor]]
 
+PathLike = Union[str, "os.PathLike[Any]"]
+TokenizerType = PreTrainedTokenizerBase
 
 class DatumSpec(TypedDict):
     message_log: LLMMessageLogType
@@ -49,13 +52,13 @@ class DPODatumSpec(TypedDict):
 class TaskDataSpec:
     task_name: Optional[str] = None
     # prompt
-    prompt_file: Optional[str | os.PathLike | str] = None
+    prompt_file: Optional[PathLike] = None
 
-    system_prompt_file: Optional[str | os.PathLike] = None
+    system_prompt_file: Optional[PathLike] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         def load_prompt_file(
-            prompt_file: Optional[str | os.PathLike],
+            prompt_file: Optional[PathLike],
         ) -> Optional[str]:
             """Load prompt from file if it exists, otherwise return as is."""
             if prompt_file is None:
@@ -70,7 +73,7 @@ class TaskDataSpec:
         self.system_prompt = load_prompt_file(self.system_prompt_file)
         self.prompt = load_prompt_file(self.prompt_file) or "{}"
 
-    def copy_defaults(self, from_spec: "TaskDataSpec"):
+    def copy_defaults(self, from_spec: "TaskDataSpec") -> None:
         """Apply default values from another Task instance for any None attributes."""
         default_attrs = {
             "system_prompt": from_spec.system_prompt,
@@ -89,7 +92,7 @@ class TaskDataProcessFnCallable(Protocol):
         self,
         datum_dict: dict[str, Any],
         task_data_spec: TaskDataSpec,
-        tokenizer,
+        tokenizer: TokenizerType,
         max_seq_length: int,
         idx: int,
     ) -> DatumSpec:

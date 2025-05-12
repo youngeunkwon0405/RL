@@ -16,7 +16,7 @@ import gc
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Iterable, Optional, Union, Generator
 
 import ray
 import torch
@@ -57,7 +57,7 @@ from nemo_rl.utils.native_checkpoint import (
 
 
 @contextmanager
-def unshard_fsdp2_model(model: nn.Module):
+def unshard_fsdp2_model(model: nn.Module) -> Generator[None, None, None]:
     """Explicitly unshard and then reshard the FSDP2 modules. Useful for logprob inference."""
     try:
         for module in model.modules():
@@ -108,7 +108,7 @@ def get_cpu_state_dict(
 class DTensorPolicyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
 
         This makes it easier to identify which worker is producing specific log messages.
@@ -250,19 +250,19 @@ class DTensorPolicyWorker:
                 "No weights path provided. Starting from scratch (default policy init)"
             )
 
-    def is_alive(self):
+    def is_alive(self) -> bool:
         return True
 
-    def reset_peak_memory_stats(self):
+    def reset_peak_memory_stats(self) -> None:
         torch.cuda.reset_peak_memory_stats()
 
-    def get_gpu_info(self):
+    def get_gpu_info(self) -> dict[str, Any]:
         """Return information about the GPU being used by this worker."""
         return get_gpu_info(self.model)
 
     def train(
         self,
-        data: BatchedDataDict,
+        data: BatchedDataDict[Any],
         loss_fn: LossFunction,
         eval_mode: bool = False,
         gbs: Optional[int] = None,
@@ -302,7 +302,7 @@ class DTensorPolicyWorker:
             losses = []
             all_mb_metrics = []
             for gb_start in range(0, dataset_size, local_gbs):
-                global_batch: BatchedDataDict = data.slice(
+                global_batch: BatchedDataDict[Any] = data.slice(
                     gb_start, gb_start + local_gbs
                 )
 
@@ -454,7 +454,7 @@ class DTensorPolicyWorker:
             return metrics
 
     def get_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
+        self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a batch of data.
 
@@ -553,7 +553,7 @@ class DTensorPolicyWorker:
         return return_data
 
     @contextmanager
-    def use_reference_model(self):
+    def use_reference_model(self) -> Generator[None, None, None]:
         """Context manager that temporarily swaps the reference model and active model.
 
         On entry: Moves model to CPU, moves reference_model to CUDA. Swaps the references
@@ -588,7 +588,7 @@ class DTensorPolicyWorker:
                     val.copy_(curr_buffers[k])
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
+        self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs from the reference policy for a batch of data.
 
@@ -604,7 +604,7 @@ class DTensorPolicyWorker:
         return_data["reference_logprobs"] = reference_logprobs["logprobs"].cpu()
         return return_data
 
-    def _add_noise_to_weights(self):
+    def _add_noise_to_weights(self) -> None:
         """Add small Gaussian noise to the weights of the model. Note that this is used for testing purposes only."""
         noise_std = 0.01  # Standard deviation for the noise
         for p in self.model.parameters():
@@ -627,7 +627,7 @@ class DTensorPolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def prepare_weights_for_ipc(self):
+    def prepare_weights_for_ipc(self) -> dict[str, int]:
         self.model = self.move_to_cuda(self.model)
         self._held_sharded_state_dict_reference = self.model.state_dict()
         # Collect info for streaming multiple tensors
@@ -749,7 +749,7 @@ class DTensorPolicyWorker:
         model = self.move_buffer_to_device(model, device)
         return model.to(device)
 
-    def move_buffer_to_device(self, model, device):
+    def move_buffer_to_device(self, model: nn.Module, device: str) -> nn.Module:
         # FSDP modules do not move buffers to the device automatically
         for v in model.buffers():
             v.data = v.data.to(device)

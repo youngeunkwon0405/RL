@@ -504,7 +504,7 @@ class RayWorkerGroup:
 
         return futures
 
-    def get_all_worker_results(self, future_bundle):
+    def get_all_worker_results(self, future_bundle: MultiWorkerFuture) -> list[Any]:
         """Get results from all workers, optionally filtering to get just one result per tied worker group.
 
         Args:
@@ -522,7 +522,7 @@ class RayWorkerGroup:
         cleanup_method: Optional[str] = None,
         timeout: Optional[float] = 30.0,
         force: bool = False,
-    ):
+    ) -> bool:
         """Shutdown all workers in the worker group.
 
         Args:

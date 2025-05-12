@@ -22,11 +22,13 @@ import json
 import os
 import shutil
 from pathlib import Path
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, Union
 
 import numpy as np
 import torch
 import yaml
+
+PathLike = Union[str, "os.PathLike[Any]"]
 
 
 class CheckpointingConfig(TypedDict):
@@ -34,14 +36,14 @@ class CheckpointingConfig(TypedDict):
 
     Attributes:
     enabled (bool): Whether checkpointing is enabled.
-    checkpoint_dir (os.PathLike): Directory where checkpoints will be saved.
+    checkpoint_dir (PathLike): Directory where checkpoints will be saved.
     metric_name (str): Name of the metric to use for determining best checkpoints.
     higher_is_better (bool): Whether higher values of the metric indicate better performance.
     keep_top_k (Optional[int]): Number of best checkpoints to keep. If None, all checkpoints are kept.
     """
 
     enabled: bool
-    checkpoint_dir: os.PathLike
+    checkpoint_dir: PathLike
     metric_name: str
     higher_is_better: bool
     save_period: int
@@ -85,7 +87,7 @@ class CheckpointManager:
         step: int,
         training_info: dict[str, Any],
         run_config: Optional[dict[str, Any]] = None,
-    ) -> os.PathLike:
+    ) -> PathLike:
         """Initialize a temporary checkpoint directory.
 
         Creates a temporary directory for a new checkpoint and saves training info
@@ -100,7 +102,7 @@ class CheckpointManager:
             run_config (Optional[dict[str, Any]]): Optional configuration for the training run.
 
         Returns:
-            os.PathLike: Path to the temporary checkpoint directory.
+            PathLike: Path to the temporary checkpoint directory.
         """
         # create new step_{step} directory
         save_dir = self.checkpoint_dir / f"tmp_step_{step}"
@@ -121,7 +123,7 @@ class CheckpointManager:
 
         return Path(os.path.abspath(save_dir))
 
-    def finalize_checkpoint(self, checkpoint_path: os.PathLike) -> None:
+    def finalize_checkpoint(self, checkpoint_path: PathLike) -> None:
         """Complete a checkpoint by moving it from temporary to permanent location.
 
         If a checkpoint at the target location already exists (i.e when resuming training),
@@ -129,7 +131,7 @@ class CheckpointManager:
         Also triggers cleanup of old checkpoints based on the keep_top_k setting.
 
         Args:
-            checkpoint_path (os.PathLike): Path to the temporary checkpoint directory.
+            checkpoint_path (PathLike): Path to the temporary checkpoint directory.
         """
         # rename tmp_step_{step} to step_{step}
         checkpoint_path = Path(checkpoint_path)
@@ -230,12 +232,12 @@ class CheckpointManager:
         return str(step_dirs[-1])
 
     def load_training_info(
-        self, checkpoint_path: Optional[str | os.PathLike] = None
+        self, checkpoint_path: Optional[PathLike] = None
     ) -> Optional[dict[str, Any]]:
         """Load the training info from a checkpoint.
 
         Args:
-            checkpoint_path (Optional[os.PathLike]): Path to the checkpoint. If None,
+            checkpoint_path (Optional[PathLike]): Path to the checkpoint. If None,
                 returns None.
 
         Returns:
@@ -250,17 +252,17 @@ class CheckpointManager:
 
 def _load_checkpoint_history(
     checkpoint_dir: Path,
-) -> list[tuple[int, str | os.PathLike, dict[str, Any]]]:
+) -> list[tuple[int, PathLike, dict[str, Any]]]:
     """Load the history of checkpoints and their metrics.
 
     Args:
         checkpoint_dir (Path): Directory containing the checkpoints.
 
     Returns:
-        list[tuple[int, os.PathLike, dict[str, Any]]]: List of tuples containing
+        list[tuple[int, PathLike, dict[str, Any]]]: List of tuples containing
             (step_number, checkpoint_path, info) for each checkpoint.
     """
-    checkpoint_history: list[tuple[int, str | os.PathLike, dict[str, Any]]] = []
+    checkpoint_history: list[tuple[int, PathLike, dict[str, Any]]] = []
 
     # Find all step directories
     step_dirs = glob.glob(str(checkpoint_dir / "step_*"))

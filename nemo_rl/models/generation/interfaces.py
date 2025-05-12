@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from abc import ABC, abstractmethod
-from typing import Any, Optional, TypedDict, Union
+from typing import Any, NotRequired, Optional, TypedDict, Union
 
 import torch
 
@@ -108,7 +108,7 @@ class GenerationConfig(TypedDict):
     top_k: int
     model_name: str
     stop_token_ids: list[int]
-    pad_token_id: int
+    pad_token_id: NotRequired[int]
 
 
 class GenerationDatumSpec(TypedDict):
@@ -202,9 +202,9 @@ class GenerationInterface(ABC):
         pass
 
     @abstractmethod
-    def prepare_for_generation(self, *args, **kwargs):
+    def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         pass
 
     @abstractmethod
-    def finish_generation(self, *args, **kwargs):
+    def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         pass

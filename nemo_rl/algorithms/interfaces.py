@@ -19,6 +19,7 @@ import torch
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
+
 class LossType(enum.Enum):
     TOKEN_LEVEL = "token_level"
     SEQUENCE_LEVEL = "sequence_level"
@@ -30,6 +31,7 @@ class LossFunction(Protocol):
     Loss functions compute a scalar loss value and associated metrics from
     model logprobs and other data contained in a BatchedDataDict.
     """
+
     loss_type: LossType
 
     def __call__(

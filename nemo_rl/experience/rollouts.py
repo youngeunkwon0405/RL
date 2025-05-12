@@ -41,6 +41,7 @@ from nemo_rl.models.generation.interfaces import (
 
 TokenizerType = PreTrainedTokenizerBase
 
+
 def generate_responses(
     policy_generation: GenerationInterface,
     generation_input_data: BatchedDataDict[GenerationDatumSpec],
