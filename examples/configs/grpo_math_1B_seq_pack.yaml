@@ -1,0 +1,44 @@
+# GRPO Algorithm Configuration with Sequence Packing
+# Extends the base grpo_math_1B.yaml configuration with sequence packing support
+
+defaults: "grpo_math_1B.yaml"
+
+# Sequence packing configuration
+seq_pack:
+  enabled: true                  # Enable sequence packing
+  algorithm: "concatenative"     # Packing algorithm to use (options: "concatenative", "first_fit_decreasing", "first_fit_shuffle")
+  collect_metrics: true          # Whether to collect and log packing metrics
+  num_batches: 4                 # Number of batches to process before packing and training
+
+# Adjust other parameters as needed for sequence packing
+grpo:
+  num_prompts_per_step: 32       # Number of prompts per batch
+  num_generations_per_prompt: 16 # Number of generations per prompt
+  max_rollout_turns: 1           # For multi-turn rollouts. Math Environments just have 1 turn (answering the question)
+  max_num_steps: 1000000
+  normalize_rewards: true
+  use_leave_one_out_baseline: true
+  val_period: 10
+  val_at_start: false
+  max_val_samples: 256
+  val_batch_size: 256
+
+# Increase sequence length to allow for more efficient packing
+policy:
+  max_total_sequence_length: 1024  # Increased from 512 to allow for more efficient packing
+
+  generation:
+    max_new_tokens: ${policy.max_total_sequence_length}
+    vllm_cfg:
+      max_model_len: ${policy.max_total_sequence_length}
+
+data:
+  max_input_seq_length: ${policy.max_total_sequence_length}
+
+# Update log directory to distinguish from non-packed runs
+logger:
+  log_dir: "/results/reinforcer/grpo_math_1b_seq_pack/logs"
+
+# Update checkpoint directory
+checkpointing:
+  checkpoint_dir: "/results/reinforcer/grpo_math_1b_seq_pack/checkpoints"

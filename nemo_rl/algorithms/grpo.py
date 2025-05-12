@@ -36,6 +36,7 @@ from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
     get_keys_from_message_log,
 )
+from nemo_rl.data.packing import get_packer
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.environments.interfaces import (
@@ -62,6 +63,13 @@ from nemo_rl.utils.timer import Timer
 # ===============================================================================
 
 
+class SeqPackConfig(TypedDict):
+    enabled: bool
+    algorithm: str
+    collect_metrics: bool
+    num_batches: int
+
+
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
@@ -72,6 +80,8 @@ class GRPOConfig(TypedDict):
     val_batch_size: int
     val_at_start: bool
     checkpoint_dir: str
+    max_rollout_turns: int
+    max_val_samples: int
 
 
 class GRPOSaveState(TypedDict):
@@ -97,6 +107,7 @@ class MasterConfig(TypedDict):
     logger: LoggerConfig
     cluster: ClusterConfig
     checkpointing: CheckpointingConfig
+    seq_pack: Optional[SeqPackConfig]
 
 
 # ===============================================================================
@@ -356,120 +367,348 @@ def grpo_train(
         logger.log_metrics(val_metrics, step, prefix="validation")
         logger.log_metrics(validation_timings, step, prefix="timing/validation")
 
-    # Run grpo training (single-turn)
-    batch: BatchedDataDict[DatumSpec]
-    for batch in dataloader:
+    # Check if sequence packing is enabled
+    seq_packing_config = master_config.get("seq_pack", None)
+    seq_packing_enabled = seq_packing_config and seq_packing_config.get(
+        "enabled", False
+    )
+    num_batches = seq_packing_config.get("num_batches", 1) if seq_packing_enabled else 1
+
+    # Run grpo training
+    batch_idx = 0
+    while batch_idx < min(len(dataloader), master_config["grpo"]["max_num_steps"]):
         print(
             f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
         )
 
         with timer.time("total_step_time"):
-            # Prepare batch
-            print("▶ Preparing batch...")
-            with timer.time("data_processing"):
-                # Repeat batch items
-                repeated_batch: BatchedDataDict[DatumSpec] = batch.repeat_interleave(
-                    master_config["grpo"]["num_generations_per_prompt"]
+            # PHASE 1: READ MULTIPLE BATCHES AND GENERATE RESPONSES
+            if seq_packing_enabled:
+                print(
+                    f"▶ PHASE 1: Reading {num_batches} batches and generating responses..."
                 )
-                # Convert LLMMessageLogType to FlatMessagesType for generation
-                batched_flat, input_lengths = batched_message_log_to_flat_message(
-                    repeated_batch["message_log"],
-                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
-                )
-                input_ids = batched_flat["token_ids"]
 
-            # Generate responses - this updates the LLMMessageLogType in repeated_batch
-            print(f"▶ Generating responses for batch of size {repeated_batch.size}...")
-            with timer.time("prepare_for_generation"):
-                if NEED_REFIT and POLICY_GENERATION_STALE:
-                    refit_policy_generation(
-                        policy,
-                        policy_generation,
-                        refit_buffer_size_gb,
-                    )
-                    POLICY_GENERATION_STALE = False
-                else:
-                    policy_generation.prepare_for_generation()
+                all_generated_batches = []
+                all_rewards = []
+                all_message_logs = []
+                all_loss_multipliers = []
+                all_input_ids = []
+                all_advantages = []
+                rollout_metrics = None
 
-            with timer.time("generation"):
-                repeated_batch, rollout_metrics = run_multi_turn_rollout(
-                    policy_generation=policy_generation,
-                    input_batch=repeated_batch,
-                    tokenizer=tokenizer,
-                    task_to_env=task_to_env,
-                    max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
-                    greedy=False,
-                )
-                policy_generation.finish_generation()
+                # Process num_batches batches
+                for i in range(num_batches):
+                    if batch_idx >= min(
+                        len(dataloader), master_config["grpo"]["max_num_steps"]
+                    ):
+                        break
 
-            # Calculate rewards & advantages
-            print("▶ Processing rewards...")
-            with timer.time("reward_calculation"):
-                # Extract rewards from final_batch
-                rewards = repeated_batch["total_reward"]
+                    print(f"  • Processing batch {i + 1}/{num_batches}...")
 
-                print("▶ Computing advantages...")
-                baseline, std = calculate_baseline_and_std_per_prompt(
-                    input_ids,
-                    rewards,
-                    torch.ones_like(rewards),
-                    leave_one_out_baseline=master_config["grpo"][
-                        "use_leave_one_out_baseline"
-                    ],
-                )
-                advantages = (rewards - baseline).unsqueeze(-1)
+                    # Get batch from dataloader
+                    batch = next(iter(dataloader))
+                    batch_idx += 1
 
-                if master_config["grpo"]["normalize_rewards"]:
-                    # don't sharpen the ones with no variation
-                    zero_std_mask = std > 0
-                    advantages[zero_std_mask] = (
-                        advantages[zero_std_mask] / std.unsqueeze(-1)[zero_std_mask]
-                    )
-
-            with timer.time("data_processing"):
-                # Add loss mask and advantages to each message in LLMMessageLogType
-                for i, message_log in enumerate(repeated_batch["message_log"]):
-                    for j, message in enumerate(message_log):
-                        if message["role"] == "assistant":
-                            message["token_loss_mask"] = torch.ones_like(
-                                message["token_ids"]
+                    # Prepare batch for generation
+                    with timer.time("data_processing"):
+                        # Repeat batch items
+                        repeated_batch: BatchedDataDict[DatumSpec] = (
+                            batch.repeat_interleave(
+                                master_config["grpo"]["num_generations_per_prompt"]
                             )
+                        )
+                        # Convert LLMMessageLogType to FlatMessagesType for generation
+                        batched_flat, input_lengths = (
+                            batched_message_log_to_flat_message(
+                                repeated_batch["message_log"],
+                                pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                            )
+                        )
+                        input_ids = batched_flat["token_ids"]
+
+                    # Generate responses
+                    with timer.time("prepare_for_generation"):
+                        if NEED_REFIT and POLICY_GENERATION_STALE:
+                            refit_policy_generation(
+                                policy,
+                                policy_generation,
+                                refit_buffer_size_gb,
+                            )
+                            POLICY_GENERATION_STALE = False
                         else:
-                            message["token_loss_mask"] = torch.zeros_like(
-                                message["token_ids"]
+                            policy_generation.prepare_for_generation()
+
+                    with timer.time("generation"):
+                        repeated_batch, batch_rollout_metrics = run_multi_turn_rollout(
+                            policy_generation=policy_generation,
+                            input_batch=repeated_batch,
+                            tokenizer=tokenizer,
+                            task_to_env=task_to_env,
+                            max_seq_len=master_config["policy"][
+                                "max_total_sequence_length"
+                            ],
+                            max_rollout_turns=master_config["grpo"][
+                                "max_rollout_turns"
+                            ],
+                            greedy=False,
+                        )
+                        policy_generation.finish_generation()
+
+                        # Store rollout metrics from the first batch
+                        if rollout_metrics is None:
+                            rollout_metrics = batch_rollout_metrics
+
+                    # Calculate rewards & advantages for this batch
+                    with timer.time("reward_calculation"):
+                        rewards = repeated_batch["total_reward"]
+
+                        baseline, std = calculate_baseline_and_std_per_prompt(
+                            input_ids,
+                            rewards,
+                            torch.ones_like(rewards),
+                            leave_one_out_baseline=master_config["grpo"][
+                                "use_leave_one_out_baseline"
+                            ],
+                        )
+                        advantages = (rewards - baseline).unsqueeze(-1)
+
+                        if master_config["grpo"]["normalize_rewards"]:
+                            zero_std_mask = std > 0
+                            advantages[zero_std_mask] = (
+                                advantages[zero_std_mask]
+                                / std.unsqueeze(-1)[zero_std_mask]
                             )
-                        if "generation_logprobs" not in message:
-                            message["generation_logprobs"] = torch.zeros_like(
-                                message["token_ids"], dtype=torch.float32
+
+                    # Add loss mask and advantages to each message
+                    for i, message_log in enumerate(repeated_batch["message_log"]):
+                        for j, message in enumerate(message_log):
+                            if message["role"] == "assistant":
+                                message["token_loss_mask"] = torch.ones_like(
+                                    message["token_ids"]
+                                )
+                            else:
+                                message["token_loss_mask"] = torch.zeros_like(
+                                    message["token_ids"]
+                                )
+                            if "generation_logprobs" not in message:
+                                message["generation_logprobs"] = torch.zeros_like(
+                                    message["token_ids"], dtype=torch.float32
+                                )
+                            message["advantages"] = advantages[i].expand(
+                                message["token_ids"].shape
                             )
-                        message["advantages"] = advantages[i].expand(
-                            message["token_ids"].shape
+
+                    # Store the generated batch data
+                    all_generated_batches.append(repeated_batch)
+                    all_rewards.append(rewards)
+                    all_message_logs.extend(repeated_batch["message_log"])
+                    all_loss_multipliers.extend(repeated_batch["loss_multiplier"])
+                    all_input_ids.append(input_ids)
+                    all_advantages.append(advantages)
+
+                # PHASE 2: APPLY SEQUENCE PACKING
+                print("▶ PHASE 2: Applying sequence packing to generated responses...")
+
+                with timer.time("sequence_packing"):
+                    # Get sequence lengths for all message logs
+                    sequence_lengths = []
+                    for message_log in all_message_logs:
+                        length = sum(
+                            len(message["token_ids"]) for message in message_log
+                        )
+                        sequence_lengths.append(length)
+
+                    # Create packer
+                    packer = get_packer(
+                        algorithm=seq_packing_config.get("algorithm", "concatenative"),
+                        bin_capacity=master_config["data"]["max_input_seq_length"],
+                        collect_metrics=seq_packing_config.get(
+                            "collect_metrics", False
+                        ),
+                    )
+
+                    # Pack the sequences
+                    packed_groups = packer.pack(sequence_lengths)
+
+                    # Create packed message logs
+                    packed_message_logs = []
+                    packed_loss_multipliers = []
+
+                    for group in packed_groups:
+                        if not group:
+                            continue
+
+                        # Combine message logs in this group
+                        packed_log = []
+                        for idx in group:
+                            packed_log.extend(all_message_logs[idx])
+
+                        packed_message_logs.append(packed_log)
+                        # Use minimum loss multiplier from all samples in group
+                        min_loss_multiplier = min(
+                            all_loss_multipliers[idx] for idx in group
+                        )
+                        packed_loss_multipliers.append(min_loss_multiplier)
+
+                    # Create a BatchedDataDict with the packed message logs
+                    packed_batch = BatchedDataDict(
+                        message_log=packed_message_logs,
+                        loss_multiplier=torch.tensor(packed_loss_multipliers),
+                        is_packed=True,
+                        packed_lengths=[len(group) for group in packed_groups if group],
+                    )
+
+                # Convert packed message logs to flat format for training
+                with timer.time("data_processing"):
+                    flat_messages, input_lengths = batched_message_log_to_flat_message(
+                        packed_batch["message_log"],
+                        pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                        make_sequence_length_divisible_by=master_config["policy"][
+                            "make_sequence_length_divisible_by"
+                        ],
+                    )
+
+                    # Create training data
+                    train_data = BatchedDataDict[ClippedPGLossDataDict](
+                        {
+                            "input_ids": flat_messages["token_ids"],
+                            "input_lengths": input_lengths,
+                            "advantages": flat_messages["advantages"],
+                            "generation_logprobs": flat_messages["generation_logprobs"],
+                            "token_mask": flat_messages["token_loss_mask"],
+                            "sample_mask": packed_batch["loss_multiplier"],
+                            "packed_lengths": packed_batch["packed_lengths"],
+                        }
+                    )
+                    train_data.to("cpu")
+
+                # Log packing metrics if enabled
+                if seq_packing_config.get("collect_metrics", False) and packer.metrics:
+                    packing_metrics = packer.get_aggregated_metrics()
+                    logger.log_metrics(packing_metrics, step + 1, prefix="packing")
+
+                # For logging purposes, use the rewards from the last batch
+                rewards = all_rewards[-1] if all_rewards else torch.tensor([0.0])
+
+            else:
+                # Original non-packed implementation
+                batch = next(iter(dataloader))
+                batch_idx += 1
+
+                # Prepare batch
+                print("▶ Preparing batch...")
+                with timer.time("data_processing"):
+                    # Repeat batch items
+                    repeated_batch: BatchedDataDict[DatumSpec] = (
+                        batch.repeat_interleave(
+                            master_config["grpo"]["num_generations_per_prompt"]
+                        )
+                    )
+                    # Convert LLMMessageLogType to FlatMessagesType for generation
+                    batched_flat, input_lengths = batched_message_log_to_flat_message(
+                        repeated_batch["message_log"],
+                        pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                    )
+                    input_ids = batched_flat["token_ids"]
+
+                # Generate responses - this updates the LLMMessageLogType in repeated_batch
+                print(
+                    f"▶ Generating responses for batch of size {repeated_batch.size}..."
+                )
+                with timer.time("prepare_for_generation"):
+                    if NEED_REFIT and POLICY_GENERATION_STALE:
+                        refit_policy_generation(
+                            policy,
+                            policy_generation,
+                            refit_buffer_size_gb,
+                        )
+                        POLICY_GENERATION_STALE = False
+                    else:
+                        policy_generation.prepare_for_generation()
+
+                with timer.time("generation"):
+                    repeated_batch, rollout_metrics = run_multi_turn_rollout(
+                        policy_generation=policy_generation,
+                        input_batch=repeated_batch,
+                        tokenizer=tokenizer,
+                        task_to_env=task_to_env,
+                        max_seq_len=master_config["policy"][
+                            "max_total_sequence_length"
+                        ],
+                        max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                        greedy=False,
+                    )
+                    policy_generation.finish_generation()
+
+                # Calculate rewards & advantages
+                print("▶ Processing rewards...")
+                with timer.time("reward_calculation"):
+                    # Extract rewards from final_batch
+                    rewards = repeated_batch["total_reward"]
+
+                    print("▶ Computing advantages...")
+                    baseline, std = calculate_baseline_and_std_per_prompt(
+                        input_ids,
+                        rewards,
+                        torch.ones_like(rewards),
+                        leave_one_out_baseline=master_config["grpo"][
+                            "use_leave_one_out_baseline"
+                        ],
+                    )
+                    advantages = (rewards - baseline).unsqueeze(-1)
+
+                    if master_config["grpo"]["normalize_rewards"]:
+                        # don't sharpen the ones with no variation
+                        zero_std_mask = std > 0
+                        advantages[zero_std_mask] = (
+                            advantages[zero_std_mask] / std.unsqueeze(-1)[zero_std_mask]
                         )
 
-                # Convert updated LLMMessageLogType to FlatMessagesType for training
-                flat_messages, input_lengths = batched_message_log_to_flat_message(
-                    repeated_batch["message_log"],
-                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
-                    make_sequence_length_divisible_by=master_config["policy"][
-                        "make_sequence_length_divisible_by"
-                    ],
-                )
+                with timer.time("data_processing"):
+                    # Add loss mask and advantages to each message in LLMMessageLogType
+                    for i, message_log in enumerate(repeated_batch["message_log"]):
+                        for j, message in enumerate(message_log):
+                            if message["role"] == "assistant":
+                                message["token_loss_mask"] = torch.ones_like(
+                                    message["token_ids"]
+                                )
+                            else:
+                                message["token_loss_mask"] = torch.zeros_like(
+                                    message["token_ids"]
+                                )
+                            if "generation_logprobs" not in message:
+                                message["generation_logprobs"] = torch.zeros_like(
+                                    message["token_ids"], dtype=torch.float32
+                                )
+                            message["advantages"] = advantages[i].expand(
+                                message["token_ids"].shape
+                            )
 
-                # Create training data from flattened messages
-                train_data = BatchedDataDict[ClippedPGLossDataDict](
-                    {
-                        "input_ids": flat_messages["token_ids"],
-                        "input_lengths": input_lengths,
-                        "advantages": flat_messages["advantages"],
-                        "generation_logprobs": flat_messages["generation_logprobs"],
-                        "token_mask": flat_messages["token_loss_mask"],
-                        "sample_mask": repeated_batch["loss_multiplier"],
-                    }
-                )
-                train_data.to("cpu")
+                    # Convert updated LLMMessageLogType to FlatMessagesType for training
+                    flat_messages, input_lengths = batched_message_log_to_flat_message(
+                        repeated_batch["message_log"],
+                        pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                        make_sequence_length_divisible_by=master_config["policy"][
+                            "make_sequence_length_divisible_by"
+                        ],
+                    )
 
-            print("▶ Preparing for logprob inference...")
+                    # Create training data from flattened messages
+                    train_data = BatchedDataDict[ClippedPGLossDataDict](
+                        {
+                            "input_ids": flat_messages["token_ids"],
+                            "input_lengths": input_lengths,
+                            "advantages": flat_messages["advantages"],
+                            "generation_logprobs": flat_messages["generation_logprobs"],
+                            "token_mask": flat_messages["token_loss_mask"],
+                            "sample_mask": repeated_batch["loss_multiplier"],
+                        }
+                    )
+                    train_data.to("cpu")
+
+            # PHASE 3: TRAIN POLICY
+            print("▶ PHASE 3: Training policy...")
+
             with timer.time("logprob_inference_prep"):
                 policy.prepare_for_lp_inference()
 
