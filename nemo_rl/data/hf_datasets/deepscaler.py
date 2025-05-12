@@ -46,15 +46,11 @@ def prepare_deepscaler_dataset(seed=42, num_epochs=1):
     ).repeat(num_epochs)
     # Shuffle the dataset with the specified seed
     # Set repeat=True to allow the dataset to be iterated over multiple times (epochs)
-    shuffled_ds: DatasetDict | Dataset | IterableDataset | IterableDatasetDict = (
+    train_ds: DatasetDict | Dataset | IterableDataset | IterableDatasetDict = (
         original_ds.shuffle(seed=seed)
     )
 
-    # Take 128 samples for test set
-    test_ds = shuffled_ds.select(range(128))
-
-    # Use the rest for training
-    train_ds = shuffled_ds.select(range(128, len(shuffled_ds)))
+    test_ds = load_dataset("HuggingFaceH4/aime_2024", split="train").repeat(4)
 
     # Format the examples, removing original columns
     train_formatted = train_ds.map(format_math, remove_columns=train_ds.column_names)
