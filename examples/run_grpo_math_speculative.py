@@ -68,13 +68,15 @@ def process_data(self, problem,thoughts):
         add_generation_prompt=True,
         add_special_tokens=False,
     )
-
+    # TODO note that this deoesn't use most of the code above
+    message = thoughts
     user_message["token_ids"] = self(message, return_tensors="pt")["input_ids"][0]
 
     # import pdb;
     # pdb.set_trace()
     if len(user_message["token_ids"]) > self.max_sequence_length:
         user_message["token_ids"] = user_message["token_ids"][0:self.max_sequence_length]
+
     user_message["content"] = message
 
     # generation_input_data = BatchedDataDict[GenerationDatumSpec](
@@ -86,6 +88,66 @@ def process_data(self, problem,thoughts):
     # )
 
     return [user_message]
+
+
+def llama_nemotron_math_data_processor(
+        datum_dict: Dict[str, Any],
+        task_data_spec: TaskDataSpec,
+        tokenizer,
+        max_seq_length: int,
+        idx: int,
+) -> DatumSpec:
+    """Process a datum dictionary (directly loaded from dataset) into a DatumSpec for the Math Environment."""
+    problem = datum_dict["problem"]
+    solution = str(datum_dict["expected_answer"])
+    extra_env_info = {"ground_truth": solution}
+
+    message_log: LLMMessageLogType = []
+
+    sys_message = {"role": "system", "content": task_data_spec.system_prompt}
+    # import pdb;
+    # pdb.set_trace()
+    problem = task_data_spec.prompt.format(problem)
+    user_message = {"role": "user", "content": problem}
+    # user prompt
+    assert task_data_spec.prompt is not None
+
+    message_list = [sys_message, user_message]
+    # if planted_thinking_prompt is not None:
+    #     message_list.append({"role": "assistant", "content": planted_thinking_prompt})
+    message = tokenizer.apply_chat_template(
+        message_list,
+        tokenize=False,
+        add_generation_prompt=True,
+        add_special_tokens=False,
+    )
+    user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
+    user_message["content"] = message
+    message_log.append(user_message)
+
+    length = sum(len(m["token_ids"]) for m in message_log)
+
+    loss_multiplier = 1.0
+    if length > max_seq_length:
+        # make smaller and mask out
+        for message in message_log:
+            message["token_ids"] = message["token_ids"][
+                                   : min(4, max_seq_length // len(message_log))
+                                   ]
+        loss_multiplier = 0.0
+
+    output = {
+        "message_log": message_log,
+        "length": length,
+        "extra_env_info": extra_env_info,
+        "loss_multiplier": loss_multiplier,
+        "idx": idx,
+    }
+    if "task_name" in datum_dict:
+        output["task_name"] = datum_dict["task_name"]
+    return output
+
+
 def openinstructmath2_data_processor(
     datum_dict: Dict[str, Any],
     task_data_spec: TaskDataSpec,
@@ -292,7 +354,7 @@ def main():
     target_tokenizer = get_tokenizer(config["target_policy"]["tokenizer"])
 
     config["target_policy"]["generation"] = configure_generation_config(
-        config["target_policy"]["generation"], tokenizer
+        config["target_policy"]["generation"], target_tokenizer
     )
 
     target_tokenizer.max_sequence_length = config["target_policy"]["max_total_sequence_length"]

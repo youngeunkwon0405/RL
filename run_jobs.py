@@ -4,7 +4,7 @@ import getpass
 import datetime
 
 # ─── Configuration ──────────────────────────────────────────────────────────────
-SBATCH_SCRIPT = "launch_scripts/8b_math.sh"           # your sbatch script filename
+SBATCH_SCRIPT = "launch_scripts/qwen-1b_math.sh"           # your sbatch script filename
 CHECK_INTERVAL_RUNNING = 10 * 60     # seconds to wait if jobs are running (10 min)
 CHECK_INTERVAL_FREE    = 60 * 60 * 4.5    # seconds to wait after submitting (1 hour)
 

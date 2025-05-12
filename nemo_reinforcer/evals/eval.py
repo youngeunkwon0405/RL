@@ -28,7 +28,20 @@ from nemo_reinforcer.environments.math_environment import MathEnvConfig
 from nemo_reinforcer.models.generation.interfaces import GenerationConfig
 from nemo_reinforcer.models.generation.vllm import VllmGeneration
 
+from nemo_reinforcer.data.llm_message_utils import (
+    get_keys_from_message_log,
+    batched_message_log_to_flat_message,
+)
+from nemo_reinforcer.models.generation.interfaces import (
+    GenerationDatumSpec,
+)
 
+from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
+from nemo_reinforcer.data.interfaces import (
+    DatumSpec,
+    LLMMessageLogType,
+    FlatMessagesType,
+)
 # ===============================================================================
 # Configuration
 # ===============================================================================
@@ -54,6 +67,7 @@ def setup(
     VllmGeneration,
     DataLoader,
     MasterConfig,
+    VllmGeneration,
 ]:
     """Set up components for model evaluation.
 
@@ -68,6 +82,7 @@ def setup(
     """
     # Extract individual configs for easier access
     generation_config = master_config["generation"]
+    target_generation_config = master_config["target_generation"]
     cluster_config = master_config["cluster"]
 
     # ==========================
@@ -89,10 +104,19 @@ def setup(
     print("\n▶ Setting up compute cluster...")
     cluster = RayVirtualCluster(
         name="eval_cluster",
-        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
+        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]//2]
         * cluster_config["num_nodes"],
         use_gpus=True,
-        num_gpus_per_node=cluster_config["gpus_per_node"],
+        num_gpus_per_node=cluster_config["gpus_per_node"]//2,
+        max_colocated_worker_groups=1,
+    )
+
+    cluster2 = RayVirtualCluster(
+        name="eval_cluster_target",
+        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]//2]
+                                * cluster_config["num_nodes"],
+        use_gpus=True,
+        num_gpus_per_node=cluster_config["gpus_per_node"]//2,
         max_colocated_worker_groups=1,
     )
     print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
@@ -107,6 +131,11 @@ def setup(
 
     # initialize vllm generation
     vllm_generation = VllmGeneration(cluster=cluster, config=generation_config)
+
+
+    # target_generation_config["max_new_tokens"] = 2 * target_generation_config["max_new_tokens"]
+    # target_generation_config["vllm_cfg"]["max_model_len"] = 2 * target_generation_config["vllm_cfg"]["max_model_len"]
+    target_vllm_generation = VllmGeneration(cluster=cluster2, config=target_generation_config,name_prefix='vllm_target')
     print(
         f"  ✓ Using vLLM backend for generation with {generation_config['model_name']}"
     )
@@ -119,6 +148,7 @@ def setup(
         vllm_generation,
         dataloader,
         master_config,
+        target_vllm_generation,
     )
 
 
@@ -127,7 +157,7 @@ def setup(
 # ===============================================================================
 
 
-def run_env_eval(vllm_generation, dataloader, env, master_config):
+def run_env_eval(vllm_generation, dataloader, env, master_config,target_vllm_generation,target_tokenizer):
     """Main entry point for running evaluation using environment.
 
     Generates model responses and evaluates them by env.
@@ -150,6 +180,70 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
         # generate by vllm
         inputs = BatchedDataDict({"prompts": prompts})
         outputs = vllm_generation.generate_text(inputs)["texts"]
+
+        # import pdb;
+        # pdb.set_trace()
+
+
+
+        user_messages = []
+        target_model_inputs_len = []
+        for input_sample, generated_text_sample in zip(inputs['prompts'], outputs):
+            # TODO this support only the first turn
+            problem = input_sample
+            thought = generated_text_sample
+            thought = problem + ' <think> '+thought+' </think>'
+            # import pdb;
+            # pdb.set_trace()
+
+            user_message = target_tokenizer.process_data(problem, thought)
+            user_messages.append(user_message)
+        #
+        active_flat_messages: FlatMessagesType
+        active_flat_messages, active_input_lengths = (
+            batched_message_log_to_flat_message(
+                user_messages,
+                pad_value_dict={"token_ids": target_tokenizer.pad_token_id},
+            )
+        )
+
+        # Extract input_ids and lengths from the flat messages
+        active_input_ids = active_flat_messages["token_ids"]
+        active_stop_strings = [None] * len(active_input_lengths)
+
+        target_generation_input_data = BatchedDataDict[GenerationDatumSpec](
+            {
+                "input_ids": active_input_ids,
+                "input_lengths": active_input_lengths,
+                "stop_strings": active_stop_strings,
+            }
+        )
+
+        # import pdb;
+        # pdb.set_trace()
+        # target_generation_outputs = policy_generation.generate(generation_input_data, greedy=greedy)
+        target_generation_outputs = target_vllm_generation.generate(target_generation_input_data, greedy=True)
+
+
+
+        # Extract generated tokens
+        generated_ids = []
+        unpadded_sequence_lengths = target_generation_outputs["unpadded_sequence_lengths"]
+        for output_ids, input_length, total_length in zip(
+                target_generation_outputs["output_ids"], active_input_lengths, unpadded_sequence_lengths
+        ):
+            generated_ids.append(output_ids[input_length:total_length])
+
+        # import pdb;
+        # pdb.set_trace()
+
+        import pdb;
+        pdb.set_trace()
+
+        outputs = target_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
+
+        # import pdb;
+        # pdb.set_trace()
 
         # append to message_log
         for idx, output in enumerate(outputs):

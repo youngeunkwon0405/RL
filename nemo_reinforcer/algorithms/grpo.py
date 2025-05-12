@@ -290,9 +290,7 @@ def setup(
         config=target_policy_config,
         tokenizer=tokenizer,
         name_prefix='temp_policy',
-        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
-        if last_checkpoint_path
-        else None,
+        weights_path= None,
         optimizer_path= None,
         init_optimizer=False,
         init_reference_model=False

@@ -7,26 +7,9 @@
 #SBATCH --time=1:0:0
 #SBATCH --dependency=singleton
 #SBATCH --gres=gpu:8
-#SBATCH -o ../slurm_logs/%j.log
-#SBATCH -e ../slurm_logs/%j.log
 
 
 set -eoux pipefail
-
-# Cleanup function to kill any existing processes
-cleanup() {
-    echo "Cleaning up existing processes..."
-    pkill -f "ray" || true
-    pkill -f "vllm" || true
-    pkill -f "python" || true
-    ray stop --force || true
-    sleep 2
-}
-
-# First we start the head of the ray cluster on one of the physical nodes
-# Set GPU/CPU resources to 0 to avoid scheduling on the head node
-#cleanup
-ray stop --force || true
 
 ########################################################
 # User defined variables
@@ -35,15 +18,22 @@ CONTAINER=$CONTAINER
 MOUNTS=$MOUNTS
 COMMAND=${COMMAND:-}  # This is a script relative to the SLURM_SUBMIT_DIR. If left empty, it will leave the cluster idle after it's brought up.
 ########################################################
-# Ray ports 6379
-GCS_SERVER_PORT=${GCS_SERVER_PORT:-6379}
-DASHBOARD_PORT=${DASHBOARD_PORT:-8265}
-OBJECT_MANAGER_PORT=${OBJECT_MANAGER_PORT:-8076}
-NODE_MANAGER_PORT=${NODE_MANAGER_PORT:-8077}
-DASHBOARD_AGENT_PORT=${DASHBOARD_AGENT_PORT:-52365}
-DASHBOARD_AGENT_GRPC_PORT=${DASHBOARD_AGENT_GRPC_PORT:-52366}
-METRICS_PORT=${METRICS_PORT:-9002}
-# On our clusters, the largest port range on an idle worker appeared between 52367-64607
+# Ports for all nodes (should be odd numbers since we place head/worker[0] on the same node) so all workers get the odd ports, but the head will get +1 the ports
+NODE_MANAGER_PORT=${NODE_MANAGER_PORT:-53001}
+OBJECT_MANAGER_PORT=${OBJECT_MANAGER_PORT:-53003}
+RUNTIME_ENV_AGENT_PORT=${RUNTIME_ENV_AGENT_PORT:-53005}
+DASHBOARD_AGENT_GRPC_PORT=${DASHBOARD_AGENT_GRPC_PORT:-53007}
+METRICS_EXPORT_PORT=${METRICS_EXPORT_PORT:-53009}
+
+# Ports for the head node
+PORT=${PORT:-6379}
+RAY_CLIENT_SERVER_PORT=${RAY_CLIENT_SERVER_PORT:-10001}
+#REDIT_SHARD_PORTS=${REDIT_SHARD_PORTS:-"random"} ??
+DASHBOARD_GRPC_PORT=${DASHBOARD_GRPC_PORT:-52367}
+DASHBOARD_PORT=${DASHBOARD_PORT:-8265}  # Also used by debugger
+DASHBOARD_AGENT_LISTEN_PORT=${DASHBOARD_AGENT_LISTEN_PORT:-52365}
+
+# On our clusters, the largest port range on an idle worker appeared between 52369-64607
 # (not including the other ports set by this script). So this range is chosen to be
 # somewhere in the middle
 MIN_WORKER_PORT=${MIN_WORKER_PORT:-54001}
@@ -56,16 +46,9 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-$SLURM_SUBMIT_DIR/uv_cache}"
 mkdir -p $UV_CACHE_DIR
 
 # Create logs directory
-LOG_DIR="$SLURM_SUBMIT_DIR/$SLURM_JOB_ID-logs"
+BASE_LOG_DIR=${BASE_LOG_DIR:-$SLURM_SUBMIT_DIR}
+LOG_DIR="$BASE_LOG_DIR/$SLURM_JOB_ID-logs"
 mkdir -p $LOG_DIR
-
-# Set vLLM port range to avoid conflicts
-export VLLM_PORT_RANGE="30000-40000"
-export MASTER_PORT=29500
-export MASTER_ADDR="localhost"
-export RANK=0
-export WORLD_SIZE=1
-export LOCAL_RANK=0
 
 COMMON_SRUN_ARGS=""
 COMMON_SRUN_ARGS+=" --no-container-mount-home"
@@ -81,7 +64,7 @@ COMMON_SRUN_ARGS+=" --gres=gpu:8"
 # Number of GPUs per node
 gpus_per_node=8
 
-num_retries=5
+num_retries=3
 
 # Getting the node names and IP addresses in the SLURM allocation
 nodes=$(scontrol show hostnames "$SLURM_JOB_NODELIST")
@@ -97,45 +80,73 @@ done
 head_node=${nodes_array[0]}
 head_node_ip=${ip_addresses_array[0]}
 
-ip_head=$head_node_ip:$GCS_SERVER_PORT
+ip_head=$head_node_ip:$PORT
 
+# First we start the head of the ray cluster on one of the physical nodes
+# Set GPU/CPU resources to 0 to avoid scheduling on the head node
 
 head_cmd=$(cat <<EOF
-# Clean up any existing processes
-
 # Touch a file to indicate that the head node has started
 # Overlapping srun commands will check this file to determine if we can overlap a container command
 touch $LOG_DIR/STARTED_RAY_HEAD
 env
+
+exit-dramatically() {
+    # Use SIGTERM to forcefully terminate the srun process
+    pkill -P $$ || true
+    kill -TERM 0 || true
+    # As a last resort, exit with a non-zero code
+    exit 1
+}
+export -f exit-dramatically
+
+# Background process to check for ENDED file
+monitor-sidecar() {
+  set +x
+  while true; do
+    sleep 60
+    if [[ -f "$LOG_DIR/ENDED" ]]; then
+      echo "Detected ENDED file, terminating..."
+      exit-dramatically
+    fi
+  done
+}
+monitor-sidecar &
+
 cat <<EOFINNER | tee /launch-head.sh
 ray start --head \
---disable-usage-stats \
---num-cpus=0 \
---num-gpus=0 \
---node-ip-address="$head_node_ip" \
---port=${GCS_SERVER_PORT} \
---dashboard-port=${DASHBOARD_PORT} \
---object-manager-port=${OBJECT_MANAGER_PORT} \
---node-manager-port=${NODE_MANAGER_PORT} \
---metrics-export-port=${METRICS_PORT} \
---dashboard-agent-grpc-port=${DASHBOARD_AGENT_GRPC_PORT} \
---dashboard-agent-listen-port=${DASHBOARD_AGENT_PORT} \
---block
+    --disable-usage-stats \
+    --num-cpus=0 \
+    --num-gpus=0 \
+    --node-ip-address="$head_node_ip" \
+    --port=${PORT} \
+    --ray-client-server-port=${RAY_CLIENT_SERVER_PORT} \
+    --dashboard-grpc-port=${DASHBOARD_GRPC_PORT} \
+    --dashboard-port=${DASHBOARD_PORT} \
+    \
+    --node-manager-port=$((${NODE_MANAGER_PORT} + 1)) \
+    --object-manager-port=$((${OBJECT_MANAGER_PORT} + 1)) \
+    --runtime-env-agent-port=$((${RUNTIME_ENV_AGENT_PORT} + 1)) \
+    --dashboard-agent-grpc-port=$((${DASHBOARD_AGENT_GRPC_PORT} + 1)) \
+    --dashboard-agent-listen-port=$((${DASHBOARD_AGENT_LISTEN_PORT} + 1)) \
+    --metrics-export-port=$((${METRICS_EXPORT_PORT} + 1)) \
+    \
+    --block
 EOFINNER
 chmod +x /launch-head.sh
 
 count=0
-while true; do
+while [[ \$count -lt $num_retries ]]; do
   bash /launch-head.sh
   count=\$((count+1))
-  echo "Head node failed \$count times, restarting..."
-#  cleanup
-#  sleep 2
+  echo "Head node failed \$count/$num_retries times, restarting in 5 seconds..."
+  sleep 5
 done
-echo ret_code=\$?
+touch $LOG_DIR/ENDED
+exit 1
 EOF
 )
-srun $COMMON_SRUN_ARGS --container-name=ray-head --kill-on-bad-exit=1 --nodes=1 --ntasks=1 -w "$head_node" -o $LOG_DIR/ray-head.log bash -x -c "$head_cmd" &
+srun $COMMON_SRUN_ARGS --container-name=ray-head --nodes=1 --ntasks=1 -w "$head_node" -o $LOG_DIR/ray-head.log bash -x -c "$head_cmd" &
 
 NUM_ACTORS=$((gpus_per_node * SLURM_JOB_NUM_NODES))
 
@@ -144,41 +155,68 @@ NUM_ACTORS=$((gpus_per_node * SLURM_JOB_NUM_NODES))
 # Worker nodes are started with ray start but without the --head flag
 for ((i = 0; i < SLURM_JOB_NUM_NODES; i++)); do
   node_i=${nodes_array[$i]}
-#  cleanup
+
   worker_cmd=$(cat <<EOF
-# Clean up any existing processes
-
-
 env
+
+exit-dramatically() {
+    # Use SIGTERM to forcefully terminate the srun process
+    pkill -P $$ || true
+    kill -TERM 0 || true
+    # As a last resort, exit with a non-zero code
+    exit 1
+}
+
+# Background process to check for ENDED file
+monitor-sidecar() {
+  set +x
+  while true; do
+    sleep 60
+    if [[ -f "$LOG_DIR/ENDED" ]]; then
+      echo "Detected ENDED file, terminating..."
+      exit-dramatically
+    fi
+  done
+}
+monitor-sidecar &
+
 cat <<EOFINNER | tee /launch-worker.sh
 ray start --address "$ip_head" \
           --disable-usage-stats \
-          --resources="{\"worker_units\": $gpus_per_node}" \
+          --resources="{\"worker_units\": $gpus_per_node, \"slurm_managed_ray_cluster\": 1}" \
           --min-worker-port=${MIN_WORKER_PORT} \
           --max-worker-port=${MAX_WORKER_PORT} \
+          \
+          --node-manager-port=${NODE_MANAGER_PORT} \
+          --object-manager-port=${OBJECT_MANAGER_PORT} \
+          --runtime-env-agent-port=${RUNTIME_ENV_AGENT_PORT} \
+          --dashboard-agent-grpc-port=${DASHBOARD_AGENT_GRPC_PORT} \
+          --dashboard-agent-listen-port=${DASHBOARD_AGENT_LISTEN_PORT} \
+          --metrics-export-port=${METRICS_EXPORT_PORT} \
+          \
           --block
 EOFINNER
 
 count=0
-while true; do
+while [[ \$count -lt $num_retries ]]; do
   bash /launch-worker.sh
   count=\$((count+1))
-  echo "Worker failed \$count times, restarting..."
-#  cleanup
-#  sleep 2
+  echo "Worker failed \$count/$num_retries times, restarting in 5 seconds..."
+  sleep 5
 done
-echo ret_code=\$?
+touch $LOG_DIR/ENDED
+exit 1
 EOF
 )
   if [[ $i -eq 0 ]]; then
     OVERLAP_HEAD_AND_WORKER_ARG="--overlap"
   fi
-  srun $COMMON_SRUN_ARGS ${OVERLAP_HEAD_AND_WORKER_ARG:-} --container-name=ray-worker-$i --kill-on-bad-exit=1 --exact --nodes=1 --ntasks=1 --cpus-per-task=$((16 * gpus_per_node)) -w "$node_i" -o $LOG_DIR/ray-worker-$i.log bash -x -c "$worker_cmd" &
+  srun $COMMON_SRUN_ARGS ${OVERLAP_HEAD_AND_WORKER_ARG:-} --container-name=ray-worker-$i --exact --nodes=1 --ntasks=1 --cpus-per-task=$((16 * gpus_per_node)) -w "$node_i" -o $LOG_DIR/ray-worker-$i.log bash -x -c "$worker_cmd" &
   sleep 3
 done
 
 # Then we wait here for the file to be created by the head node container
-while ! srun --overlap --kill-on-bad-exit=1 --nodes=1 --ntasks=1 -w $head_node test -f $LOG_DIR/STARTED_RAY_HEAD; do
+while ! srun --overlap --nodes=1 --ntasks=1 -w $head_node test -f $LOG_DIR/STARTED_RAY_HEAD; do
   echo "[INFO][$(date)] Waiting for head node container to start..."
   sleep 2
 done
@@ -187,7 +225,7 @@ done
 # Before we launch a job on this cluster we need to make sure that the bringup is complete
 # We do so by querying the number of worker_units in the ray cluster and asserting = NUM_ACTORS
 extract_worker_units() {
-  status_output=$(srun --overlap --container-name=ray-head --kill-on-bad-exit=1 --nodes=1 --ntasks=1 -w "$head_node" ray status)
+  status_output=$(srun --overlap --container-name=ray-head --nodes=1 --ntasks=1 -w "$head_node" ray status)
   if echo "$status_output" | grep -q "worker_units"; then
     worker_units=$(echo "$status_output" | grep "worker_units" | awk -F'[/. ]' '{print $4}')
     echo $worker_units
@@ -216,7 +254,7 @@ echo "All workers connected!"
 # This driver process is responsible for launching a job on the Ray cluster
 CONTAINER_CWD=$(scontrol show job $SLURM_JOB_ID --json | jq -r '.jobs[].current_working_directory')
 if [[ -n "$COMMAND" ]]; then
-  srun --no-container-mount-home --kill-on-bad-exit=1 --gpus=0 --overlap --container-name=ray-head --container-workdir=$CONTAINER_CWD --nodes=1 --ntasks=1 -w "$head_node" -o $LOG_DIR/ray-driver.log bash -c "$COMMAND"
+  srun --no-container-mount-home --gpus=0 --overlap --container-name=ray-head --container-workdir=$CONTAINER_CWD --nodes=1 --ntasks=1 -w "$head_node" -o $LOG_DIR/ray-driver.log bash -c "$COMMAND"
 else
   echo "[INFO]: Ray Cluster is idled, run this on the slurm head node to get a shell to the head node:"
   cat <<EOF >$SLURM_SUBMIT_DIR/${SLURM_JOB_ID}-attach.sh
@@ -224,10 +262,10 @@ else
 WORKER_NUM=\${1:-}
 if [[ -z "\$WORKER_NUM" ]]; then
   # Empty means we are on the head node
-  srun --no-container-mount-home --kill-on-bad-exit=1 --gpus=0 -A $SLURM_JOB_ACCOUNT -p $SLURM_JOB_PARTITION --overlap --container-name=ray-head --container-workdir=$CONTAINER_CWD --nodes=1 --ntasks=1 -w "$head_node" --jobid $SLURM_JOB_ID --pty bash
+  srun --no-container-mount-home --gpus=0 -A $SLURM_JOB_ACCOUNT -p $SLURM_JOB_PARTITION --overlap --container-name=ray-head --container-workdir=$CONTAINER_CWD --nodes=1 --ntasks=1 -w "$head_node" --jobid $SLURM_JOB_ID --pty bash
 else
   nodes_array=($nodes)
-  srun --no-container-mount-home --kill-on-bad-exit=1 --gres=gpu:8 -A $SLURM_JOB_ACCOUNT -p $SLURM_JOB_PARTITION --overlap --container-name=ray-worker-\$WORKER_NUM --container-workdir=$CONTAINER_CWD --nodes=1 --ntasks=1 -w "\${nodes_array[\$WORKER_NUM]}" --jobid $SLURM_JOB_ID --pty bash
+  srun --no-container-mount-home --gres=gpu:8 -A $SLURM_JOB_ACCOUNT -p $SLURM_JOB_PARTITION --overlap --container-name=ray-worker-\$WORKER_NUM --container-workdir=$CONTAINER_CWD --nodes=1 --ntasks=1 -w "\${nodes_array[\$WORKER_NUM]}" --jobid $SLURM_JOB_ID --pty bash
 fi
 EOF
   chmod +x $SLURM_SUBMIT_DIR/${SLURM_JOB_ID}-attach.sh

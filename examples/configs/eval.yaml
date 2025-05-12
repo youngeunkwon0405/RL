@@ -11,17 +11,36 @@ generation:
   stop_strings: null
   vllm_cfg:
     tensor_parallel_size: 1
-    gpu_memory_utilization: 0.9
-    max_model_len: 2048
+    gpu_memory_utilization: 0.6
+    max_model_len: 4096
+
+target_generation:
+  backend: "vllm" # only vllm is supported for evaluation
+  max_new_tokens: ${generation.vllm_cfg.max_model_len}
+  temperature: 0.0
+  top_p: 1.0
+  top_k: -1 # disable
+  num_prompts_per_step: -1 # -1 means pass all prompts at once
+  model_name: "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" #"Qwen/Qwen2.5-Math-1.5B-Instruct"
+  stop_token_ids: null
+  stop_strings: null
+  vllm_cfg:
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.6
+    max_model_len: 24000
 
 tokenizer:
   name: ${generation.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   chat_template: "default"
 
+target_tokenizer:
+  name: ${target_generation.model_name} ## specify if you'd like to use a tokenizer different from the model's default
+  chat_template: "default"
+
 data:
   max_input_seq_length: ${generation.vllm_cfg.max_model_len} # useless since we directly use prompts in evaluation
-  prompt_file: null
-  system_prompt_file: null
+  prompt_file: "examples/prompts/cot2.txt"
+  system_prompt_file: "examples/prompts/sys.txt"
   dataset_name: "HuggingFaceH4/aime_2024"
   dataset_key: "train"
   problem_key: "problem"
@@ -32,5 +51,5 @@ env:
     num_workers: 8
 
 cluster:
-  gpus_per_node: 1
+  gpus_per_node: 2
   num_nodes: 1

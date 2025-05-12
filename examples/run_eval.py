@@ -22,8 +22,10 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datasets import load_dataset
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
+from types import MethodType
 
 from examples.run_grpo_math import math_data_processor
+from examples.run_grpo_math_speculative import process_data, llama_nemotron_math_data_processor
 from nemo_reinforcer.algorithms.utils import get_tokenizer
 from nemo_reinforcer.data import MathDataConfig
 from nemo_reinforcer.data.datasets import AllTaskProcessedDataset
@@ -33,6 +35,7 @@ from nemo_reinforcer.distributed.virtual_cluster import init_ray
 from nemo_reinforcer.environments.math_environment import MathEnvironment
 from nemo_reinforcer.evals.eval import MasterConfig, run_env_eval, setup
 from nemo_reinforcer.models.generation.interfaces import configure_generation_config
+
 
 
 def parse_args():
@@ -75,12 +78,14 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
     math_env = MathEnvironment.options(
         runtime_env={"py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE}
     ).remote(env_configs["math"])
+    # import pdb;
+    # pdb.set_trace()
 
     dataset = AllTaskProcessedDataset(
         dataset=remapped_dataset,
         tokenizer=tokenizer,
         default_task_data_spec=math_task_spec,
-        task_data_processors=math_data_processor,
+        task_data_processors=llama_nemotron_math_data_processor,
         max_seq_length=data_config["max_input_seq_length"],
     )
 
@@ -119,6 +124,14 @@ def main():
         config["generation"], tokenizer, is_eval=True
     )
 
+    target_tokenizer = get_tokenizer(config["target_tokenizer"])
+    config["target_generation"] = configure_generation_config(
+        config["target_generation"], target_tokenizer, is_eval=True
+    )
+
+    target_tokenizer.max_sequence_length = config["target_generation"]["max_new_tokens"]
+    target_tokenizer.process_data = MethodType(process_data, target_tokenizer)
+
     # Setup data
     (
         dataset,
@@ -131,6 +144,7 @@ def main():
         vllm_generation,
         dataloader,
         master_config,
+        target_vllm_generation,
     ) = setup(config, tokenizer, dataset)
 
     # Run evaluation
@@ -139,6 +153,8 @@ def main():
         dataloader,
         math_env,
         master_config,
+        target_vllm_generation,
+        target_tokenizer,
     )
 
 
