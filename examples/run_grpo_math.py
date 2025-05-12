@@ -172,7 +172,6 @@ def llama_nemotron_math_data_processor(
     tokenizer,
     max_seq_length: int,
     idx: int,
-    planted_thinking_prompt: str = None,
 ) -> DatumSpec:
     """Process a datum dictionary (directly loaded from dataset) into a DatumSpec for the Math Environment."""
     problem = datum_dict["problem"]
