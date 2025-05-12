@@ -82,3 +82,33 @@ class PolicyInterface(ABC):
     @abstractmethod
     def finish_training(self, *args, **kwargs):
         pass
+
+    @abstractmethod
+    def save_checkpoint(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def load_checkpoint(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def shutdown(self):
+        pass
+
+
+class ColocatablePolicyInterface(PolicyInterface):
+    @abstractmethod
+    def offload_before_refit(self):
+        pass
+
+    @abstractmethod
+    def offload_after_refit(self):
+        pass
+
+    @abstractmethod
+    def prepare_weights_for_ipc(self, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def get_weights_ipc_handles(self, keys: list[str]) -> dict[str, Any]:
+        pass

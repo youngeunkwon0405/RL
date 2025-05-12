@@ -230,7 +230,7 @@ class CheckpointManager:
         return str(step_dirs[-1])
 
     def load_training_info(
-        self, checkpoint_path: Optional[os.PathLike] = None
+        self, checkpoint_path: Optional[str | os.PathLike] = None
     ) -> Optional[dict[str, Any]]:
         """Load the training info from a checkpoint.
 

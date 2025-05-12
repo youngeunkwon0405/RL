@@ -19,7 +19,7 @@ from typing import Any
 
 import ray
 import torch
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.data.interfaces import (
     DatumSpec,
@@ -39,12 +39,13 @@ from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
 
+TokenizerType = PreTrainedTokenizerBase
 
 def generate_responses(
     policy_generation: GenerationInterface,
     generation_input_data: BatchedDataDict[GenerationDatumSpec],
     batch: BatchedDataDict[DatumSpec],
-    tokenizer: AutoTokenizer,
+    tokenizer: TokenizerType,
     input_lengths: torch.Tensor,
     include_logprobs: bool = True,
     greedy: bool = False,
@@ -199,7 +200,7 @@ def calculate_rewards(
 def run_multi_turn_rollout(
     policy_generation: GenerationInterface,
     input_batch: BatchedDataDict[DatumSpec],
-    tokenizer: AutoTokenizer,
+    tokenizer: TokenizerType,
     task_to_env: dict[str, EnvironmentInterface],
     max_seq_len: int,
     max_rollout_turns: int = 999999,

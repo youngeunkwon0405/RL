@@ -28,7 +28,7 @@ from torch.distributed.fsdp import (
     MixedPrecision,
 )
 from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, PreTrainedTokenizerBase
 from transformers.integrations.accelerate import find_tied_parameters
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
@@ -74,7 +74,7 @@ class FSDP1PolicyWorker:
     def __init__(
         self,
         config: PolicyConfig,
-        tokenizer: AutoTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         weights_path: Optional[str] = None,
         optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,

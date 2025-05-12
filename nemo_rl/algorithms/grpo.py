@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from pathlib import Path
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, cast
 
 import numpy as np
 import torch
@@ -45,8 +45,8 @@ from nemo_rl.experience.rollouts import run_multi_turn_rollout
 from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
-from nemo_rl.models.generation.vllm import VllmGeneration
-from nemo_rl.models.policy.interfaces import PolicyInterface
+from nemo_rl.models.generation.vllm import VllmGeneration, VllmConfig
+from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
@@ -116,7 +116,7 @@ def setup(
     dataset: AllTaskProcessedDataset,
     val_dataset: Optional[AllTaskProcessedDataset],
 ) -> tuple[
-    PolicyInterface,
+    ColocatablePolicyInterface,
     GenerationInterface,
     RayVirtualCluster,
     StatefulDataLoader,
@@ -193,9 +193,10 @@ def setup(
     print(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
 
     # Load validation dataset if provided
-    val_dataloader = None
+    val_dataloader: Optional[StatefulDataLoader] = None
     # If validation is enabled, load the validation dataloader
     if grpo_config["val_period"] > 0 or grpo_config["val_at_start"]:
+        assert val_dataset is not None, "Validation dataset is required if validation is enabled"
         val_dataloader = StatefulDataLoader(
             val_dataset,
             batch_size=grpo_config["val_batch_size"],
@@ -232,6 +233,7 @@ def setup(
         policy_generation = None
         print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
     elif backend == "vllm":
+        generation_config = cast(VllmConfig, generation_config)
         policy_generation = VllmGeneration(cluster=cluster, config=generation_config)
         # Worker groups are not initialized until the first call to run something on workergroups.
         # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
@@ -279,7 +281,7 @@ def setup(
 
 
 def refit_policy_generation(
-    policy: PolicyInterface,
+    policy: ColocatablePolicyInterface,
     policy_generation: GenerationInterface,
     refit_buffer_size_gb: int,  # GB
 ):
@@ -317,7 +319,7 @@ def refit_policy_generation(
 
 
 def grpo_train(
-    policy: PolicyInterface,
+    policy: ColocatablePolicyInterface,
     policy_generation: Optional[GenerationInterface],
     dataloader: StatefulDataLoader,
     val_dataloader: Optional[StatefulDataLoader],

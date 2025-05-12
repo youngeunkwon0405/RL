@@ -13,14 +13,15 @@
 # limitations under the License.
 from typing import cast
 
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.models.generation.interfaces import GenerationConfig
 from nemo_rl.models.generation.vllm import VllmConfig
 
+TokenizerType = PreTrainedTokenizerBase
 
 def configure_generation_config(
-    config: GenerationConfig, tokenizer: AutoTokenizer, is_eval=False
+    config: GenerationConfig, tokenizer: TokenizerType, is_eval=False
 ):
     """Apply specific configurations to generation config."""
     # tokenizer setting

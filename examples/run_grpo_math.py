@@ -16,7 +16,7 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
-from typing import Any
+from typing import Any, cast
 
 import torch
 from omegaconf import OmegaConf
@@ -133,7 +133,7 @@ def math_data_processor(
             "content": task_data_spec.system_prompt,
         }
         sys = tokenizer.apply_chat_template(
-            [sys_prompt],
+            [cast(dict[str, str], sys_prompt)],
             tokenize=False,
             add_generation_prompt=False,
             add_special_tokens=False,
@@ -160,8 +160,8 @@ def math_data_processor(
     loss_multiplier = 1.0
     if length > max_seq_length:
         # make smaller and mask out
-        for message in message_log:
-            message["token_ids"] = message["token_ids"][
+        for indiv_message in message_log:
+            indiv_message["token_ids"] = indiv_message["token_ids"][
                 : min(4, max_seq_length // len(message_log))
             ]
         loss_multiplier = 0.0

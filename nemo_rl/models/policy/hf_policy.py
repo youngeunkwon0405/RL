@@ -33,11 +33,12 @@ from nemo_rl.models.policy.fsdp1_policy_worker import FSDP1PolicyWorker
 from nemo_rl.models.policy.interfaces import (
     LogprobOutputSpec,
     PolicyInterface,
+    ColocatablePolicyInterface,
     ReferenceLogprobOutputSpec,
 )
 
 
-class HfPolicy(PolicyInterface, GenerationInterface):
+class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
     def __init__(
         self,
         cluster: RayVirtualCluster,
