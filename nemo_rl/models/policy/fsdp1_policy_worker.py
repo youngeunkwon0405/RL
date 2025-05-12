@@ -17,7 +17,7 @@ import os
 import warnings
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Generator, Optional
+from typing import Any, Generator, Optional, cast
 
 import ray
 import torch
@@ -181,7 +181,9 @@ class FSDP1PolicyWorker:
 
         if "scheduler" in self.cfg and self.optimizer is not None:
             if isinstance(self.cfg["scheduler"], dict):
-                scheduler_cls = import_class_from_path(self.cfg["scheduler"]["name"])
+                scheduler_cls = import_class_from_path(
+                    cast(str, self.cfg["scheduler"]["name"])
+                )
                 self.scheduler = scheduler_cls(
                     self.optimizer, **self.cfg["scheduler"]["kwargs"]
                 )
@@ -190,7 +192,7 @@ class FSDP1PolicyWorker:
                 for scheduler_cfg in self.cfg["scheduler"]:
                     if "name" in scheduler_cfg:
                         schedulers.append(
-                            import_class_from_path(scheduler_cfg["name"])(
+                            import_class_from_path(cast(str, scheduler_cfg["name"]))(
                                 self.optimizer, **scheduler_cfg["kwargs"]
                             )
                         )
@@ -807,7 +809,7 @@ class FSDP1PolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def prepare_weights_for_ipc(self) -> dict[str, int]:
+    def prepare_weights_for_ipc(self) -> list[tuple[str, int]]:
         from torch.distributed.fsdp.api import ShardedStateDictConfig, StateDictType
 
         # If the model is not FSDP, then we need to manually move it to the GPU

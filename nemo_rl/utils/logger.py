@@ -419,7 +419,7 @@ class RayGpuMonitorLogger:
             return {}
 
     def _fetch_and_parse_metrics(
-        self, node_idx: int, metric_address: str, parser_fn: Callable[Any, int]
+        self, node_idx: int, metric_address: str, parser_fn: Callable
     ):
         """Fetch metrics from a node and parse GPU metrics.
 
@@ -574,7 +574,7 @@ class Logger(LoggerInterface):
             logger.log_hyperparams(params)
 
     def log_batched_dict_as_jsonl(
-        self, to_log: BatchedDataDict | dict[str, Any], filename: str
+        self, to_log: BatchedDataDict[Any] | dict[str, Any], filename: str
     ) -> None:
         """Log a list of dictionaries to a JSONL file.
 
@@ -599,7 +599,7 @@ class Logger(LoggerInterface):
 
         print(f"Logged data to {filepath}")
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Clean up resources when the logger is destroyed."""
         if self.gpu_monitor:
             self.gpu_monitor.stop()
@@ -631,9 +631,9 @@ def flatten_dict(d: Mapping[str, Any], sep: str = ".") -> dict[str, Any]:
         {'a.0.b': 1, 'a.1.c': 2}
         ```
     """
-    result = {}
+    result: dict[str, Any] = {}
 
-    def _flatten(d, parent_key=""):
+    def _flatten(d: Mapping[str, Any], parent_key: str = "") -> None:
         for key, value in d.items():
             new_key = f"{parent_key}{sep}{key}" if parent_key else key
 
@@ -830,7 +830,7 @@ def print_message_log_samples(
         message_parts = []
         for msg in message_log:
             role = cast(str, msg.get("role", "unknown")).upper()
-            content = msg.get("content", "")
+            content = cast(str, msg.get("content", ""))
 
             # Choose color based on role - using muted, elegant colors
             if role == "SYSTEM":

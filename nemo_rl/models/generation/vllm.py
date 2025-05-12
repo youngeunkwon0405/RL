@@ -15,7 +15,7 @@
 import copy
 import gc
 import os
-from typing import Any, NotRequired, Optional, TypedDict, Union
+from typing import Any, NotRequired, Optional, TypedDict, Union, cast
 
 import ray
 import torch
@@ -46,14 +46,14 @@ class VllmSpecificArgs(TypedDict):
 
 class VllmConfig(GenerationConfig):
     vllm_cfg: VllmSpecificArgs
-    vllm_kwargs: NotRequired[dict]
+    vllm_kwargs: NotRequired[dict[str, Any]]
 
 
 @ray.remote
 class VllmGenerationWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.VLLM
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
 
         This makes it easier to identify which worker is producing specific log messages.
@@ -62,8 +62,8 @@ class VllmGenerationWorker:
 
     @staticmethod
     def configure_worker(
-        num_gpus: int | float, bundle_indices: Optional[tuple] = None
-    ) -> tuple[dict, dict, dict]:
+        num_gpus: int | float, bundle_indices: Optional[tuple[int, list[int]]] = None
+    ) -> tuple[dict[str, Any], dict[str, str], dict[str, Any]]:
         """Provides complete worker configuration for vLLM tensor parallelism.
 
         This method configures the worker based on its role in tensor parallelism,
@@ -80,9 +80,9 @@ class VllmGenerationWorker:
               - 'init_kwargs': Parameters to pass to __init__ of the worker
         """
         # Initialize configuration
-        resources = {"num_gpus": num_gpus}
-        init_kwargs = {}
-        env_vars = {}
+        resources: dict[str, Any] = {"num_gpus": num_gpus}
+        init_kwargs: dict[str, Any] = {}
+        env_vars: dict[str, str] = {}
 
         local_bundle_indices = None
         if bundle_indices is not None:
@@ -119,7 +119,7 @@ class VllmGenerationWorker:
     def __init__(
         self,
         config: VllmConfig,
-        bundle_indices: Optional[list] = None,
+        bundle_indices: Optional[list[int]] = None,
         fraction_of_gpus: float = 1.0,
         seed: Optional[int] = None,
     ):
@@ -160,7 +160,7 @@ class VllmGenerationWorker:
                 "vLLM is not installed. Please check that VllmGenerationWorker.DEFAULT_PY_EXECUTABLE covers the vllm dependency. "
                 "If you are working interactively, you can install by running  `uv sync --extra vllm` anywhere in the repo."
             )
-        vllm_kwargs: dict = copy.deepcopy(self.cfg.get("vllm_kwargs", {}))
+        vllm_kwargs: dict[str, Any] = copy.deepcopy(self.cfg.get("vllm_kwargs", {}))
 
         # Special handling for tensor parallel case
         if self.tensor_parallel_size > 1:
@@ -203,7 +203,7 @@ class VllmGenerationWorker:
             **vllm_kwargs,
         )
 
-    def is_alive(self):
+    def is_alive(self) -> bool:
         """Check if the worker is alive."""
         return True
 
@@ -238,7 +238,7 @@ class VllmGenerationWorker:
         input_ids = data["input_ids"]
         input_lengths = data["input_lengths"]
         # this function requires all generations have the same stop strings, so we collect all here
-        batch_stop_strings: list = data.get("stop_strings", [])
+        batch_stop_strings: list[list[str]] = data.get("stop_strings", [])
         stop_strings: set[str] = set()
         for sample_stop_strings in batch_stop_strings:
             if sample_stop_strings:
@@ -375,7 +375,7 @@ class VllmGenerationWorker:
                 - texts: List of generated text responses
         """
         # Extract stop_strings if provided, else use default from config
-        batch_stop_strings = data.get(
+        batch_stop_strings: list[list[str]] = data.get(
             "stop_strings", [self.cfg.get("stop_strings")] * len(data["prompts"])
         )
 
@@ -389,7 +389,7 @@ class VllmGenerationWorker:
         if self.cfg.get("stop_strings", None):
             stop_strings.update(self.cfg["stop_strings"])
 
-        stop_strings: Optional[list[str]] = (
+        stop_strings: list[str] | None = (
             list(stop_strings) if len(stop_strings) > 0 else None
         )
 
@@ -418,7 +418,7 @@ class VllmGenerationWorker:
         )
         return return_data
 
-    def shutdown(self):
+    def shutdown(self) -> bool:
         """Clean up vLLM resources."""
         try:
             # Clear caches and free memory
@@ -438,13 +438,13 @@ class VllmGenerationWorker:
         assert self.llm is not None, (
             "Attempting to report device id with either an uninitialized vLLM or non-model-owner"
         )
-        return self.llm.collective_rpc("report_device_id", args=tuple())[0]
+        return cast(str, self.llm.collective_rpc("report_device_id", args=tuple())[0])
 
-    def update_weights_from_ipc_handles(self, ipc_handles):
+    def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         """Update weights from IPC handles by delegating to the vLLM Worker implementation.
 
         Args:
-            ipc_handles (dict): Dictionary mapping device UUIDs to parameter IPC handles.
+            ipc_handles (dict): Dictionary mapping device UUIDs (str) to parameter IPC handles.
 
         Returns:
             bool: True if weights were successfully updated, False otherwise.
@@ -462,7 +462,7 @@ class VllmGenerationWorker:
             print(f"Error updating weights: {e}")
             return False
 
-    def sleep(self):
+    def sleep(self) -> None:
         assert self.llm is not None, (
             "Attempting to sleep with either an uninitialized vLLM or non-model-owner"
         )
@@ -472,7 +472,7 @@ class VllmGenerationWorker:
         gc.collect()
         torch.cuda.empty_cache()
 
-    def wake_up(self, **kwargs):
+    def wake_up(self, **kwargs: Any) -> None:
         assert self.llm is not None, (
             "Attempting to wake up with either an uninitialized vLLM or non-model-owner"
         )
@@ -534,7 +534,9 @@ class VllmGeneration(GenerationInterface):
         # Number of data parallel groups is the number of tied worker groups
         self.dp_size = self.worker_group.group_count
 
-    def _get_tied_worker_bundle_indices(self, cluster):
+    def _get_tied_worker_bundle_indices(
+        self, cluster: RayVirtualCluster
+    ) -> list[tuple[int, list[int]]]:
         """Calculate bundle indices for tensor parallel workers."""
         # Get the placement groups (nodes) from the cluster
         placement_groups = cluster.get_placement_groups()
@@ -681,13 +683,13 @@ class VllmGeneration(GenerationInterface):
             print(f"Error during policy shutdown: {e}")
             return False
 
-    def update_weights(self, ipc_handles):
+    def update_weights(self, ipc_handles: dict[str, Any]) -> bool:
         """Update weights of the policy using IPC handles, considering tensor parallelism.
 
         For tp > 1, only the leader in each tensor parallel tied worker group will update weights.
 
         Args:
-            ipc_handles (dict): Dictionary mapping device UUIDs to parameter IPC handles.
+            ipc_handles (dict): Dictionary mapping device UUIDs (str) to parameter IPC handles.
 
         Returns:
             bool: True if weights were successfully updated, False otherwise.
@@ -709,7 +711,7 @@ class VllmGeneration(GenerationInterface):
             print(f"Error updating weights: {e}")
             return False
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Shuts down the worker groups when the object is deleted or is garbage collected.
 
         This is an extra safety net in case the user forgets to call shutdown() and the pointer to

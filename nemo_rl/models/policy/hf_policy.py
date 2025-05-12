@@ -269,7 +269,7 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
         # Placeholder implementation
         pass
 
-    def prepare_weights_for_ipc(self) -> dict[str, int]:
+    def prepare_weights_for_ipc(self) -> list[tuple[str, int]]:
         """Prepare the weights for IPC.
 
         Returns:
@@ -279,7 +279,7 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             "prepare_weights_for_ipc", only_on="all_tied_workers"
         )
         # only get the first worker's result is enough since all workers will have the same result
-        return cast(dict[str, Any], ray.get(futures)[0])
+        return cast(list[tuple[str, int]], ray.get(futures)[0])
 
     def get_weights_ipc_handles(self, keys: list[str]) -> dict[str, Any]:
         """Fetch weight IPC handles from all workers.

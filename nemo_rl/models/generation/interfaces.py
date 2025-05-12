@@ -208,3 +208,7 @@ class GenerationInterface(ABC):
     @abstractmethod
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         pass
+
+    def update_weights(self, ipc_handles: dict[str, Any]) -> bool:
+        """Update the model weights from the given IPC handles."""
+        raise NotImplementedError

@@ -16,7 +16,7 @@ import gc
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Generator, Iterable, Optional, Union
+from typing import Any, Generator, Iterable, Optional, Union, cast
 
 import ray
 import torch
@@ -191,7 +191,9 @@ class DTensorPolicyWorker:
             self.model = self.move_buffer_to_device(self.model, "cpu")
 
         # used for streaming update inference engine weights
-        self._held_sharded_state_dict_reference = None
+        self._held_sharded_state_dict_reference: Optional[dict[str, torch.Tensor]] = (
+            None
+        )
         self._held_streamed_param_reference = None
 
         if init_reference_model:
@@ -212,7 +214,9 @@ class DTensorPolicyWorker:
 
         if "scheduler" in self.cfg and self.optimizer is not None:
             if isinstance(self.cfg["scheduler"], dict):
-                scheduler_cls = import_class_from_path(self.cfg["scheduler"]["name"])
+                scheduler_cls = import_class_from_path(
+                    cast(str, self.cfg["scheduler"]["name"])
+                )
                 self.scheduler = scheduler_cls(
                     self.optimizer, **self.cfg["scheduler"]["kwargs"]
                 )
@@ -221,7 +225,7 @@ class DTensorPolicyWorker:
                 for scheduler_cfg in self.cfg["scheduler"]:
                     if "name" in scheduler_cfg:
                         schedulers.append(
-                            import_class_from_path(scheduler_cfg["name"])(
+                            import_class_from_path(cast(str, scheduler_cfg["name"]))(
                                 self.optimizer, **scheduler_cfg["kwargs"]
                             )
                         )
@@ -627,9 +631,11 @@ class DTensorPolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def prepare_weights_for_ipc(self) -> dict[str, int]:
+    def prepare_weights_for_ipc(self) -> list[tuple[str, int]]:
         self.model = self.move_to_cuda(self.model)
-        self._held_sharded_state_dict_reference = self.model.state_dict()
+        self._held_sharded_state_dict_reference: dict[str, torch.Tensor] = (
+            self.model.state_dict()
+        )
         # Collect info for streaming multiple tensors
         state_dict_info = []
         for name, tensor in self._held_sharded_state_dict_reference.items():
@@ -639,7 +645,7 @@ class DTensorPolicyWorker:
         return state_dict_info
 
     @torch.no_grad()
-    def get_weights_ipc_handles(self, keys: Iterable[str]):
+    def get_weights_ipc_handles(self, keys: Iterable[str]) -> dict[str, Any]:
         from torch.multiprocessing.reductions import reduce_tensor
 
         assert self._held_sharded_state_dict_reference is not None, (
@@ -671,7 +677,7 @@ class DTensorPolicyWorker:
 
         return {device_uuid: all_handles}
 
-    def prepare_for_lp_inference(self):
+    def prepare_for_lp_inference(self) -> None:
         if not self.cpu_offload:
             self.move_to_cuda(self.model)
         else:
@@ -680,7 +686,7 @@ class DTensorPolicyWorker:
         self.model.eval()
         self.offload_before_refit()
 
-    def prepare_for_training(self, *args, **kwargs):
+    def prepare_for_training(self, *args, **kwargs) -> None:
         # onload models and optimizer state to cuda
         if not self.cpu_offload:
             self.move_to_cuda(self.model)
@@ -707,7 +713,7 @@ class DTensorPolicyWorker:
         torch.cuda.empty_cache()
 
     @torch.no_grad()
-    def offload_before_refit(self):
+    def offload_before_refit(self) -> None:
         """Offload the optimizer to the CPU."""
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
@@ -720,7 +726,7 @@ class DTensorPolicyWorker:
         torch.cuda.empty_cache()
 
     @torch.no_grad()
-    def offload_after_refit(self):
+    def offload_after_refit(self) -> None:
         # Offload as much as possible on the CPU
         self.model = self.move_to_cpu(self.model)
         self.model.eval()
@@ -745,11 +751,13 @@ class DTensorPolicyWorker:
             f"GPU Memory after optimizer offload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
 
-    def move_to_device(self, model, device):
+    def move_to_device(self, model: nn.Module, device: str | torch.device) -> nn.Module:
         model = self.move_buffer_to_device(model, device)
         return model.to(device)
 
-    def move_buffer_to_device(self, model: nn.Module, device: str) -> nn.Module:
+    def move_buffer_to_device(
+        self, model: nn.Module, device: str | torch.device
+    ) -> nn.Module:
         # FSDP modules do not move buffers to the device automatically
         for v in model.buffers():
             v.data = v.data.to(device)
@@ -800,5 +808,5 @@ class DTensorPolicyWorker:
             optimizer_path=optimizer_path,
         )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Shutdown the policy."""

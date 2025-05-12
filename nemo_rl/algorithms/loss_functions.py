@@ -157,7 +157,6 @@ class ClippedPGLossFn(LossFunction):
             ).squeeze(-1)
 
         # Calculate KL regularization.
-        kl: float | Tensor
         if self.reference_policy_kl_penalty != 0:
             if self.use_on_policy_kl_approximation:
                 # See: docs/guides/grpo.md#on-policy-kl-approximation
@@ -188,7 +187,7 @@ class ClippedPGLossFn(LossFunction):
                     global_normalization_factor=total_valid_tokens_or_seqs,
                 )
         else:
-            kl = 0.0
+            kl = torch.tensor(0.0)
 
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:

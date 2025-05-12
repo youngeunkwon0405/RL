@@ -102,7 +102,9 @@ class ColocatablePolicyInterface(PolicyInterface):
         pass
 
     @abstractmethod
-    def prepare_weights_for_ipc(self, *args: Any, **kwargs: Any) -> dict[str, int]:
+    def prepare_weights_for_ipc(
+        self, *args: Any, **kwargs: Any
+    ) -> list[tuple[str, int]]:
         pass
 
     @abstractmethod

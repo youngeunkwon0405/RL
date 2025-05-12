@@ -23,7 +23,7 @@ TokenizerType = PreTrainedTokenizerBase
 
 def configure_generation_config(
     config: GenerationConfig, tokenizer: TokenizerType, is_eval=False
-):
+) -> GenerationConfig:
     """Apply specific configurations to generation config."""
     # tokenizer setting
     config["pad_token_id"] = tokenizer.pad_token_id
