@@ -34,7 +34,7 @@ def parse_args():
     parser.add_argument("--script", type=str, help="Path to the Python script to run")
     parser.add_argument("--config", type=str, help="Path to the base YAML config file")
     parser.add_argument("--sweep", type=str, help="Path to the sweep config YAML file")
-    parser.add_argument("--nodes", type=int, default=1, help="Number of nodes to use")
+    parser.add_argument("--nodes", type=int, default=None, help="Number of nodes to use")
     parser.add_argument("--time", type=str, default="4:0:0", help="Time limit for the job")
     parser.add_argument("--account", type=str, default=ACCOUNT, help="Slurm account to use")
     parser.add_argument("--partition", type=str, default="batch", help="Slurm partition to use")
@@ -48,8 +48,39 @@ def parse_args():
 
 def load_yaml(file_path: str) -> Dict[str, Any]:
     """Load a YAML file."""
-    with open(file_path, "r") as f:
-        return yaml.safe_load(f)
+    try:
+        with open(file_path, "r") as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Warning: Config file not found at {file_path}. Using default node count.")
+        return {}
+    except yaml.YAMLError as e:
+        print(f"Warning: Error parsing YAML file {file_path}: {e}. Using default node count.")
+        return {}
+
+
+def get_num_nodes(config_path: Optional[str], cli_nodes: Optional[int]) -> int:
+    """
+    Determine the number of nodes to use.
+    Reads from the config file (cluster.num_nodes) as default,
+    overrides with CLI argument if provided.
+    """
+    # Prioritize CLI argument
+    if cli_nodes is not None:
+        return cli_nodes
+    
+    config_nodes = None
+    if config_path:
+        config_data = load_yaml(config_path)
+        config_nodes = config_data.get("cluster", {}).get("num_nodes")
+
+    # Use config value if valid
+    if isinstance(config_nodes, int) and config_nodes > 0:
+        return config_nodes
+        
+    # Default to 1 node if not specified or invalid
+    print("Warning: Number of nodes not specified in CLI or config, defaulting to 1.")
+    return 1
 
 
 def verify_with_sweep(sweep_config: Dict[str, Any], script_path: Optional[str], config_path: Optional[str]) -> Tuple[str, str]:
@@ -195,7 +226,8 @@ def launch_experiment(
     default_args = [
         f"logger.log_dir={log_dir}",
         "logger.wandb_enabled=True",
-        f"checkpointing.checkpoint_dir={checkpoint_dir}"
+        f"checkpointing.checkpoint_dir={checkpoint_dir}",
+        f"cluster.num_nodes={nodes}"
     ]
     all_args.extend(default_args)
     extra_overrides = parse_extra_args(all_args)
@@ -277,6 +309,11 @@ def main():
         sweep_config = load_yaml(args.sweep)
         script_path, config_path = verify_with_sweep(sweep_config, script_path, config_path)
         param_combinations = generate_parameter_combinations(sweep_config)
+    elif not script_path:
+         raise ValueError("Script path must be provided via --script or sweep config")
+
+    # Determine the number of nodes after potentially getting config_path from sweep
+    num_nodes = get_num_nodes(config_path, args.nodes)
     
     # Print header
     mode = "DRY RUN" if args.dry else "SUBMITTING"
@@ -297,7 +334,7 @@ def main():
             script=script_path,
             config=config_path,
             param_overrides=param_overrides,
-            nodes=args.nodes,
+            nodes=num_nodes,
             time=args.time,
             account=args.account,
             partition=args.partition,
