@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from collections import defaultdict
-from typing import Any, Optional, Union, cast, Type
+from typing import Any, Optional, Type, Union, cast
 
 import ray
 from transformers import PreTrainedTokenizerBase
@@ -37,6 +37,7 @@ from nemo_rl.models.policy.interfaces import (
 )
 
 PathLike = Union[str, "os.PathLike[Any]"]
+
 
 class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
     def __init__(
@@ -86,7 +87,9 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
         self.dp_size = self.worker_group.world_size // self.tensor_parallel_size
         self.cfg = config
 
-    def _get_tied_worker_bundle_indices(self, cluster: RayVirtualCluster) -> list[tuple[int, list[int]]]:
+    def _get_tied_worker_bundle_indices(
+        self, cluster: RayVirtualCluster
+    ) -> list[tuple[int, list[int]]]:
         """Calculate bundle indices for tensor parallel workers."""
         # Get the placement groups (nodes) from the cluster
         placement_groups = cluster.get_placement_groups()

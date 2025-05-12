@@ -28,6 +28,7 @@ FlatMessagesType = dict[str, Union[list[str], torch.Tensor]]
 PathLike = Union[str, "os.PathLike[Any]"]
 TokenizerType = PreTrainedTokenizerBase
 
+
 class DatumSpec(TypedDict):
     message_log: LLMMessageLogType
     length: int  # total (concatenated) length of the message tensors

@@ -645,7 +645,7 @@ class VllmGeneration(GenerationInterface):
         return combined
 
     def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
-        """Wake workers up"""
+        """Wake workers up."""
         try:
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(
@@ -659,7 +659,7 @@ class VllmGeneration(GenerationInterface):
             return False
 
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
-        """Sleep workers"""
+        """Sleep workers."""
         try:
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(

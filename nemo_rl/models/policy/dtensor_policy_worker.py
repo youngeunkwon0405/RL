@@ -16,7 +16,7 @@ import gc
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Iterable, Optional, Union, Generator
+from typing import Any, Generator, Iterable, Optional, Union
 
 import ray
 import torch
