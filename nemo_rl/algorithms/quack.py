@@ -171,14 +171,16 @@ def setup(
     print("\n▶ Setting up compute cluster...")
     assert actor_generation_config["backend"] == 'vllm', "Quack is pretty generation heavy, rerun with vllm backend."
     critic_generation_config["backend"] = 'vllm'
-    colocated_inference = True
+    max_colocated_worker_groups = 1 + \
+        int(actor_generation_config["backend"] == 'vllm') + \
+        int(critic_generation_config["backend"] == 'vllm')
     cluster = RayVirtualCluster(
         name="quack_policy_cluster",
         bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
         * cluster_config["num_nodes"],
         use_gpus=True,
         num_gpus_per_node=cluster_config["gpus_per_node"],
-        max_colocated_worker_groups=3,  # 3 worker groups for hf actor, vllm actor, and vllm critic
+        max_colocated_worker_groups=max_colocated_worker_groups,
     )
     print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
 
@@ -433,7 +435,7 @@ def quack_train(
                 )
                 # critic_batch = rl_collate_fn(critic_dataset)    # NOTE: we assuem critic dataset is small enough to fit into memory
 
-            print(f"▶ Generating *CRITIQUES* for batch of size {critic_batch.size}...")
+            print(f"▶ Generating *CRITIQUES* for dataset of size {len(critic_dataset)}...")
             with timer.time("prepare_critic_for_generation"):
                 if NEED_REFIT_CRITIC and CRITIC_GENERATION_STALE(step):
                     refit(
