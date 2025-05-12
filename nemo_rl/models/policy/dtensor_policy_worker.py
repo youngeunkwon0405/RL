@@ -756,13 +756,13 @@ class DTensorPolicyWorker:
 
         return model
 
-    def move_to_cuda(self, model):
+    def move_to_cuda(self, model: torch.nn.Module) -> torch.nn.Module:
         model = self.move_to_device(model, "cuda")
         gc.collect()
         torch.cuda.empty_cache()
         return model
 
-    def move_to_cpu(self, model):
+    def move_to_cpu(self, model: torch.nn.Module) -> torch.nn.Module:
         model = self.move_to_device(model, "cpu")
         gc.collect()
         torch.cuda.empty_cache()
@@ -773,7 +773,7 @@ class DTensorPolicyWorker:
         weights_path: str,
         optimizer_path: Optional[str] = None,
         tokenizer_path: Optional[str] = None,
-    ):
+    ) -> None:
         """Save a checkpoint of the model.
 
         the optimizer states are saved only if `optimizer` and `optimizer_path` are provided.
@@ -788,7 +788,9 @@ class DTensorPolicyWorker:
             tokenizer_path=tokenizer_path,
         )
 
-    def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
+    def load_checkpoint(
+        self, weights_path: str, optimizer_path: Optional[str] = None
+    ) -> None:
         """Load a checkpoint into the model."""
         load_checkpoint(
             model=self.model,

@@ -17,7 +17,7 @@ import os
 import warnings
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
-from typing import Any, Optional
+from typing import Any, Generator, Optional
 
 import ray
 import torch
@@ -61,7 +61,7 @@ from nemo_rl.utils.native_checkpoint import (
 class FSDP1PolicyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
 
         This makes it easier to identify which worker is producing specific log messages.
@@ -124,7 +124,7 @@ class FSDP1PolicyWorker:
         #    (Initialize device mesh, shard submodules, then shard entire model)
         # ------------------------------------------------
 
-        def do_fsdp(model):
+        def do_fsdp(model: torch.nn.Module) -> torch.nn.Module:
             if world_size == 1:
                 print(
                     "[INFO] Using a single GPU - skipping FSDP wrapper to avoid GPU memory offloading issues"
@@ -222,19 +222,19 @@ class FSDP1PolicyWorker:
                 "No weights path provided. Starting from scratch (default policy init)"
             )
 
-    def is_alive(self):
+    def is_alive(self) -> bool:
         return True
 
-    def reset_peak_memory_stats(self):
+    def reset_peak_memory_stats(self) -> None:
         torch.cuda.reset_peak_memory_stats()
 
-    def get_gpu_info(self):
+    def get_gpu_info(self) -> dict[str, Any]:
         """Return information about the GPU being used by this worker."""
         return get_gpu_info(self.model)
 
     def train(
         self,
-        data: BatchedDataDict,
+        data: BatchedDataDict[Any],
         loss_fn: LossFunction,
         eval_mode: bool = False,
         gbs: Optional[int] = None,
@@ -271,7 +271,7 @@ class FSDP1PolicyWorker:
             losses = []
             all_mb_metrics = []
             for gb_start in range(0, dataset_size, local_gbs):
-                global_batch: BatchedDataDict = data.slice(
+                global_batch: BatchedDataDict[Any] = data.slice(
                     gb_start, gb_start + local_gbs
                 )
 
@@ -405,7 +405,7 @@ class FSDP1PolicyWorker:
             return metrics
 
     def get_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
+        self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a batch of data.
 
@@ -486,7 +486,7 @@ class FSDP1PolicyWorker:
         return return_data
 
     @contextmanager
-    def use_reference_model(self):
+    def use_reference_model(self) -> Generator[None, None, None]:
         """Context manager that temporarily swaps the reference model and active model.
 
         On entry: Moves model to CPU, moves reference_model to CUDA. Swaps the references
@@ -518,7 +518,7 @@ class FSDP1PolicyWorker:
             torch.cuda.empty_cache()
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict, micro_batch_size: Optional[int] = None
+        self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs from the reference policy for a batch of data.
 
@@ -780,7 +780,7 @@ class FSDP1PolicyWorker:
 
             return return_data
 
-    def _add_noise_to_weights(self):
+    def _add_noise_to_weights(self) -> None:
         """Add small Gaussian noise to the weights of the model. Note that this is used for testing purposes only."""
         # TODO @sahilj: do this without a summon (maybe FSDP2)
         noise_std = 0.01  # Standard deviation for the noise
@@ -807,7 +807,7 @@ class FSDP1PolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def prepare_weights_for_ipc(self):
+    def prepare_weights_for_ipc(self) -> dict[str, int]:
         from torch.distributed.fsdp.api import ShardedStateDictConfig, StateDictType
 
         # If the model is not FSDP, then we need to manually move it to the GPU
@@ -834,7 +834,7 @@ class FSDP1PolicyWorker:
         return state_dict_info
 
     @torch.no_grad()
-    def get_weights_ipc_handles(self, keys):
+    def get_weights_ipc_handles(self, keys: list[str]) -> dict[str, Any]:
         from torch.distributed.tensor import DTensor
         from torch.multiprocessing.reductions import reduce_tensor
 
@@ -867,12 +867,12 @@ class FSDP1PolicyWorker:
 
         return {device_uuid: all_handles}
 
-    def prepare_for_lp_inference(self):
+    def prepare_for_lp_inference(self) -> None:
         self.model = self.manual_load_to_gpu(self.model)
         self.model.eval()
         self.offload_before_refit()
 
-    def prepare_for_training(self, *args, **kwargs):
+    def prepare_for_training(self, *args: Any, **kwargs: Any) -> None:
         # onload models and optimizer state to cuda
         self.model = self.manual_load_to_gpu(self.model)
         self.model.train()
@@ -933,7 +933,7 @@ class FSDP1PolicyWorker:
             f"GPU Memory after refit complete: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
 
-    def manual_offload_to_cpu(self, model):
+    def manual_offload_to_cpu(self, model: torch.nn.Module) -> torch.nn.Module:
         if self.cfg["fsdp_offload_enabled"]:
             return model
 
@@ -951,7 +951,7 @@ class FSDP1PolicyWorker:
 
         return model
 
-    def manual_load_to_gpu(self, model):
+    def manual_load_to_gpu(self, model: torch.nn.Module) -> torch.nn.Module:
         if self.cfg["fsdp_offload_enabled"]:
             return model
 
@@ -974,7 +974,7 @@ class FSDP1PolicyWorker:
         weights_path: str,
         optimizer_path: Optional[str] = None,
         tokenizer_path: Optional[str] = None,
-    ):
+    ) -> None:
         """Save a checkpoint of the model.
 
         The checkpoint is saved in the following format:

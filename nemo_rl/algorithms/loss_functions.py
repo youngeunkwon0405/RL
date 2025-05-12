@@ -110,7 +110,7 @@ class ClippedPGLossFn(LossFunction):
         next_token_logits: Tensor,
         data: BatchedDataDict[ClippedPGLossDataDict],
         total_valid_tokens_or_seqs: torch.Tensor,
-    ) -> tuple[Tensor, dict]:
+    ) -> tuple[Tensor, dict[str, Any]]:
         """Clipped Policy Gradient RL loss function."""
         token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
@@ -157,6 +157,7 @@ class ClippedPGLossFn(LossFunction):
             ).squeeze(-1)
 
         # Calculate KL regularization.
+        kl: float | Tensor
         if self.reference_policy_kl_penalty != 0:
             if self.use_on_policy_kl_approximation:
                 # See: docs/guides/grpo.md#on-policy-kl-approximation
@@ -187,7 +188,7 @@ class ClippedPGLossFn(LossFunction):
                     global_normalization_factor=total_valid_tokens_or_seqs,
                 )
         else:
-            kl = 0
+            kl = 0.0
 
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
@@ -286,11 +287,11 @@ class NLLLoss(LossFunction):
     def __call__(
         self,
         next_token_logits: Tensor,
-        data: BatchedDataDict,
+        data: BatchedDataDict[Any],
         total_valid_tokens_or_seqs: torch.Tensor,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
-    ) -> tuple[Tensor, dict]:
+    ) -> tuple[Tensor, dict[str, Any]]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         token_mask = data["token_mask"][:, 1:]
@@ -420,7 +421,7 @@ class DPOLossFn(LossFunction):
 
         self.loss_type = LossType.SEQUENCE_LEVEL
 
-    def split_output_tensor(self, tensor: Tensor):
+    def split_output_tensor(self, tensor: Tensor) -> tuple[Tensor, Tensor]:
         return tensor[::2], tensor[1::2]
 
     def _preference_loss(
@@ -495,7 +496,7 @@ class DPOLossFn(LossFunction):
         next_token_logits: Tensor,
         data: BatchedDataDict[DPOLossDataDict],
         total_valid_tokens_or_seqs: Tensor,
-    ) -> tuple[Tensor, dict]:
+    ) -> tuple[Tensor, dict[str, Any]]:
         sft_loss_chosen = torch.tensor(0.0)
         if self.sft_loss_weight > 0:
             sft_loss, _ = self.sft_loss(

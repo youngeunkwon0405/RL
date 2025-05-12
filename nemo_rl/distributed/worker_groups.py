@@ -34,7 +34,7 @@ class MultiWorkerFuture:
     used_workers: list[int]
     respect_tied_workers: bool = True
 
-    def get_results(self, worker_group) -> list[Any]:
+    def get_results(self, worker_group: "RayWorkerGroup") -> list[Any]:
         """Get results from the futures, optionally respecting tied workers.
 
         When respect_tied_workers is True, this method deduplicates results by returning
@@ -81,7 +81,7 @@ class MultiWorkerFuture:
 
 
 class RayWorkerBuilder:
-    def __init__(self, ray_actor_class: type, *args, **kwargs):
+    def __init__(self, ray_actor_class: type, *args: Any, **kwargs: Any):
         self.ray_actor_class = ray_actor_class
         self.args = args
         self.kwargs = kwargs
@@ -90,10 +90,10 @@ class RayWorkerBuilder:
         self,
         placement_group: PlacementGroup,
         placement_group_bundle_index: int,
-        num_gpus: int,
-        bundle_indices: Optional[tuple] = None,
-        **extra_options: dict[str, Any],
-    ):
+        num_gpus: float | int,
+        bundle_indices: Optional[tuple[int, list[int]]] = None,
+        **extra_options: Any,
+    ) -> ray.actor.ActorHandle:
         """Create a Ray worker with the specified configuration.
 
         Order of precedence for worker options configuration (from lowest to highest):
@@ -107,7 +107,7 @@ class RayWorkerBuilder:
         Args:
             placement_group: Ray placement group for resource allocation
             placement_group_bundle_index: Index of the bundle in the placement group
-            num_gpus: Number of GPUs to allocate to this worker
+            num_gpus: Number of GPUs to allocate to this worker (can be fractional)
             bundle_indices: Tuple of (node_idx, local_bundle_indices) for tensor parallelism (if applicable)
             extra_options: Additional options to pass to the Ray actor (may be overridden by actor's configure_worker(...) method)
 
@@ -192,7 +192,7 @@ class RayWorkerGroup:
         remote_worker_builder: RayWorkerBuilder,
         workers_per_node: Optional[Union[int, list[int]]] = None,
         name_prefix: str = "",
-        bundle_indices_list: Optional[list[tuple]] = None,
+        bundle_indices_list: Optional[list[tuple[int, list[int]]]] = None,
     ):
         """Initialize a group of distributed Ray workers.
 
@@ -206,7 +206,7 @@ class RayWorkerGroup:
                                Each tuple defines a tied group of workers placed on the same node.
                                If provided, workers_per_node is ignored.
         """
-        self._workers: list[ray.ObjectRef] = []
+        self._workers: list[ray.actor.ActorHandle] = []
         self._worker_metadata: list[dict[str, Any]] = []
         self.cluster = cluster
         self.name_prefix = name_prefix
@@ -259,8 +259,10 @@ class RayWorkerGroup:
         )
 
     def _create_workers_from_bundle_indices(
-        self, remote_worker_builder, bundle_indices_list
-    ):
+        self,
+        remote_worker_builder: RayWorkerBuilder,
+        bundle_indices_list: list[tuple[int, list[int]]],
+    ) -> None:
         """Create workers based on explicit bundle indices for tied worker groups.
 
         Args:
@@ -355,15 +357,15 @@ class RayWorkerGroup:
             self.tied_workers_groups.append(current_group)
 
     @property
-    def workers(self):
+    def workers(self) -> list[ray.actor.ActorHandle]:
         return self._workers
 
     @property
-    def worker_metadata(self):
+    def worker_metadata(self) -> list[dict[str, Any]]:
         return self._worker_metadata
 
     @property
-    def group_count(self):
+    def group_count(self) -> int:
         """Number of tied worker groups."""
         return len(self.tied_workers_groups)
 
@@ -373,7 +375,7 @@ class RayWorkerGroup:
         data: list[SlicedDataDict],
         common_kwargs: Optional[dict[str, Any]] = None,
         only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
-    ):
+    ) -> MultiWorkerFuture:
         """Run a method on all workers in parallel with different data.
 
         Args:
@@ -458,10 +460,10 @@ class RayWorkerGroup:
     def run_all_workers_single_data(
         self,
         method_name: str,
-        *args,
+        *args: Any,
         only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> list[ray.ObjectRef]:
         """Run a method on all workers in parallel with the same data.
 
         Args:
@@ -578,7 +580,7 @@ class RayWorkerGroup:
 
         return success
 
-    def print_worker_layout(self):
+    def print_worker_layout(self) -> None:
         """Prints a visual representation of the worker layout across the virtual cluster.
 
         This shows which workers are assigned to which nodes and GPUs.

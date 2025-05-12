@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Mapping, Optional, TypedDict, cast
+from typing import Any, Callable, Mapping, Optional, TypedDict, cast
 
 import ray
 import requests
@@ -220,7 +220,7 @@ class RayGpuMonitorLogger:
         self.collection_thread: Optional[threading.Thread] = None
         self.lock = threading.Lock()
 
-    def start(self):
+    def start(self) -> None:
         """Start the GPU monitoring thread."""
         if not ray.is_initialized():
             raise ValueError(
@@ -241,7 +241,7 @@ class RayGpuMonitorLogger:
             f"GPU monitoring started with collection interval={self.collection_interval}s, flush interval={self.flush_interval}s"
         )
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the GPU monitoring thread."""
         self.is_running = False
         if self.collection_thread:
@@ -251,7 +251,7 @@ class RayGpuMonitorLogger:
         self.flush()
         print("GPU monitoring stopped")
 
-    def _collection_loop(self):
+    def _collection_loop(self) -> None:
         """Main collection loop that runs in a separate thread."""
         while self.is_running:
             try:
@@ -418,7 +418,9 @@ class RayGpuMonitorLogger:
             print(f"Error collecting GPU metrics: {e}")
             return {}
 
-    def _fetch_and_parse_metrics(self, node_idx, metric_address, parser_fn):
+    def _fetch_and_parse_metrics(
+        self, node_idx: int, metric_address: str, parser_fn: Callable[Any, int]
+    ):
         """Fetch metrics from a node and parse GPU metrics.
 
         Args:
@@ -458,7 +460,7 @@ class RayGpuMonitorLogger:
             print(f"Error fetching metrics from {metric_address}: {e}")
             return {}
 
-    def flush(self):
+    def flush(self) -> None:
         """Flush collected metrics to the parent logger."""
         with self.lock:
             if not self.metrics_buffer:
@@ -747,7 +749,7 @@ def print_message_log_samples(
     discrete_lines.append("[bold bright_white]Discrete Reward Levels:[/]")
 
     # Get emoji for each reward level
-    def get_reward_emoji(reward):
+    def get_reward_emoji(reward: float) -> str:
         if reward >= 0.7:
             return "🔥"  # Excellent
         elif reward >= 0.3:
@@ -810,7 +812,7 @@ def print_message_log_samples(
     console.print("\n[bold bright_white]Sample Conversations[/]")
 
     # Helper function to safely render content that might have problematic markups
-    def safe_render(content, role_color):
+    def safe_render(content: str, role_color: str) -> str:
         # Fix common problematic patterns that might break Rich markup
         # Replace any standalone [/ without matching closing bracket
         content = content.replace("[/", "\\[/")

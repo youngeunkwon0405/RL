@@ -39,7 +39,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
     @classmethod
     def from_batches(
         cls: Type[Self],
-        batches: list[dict],
+        batches: list[dict[Any, Any]],
         pad_value_dict: Optional[dict[str, int]] = None,
     ) -> Self:
         """Given a list of batches, stack the tensors/lists within and put them in a single dictionary.
@@ -60,7 +60,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             list_of_tensors = [item[k] for item in batches]
 
             if isinstance(list_of_tensors[0], list):
-                tensor_or_list: list | torch.Tensor = [
+                tensor_or_list: list[Any] | torch.Tensor = [
                     item for sublist in list_of_tensors for item in sublist
                 ]
             elif all(x.ndim == 1 for x in list_of_tensors):
@@ -334,7 +334,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             return 0
         if not torch.is_tensor(self.data[key]):
             return len(self.data[key])
-        return self.data[key].shape[0]
+        return self.data[key].shape[0]  # type: ignore # it's a tensor here
 
     def to(self, device: str | torch.device) -> Self:
         """Move tensors in batched dict to device."""
@@ -365,7 +365,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                 )
         return selected_batch
 
-    def get_dict(self) -> dict:
+    def get_dict(self) -> dict[Any, Any]:
         """Get the underlying data dictionary."""
         return self.data
 

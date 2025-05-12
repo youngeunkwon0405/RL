@@ -26,7 +26,7 @@ from nemo_rl.models.policy import TokenizerConfig
 
 def calculate_kl_penalty_joschu2020(
     logprobs_policy: torch.Tensor, logprobs_reference: torch.Tensor
-):
+) -> torch.Tensor:
     """Calculates a per-token estimate of the KL Divergence between two log_probs.
 
     From Schulman 2020, always positive.
@@ -43,7 +43,7 @@ def calculate_baseline_and_std_per_prompt(
     rewards: torch.Tensor,
     valid_mask: torch.Tensor,
     leave_one_out_baseline: bool = True,
-):
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Function to compute a baseline for each (prompt, response) pair in the batch.
 
     The same baseline is calculated for each prompt. Samples set to 0 in 'valid_mask'
@@ -56,13 +56,13 @@ def calculate_baseline_and_std_per_prompt(
                                   the baseline is for (from RLOO https://arxiv.org/abs/2402.14740)
 
     Returns:
-    tensor (b,) of baselines on the same device as 'rewards'
+    tensor (b,), tensor (b,) of baselines and std on the same device as 'rewards'
     """
     unique_prompts = torch.unique(prompts, dim=0)
 
     baseline = torch.zeros_like(rewards)
     sq_baseline = torch.zeros_like(rewards)
-    reward_device = rewards.get_device()
+    reward_device: torch.device = rewards.get_device()
     if reward_device == -1:
         reward_device = torch.device("cpu")
 
@@ -108,9 +108,9 @@ def calculate_baseline_and_std_per_prompt(
     return baseline, std
 
 
-def surpress_user_warnings(f):
+def surpress_user_warnings(f):  # type: ignore
     @wraps(f)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args, **kwargs):  # type: ignore
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning)
             output = f(*args, **kwargs)
@@ -120,11 +120,11 @@ def surpress_user_warnings(f):
 
 
 def masked_mean(
-    values,
-    mask,
+    values: torch.Tensor,
+    mask: torch.Tensor,
     dim: Optional[int] = None,
     global_normalization_factor: Optional[torch.Tensor] = None,
-):
+) -> torch.Tensor:
     """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
     normalization_factor = (
         torch.sum(mask, dim=dim)
@@ -134,7 +134,7 @@ def masked_mean(
     return torch.sum(values * mask, dim=dim) / (normalization_factor + 1e-8)
 
 
-def set_seed(seed: int):
+def set_seed(seed: int) -> None:
     """Sets the seed for python, numpy, and pytorch."""
     random.seed(seed)
     np.random.seed(seed)
