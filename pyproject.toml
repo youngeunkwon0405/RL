@@ -27,6 +27,7 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "flash-attn",
 ]
 
 [tool.setuptools]
@@ -114,6 +115,7 @@ convention = "google"
 "__init__.py" = ["F401"]
 
 [tool.uv]
+no-build-isolation-package = ['flash-attn']
 # Users may use different link-modes depending on their scenario:
 #  --link-mode=hardlink (default on linux; may get warnings about switching to --link-mode copy if uv cache and venv on different file-systems)
 #  --link-mode=copy (slower but more reliable; supresses warning)

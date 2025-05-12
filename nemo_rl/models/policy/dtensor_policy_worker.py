@@ -141,7 +141,8 @@ class DTensorPolicyWorker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
-            torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
+            torch_dtype=self.dtype,
+            attn_implementation="flash_attention_2"
         )
         # caching since this property is not always preserved after FSDP
         self.num_tied_weights = len(find_tied_parameters(self.model))
@@ -250,6 +251,52 @@ class DTensorPolicyWorker:
         """Return information about the GPU being used by this worker."""
         return get_gpu_info(self.model)
 
+    def _pack_microbatch(mb):
+        # Build list of 1D position tensors
+        orig_seqlen = self.cfg['max_total_sequence_length']
+        max_seqlen = self.cfg['dynamic_batching']['train_mb_tokens']
+        position_ids = torch.cat([torch.arange(l) for l in mb["input_lengths"]])
+        position_ids = torch.nn.functional.pad(position_ids, (0, max_seqlen-position_ids.shape[0]), mode='constant', value=0.0)
+        position_ids = torch.unsqueeze(position_ids, dim=0)
+
+        input_ids_packed = []
+        for idx in range(mb['input_lengths'].shape[0]):
+            input_length = mb['input_lengths'][idx]
+            input_ids = mb['input_ids'][idx][:input_length]
+            input_ids_packed.append(input_ids)
+
+        input_ids_packed = torch.cat(input_ids_packed)
+        input_ids_packed = torch.nn.functional.pad(input_ids_packed, (0, max_seqlen-input_ids_packed.shape[0]), mode='constant', value=0.0)
+        input_ids_packed = torch.unsqueeze(input_ids_packed, dim=0)
+        input_ids = input_ids_packed
+
+        cu_seqlens = torch.cat(
+        (torch.tensor([0]).cuda(), mb['input_lengths'].cumsum(dim=0)), 
+        dim=0
+        )
+
+        flash_attn_kwargs = {
+            'cu_seq_lens_q': cu_seqlens,
+            'cu_seq_lens_k': cu_seqlens,
+            'max_length_q' : max(mb['input_lengths']).item(),
+            'max_length_k' : max(mb['input_lengths']).item()
+        }
+        return packed_input_ids, packed_position_ids, flash_attn_kwargs
+
+    def _unpack_tensor(tensor, mb):
+        packed_seqlen = tensor.shape[1]
+        splitsizes = mb['input_lengths'].tolist()
+        splitsizes.append(packed_seqlen - sum(splitsizes))
+        tensor_split = torch.split(tensor, tuple(splitsizes), dim=1)
+
+        tensor_stacked = []
+        for t in tensor_split[0:-1]:
+            padding_needed = orig_seqlen - t.shape[1]
+            tensor_stacked.append(
+                torch.nn.functional.pad(t, (0,0,0, padding_needed), mode='constant', value=0.0)
+                )
+        return torch.cat(tensor_stacked, dim=0)
+
     def train(
         self,
         data: BatchedDataDict,
@@ -333,13 +380,18 @@ class DTensorPolicyWorker:
                             dtype=torch.long,
                             device=input_ids.device,
                         )
-                        position_ids = torch.arange(
-                            seq_len, device=input_ids.device
-                        ).repeat(batch_size, 1)
+                        
+                        sequence_packing = True
+                        if sequence_packing:
+                            input_ids, position_ids, flash_attn_kwargs = _pack_microbatch(mb)
+                        else:
+                            # Default behavior for non-packed sequences
+                            position_ids = torch.arange(
+                                seq_len, device=input_ids.device
+                            ).repeat(batch_size, 1)
 
                         outputs = self.model(
                             input_ids=input_ids,
-                            attention_mask=attention_mask_input_all_ones,
                             position_ids=position_ids,
                             use_cache=False,
                         )
@@ -354,7 +406,10 @@ class DTensorPolicyWorker:
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
 
-                    loss, loss_metrics = loss_fn(logits, mb)
+                    if sequence_packing:
+                        logits = _unpack_tensor(logits, mb)
+
+                    loss, loss_metrics = loss_fn(logits, mb)    
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
                     loss_metrics["micro_batch_size"] = batch_size
@@ -652,6 +707,10 @@ class DTensorPolicyWorker:
         # Create handles for the tensors
         all_handles = []
         for key, p in converted_params.items():
+            #torch.compile wraps the model as "_orig_mod", so remove the prefix here
+            if key.startswith("_orig_mod."):
+                key = key.removeprefix("_orig_mod.")
+
             handle = reduce_tensor(p.detach())
             all_handles.append((key, handle))
 

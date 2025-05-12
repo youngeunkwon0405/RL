@@ -282,7 +282,7 @@ def _parallelize_model(
 
     func = PARALLIZE_FUNCTIONS[type(model)]
 
-    return func(
+    model = func(
         model,
         dp_mesh,
         tp_mesh,
@@ -291,6 +291,9 @@ def _parallelize_model(
         sequence_parallel,
         activation_checkpointing,
     )
+        
+    return model
+
 
 
 def to_local_if_dtensor(tensor: Union[torch.Tensor, DTensor]) -> torch.Tensor:

@@ -585,6 +585,7 @@ def grpo_train(
         print(
             f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
         )
+        import pdb; pdb.set_trace()
 
         print("\n⏱️  Timing:")
         # Display total time first, separately
