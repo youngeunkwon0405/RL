@@ -459,7 +459,7 @@ def quack_train(
                         max_rollout_turns=master_config["quack"]["max_rollout_turns"],
                         greedy=False,
                     )
-                    critic_micro_batch_list.append(critic_batch)
+                    critic_micro_batch_list.append(critic_micro_batch)
                 critic_batch = BatchedDataDict.from_batches(critic_micro_batch_list)
                 critic_generation.finish_generation()
                 
