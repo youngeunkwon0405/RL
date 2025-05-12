@@ -149,6 +149,7 @@ def run_env_eval(vllm_generation, dataloader, env, master_config, generation_cal
             prompts.append(content)
         # generate by vllm
         inputs = BatchedDataDict({"prompts": prompts})
+        
         outputs = vllm_generation.generate_text(inputs)["texts"]
 
         # append to message_log
