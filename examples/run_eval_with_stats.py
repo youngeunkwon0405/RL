@@ -175,6 +175,9 @@ def main():
     ) = setup(config, tokenizer, dataset)
 
     
+    for datapoint in dataloader:
+        print (datapoint)
+        import sys; sys.exit()
     online_stats_len = OnlineStats()
     def generation_callback(batch, env_return):
         for i in range(len(batch["message_log"])):
