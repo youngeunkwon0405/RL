@@ -191,8 +191,8 @@ def setup(
     actor_generation_config["model_name"] = actor_config["model_name"]
     critic_generation_config["model_name"] = actor_config["model_name"]
     # vllm generation
-    actor_generation = VllmGeneration(cluster=cluster, config=actor_generation_config)
-    critic_generation = VllmGeneration(cluster=cluster, config=critic_generation_config)
+    actor_generation = VllmGeneration(cluster=cluster, config=actor_generation_config, name_prefix="vllm_actor")
+    critic_generation = VllmGeneration(cluster=cluster, config=critic_generation_config, name_prefix="vllm_critic")
     # Worker groups are not initialized until the first call to run something on workergroups.
     # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
     actor_generation.finish_generation()
@@ -285,7 +285,6 @@ def quack_train(
     tokenizer,
     loss_fn: LossFunction,
     task_to_env: Dict[str, EnvironmentInterface],
-    val_task_to_env: Optional[Dict[str, EnvironmentInterface]],
     logger: Logger,
     checkpointer: CheckpointManager,
     quack_save_state: Optional[QUACKSaveState],
@@ -365,7 +364,7 @@ def quack_train(
             actor_generation,
             val_prompt_dataloader,
             tokenizer,
-            val_task_to_env,
+            task_to_env,
             step=0,
             master_config=master_config,
         )
@@ -502,7 +501,7 @@ def quack_train(
                     actor_generation,
                     val_prompt_dataloader,
                     tokenizer,
-                    val_task_to_env,
+                    task_to_env,
                     step=step + 1,
                     master_config=master_config,
                 )

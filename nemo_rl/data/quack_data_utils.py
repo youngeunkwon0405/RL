@@ -269,6 +269,7 @@ def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config:
     task_data_processors = defaultdict(
         lambda: (task_spec, data_processor)
     )
+    task_data_processors[task_name] = (task_spec, data_processor)
 
     dataset = AllTaskProcessedDataset(
         data,

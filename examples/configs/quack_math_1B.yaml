@@ -91,6 +91,7 @@ actor:
 
 critic:
   generation:
+    backend: "vllm"
     max_new_tokens: ${actor.max_total_sequence_length}
     temperature: 1.0
     top_p: 1.0
@@ -119,7 +120,7 @@ replay_buffer:
   buffer_size: 1000000
 
 env:
-  actor:
+  math:
     num_workers: 8
   critic:
     num_workers: 8
