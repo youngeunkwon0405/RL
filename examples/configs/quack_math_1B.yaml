@@ -41,7 +41,7 @@ actor:
     cpu_offload: False
     sequence_parallel: false
     activation_checkpointing: false
-    tensor_parallel_size: 4
+    tensor_parallel_size: 1
   
   # makes the training sequence length divisible by the tensor parallel size
   # this is useful for sequence parallel training
@@ -81,7 +81,7 @@ actor:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
-      tensor_parallel_size: 2
+      tensor_parallel_size: 1
       gpu_memory_utilization: 0.5
       max_model_len: ${actor.max_total_sequence_length}
       # For most cases, use "dummy" to load the initial weights, since they will be overwritten during refit
@@ -98,7 +98,7 @@ critic:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
-      tensor_parallel_size: 2
+      tensor_parallel_size: 1
       gpu_memory_utilization: 0.5
       max_model_len: ${actor.max_total_sequence_length}
       load_format: dummy
@@ -139,5 +139,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 8
+  gpus_per_node: 1
   num_nodes: 1
