@@ -225,7 +225,7 @@ def setup(
     # )
 
     nodes_for_each_cluster = cluster_config["num_nodes"] #if cluster_config["num_nodes"]==1 else cluster_config["num_nodes"]//2
-    gpus_for_each_cluster = cluster_config["gpus_per_node"]//2 #if cluster_config["num_nodes"]==1 else cluster_config["gpus_per_node"]
+    gpus_for_each_cluster = cluster_config["gpus_per_node"] //2 #if cluster_config["num_nodes"]==1 else cluster_config["gpus_per_node"]
 
     cluster = RayVirtualCluster(
         name="grpo_policy_cluster",

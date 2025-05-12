@@ -70,8 +70,8 @@ def generate_responses(
     for output_ids, input_length, total_length in zip(
         generation_outputs["output_ids"], input_lengths, unpadded_sequence_lengths
     ):
-        # generated_ids.append(output_ids[input_length:total_length])
-        generated_ids.append(output_ids[0:total_length])
+        generated_ids.append(output_ids[input_length:total_length])
+        # generated_ids.append(output_ids[0:total_length])
 
     generated_texts = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
 
@@ -82,6 +82,7 @@ def generate_responses(
         #TODO this support only the first turn
         problem = input_sample[0]['content']
         thought = generated_text_sample
+        thought = problem + ' <think> ' + thought + ' </think>'
         # import pdb;
         # pdb.set_trace()
 
@@ -110,8 +111,8 @@ def generate_responses(
         }
     )
 
-    import pdb;
-    pdb.set_trace()
+    # import pdb;
+    # pdb.set_trace()
     # target_generation_outputs = policy_generation.generate(generation_input_data, greedy=greedy)
     target_generation_outputs = target_model_generation.generate(target_generation_input_data, greedy=True)
 

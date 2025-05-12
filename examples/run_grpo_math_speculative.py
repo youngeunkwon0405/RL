@@ -163,12 +163,23 @@ def openinstructmath2_data_processor(
     # import pdb; pdb.set_trace()
 
     message_log: LLMMessageLogType = []
-    user_message = {
-        "role": "user",
-        "content": task_data_spec.prompt.format(problem),
-    }
+    # user_message = {
+    #     "role": "user",
+    #     "content": task_data_spec.prompt.format(problem),
+    # }
+    sys_message = {"role": "system", "content": task_data_spec.system_prompt}
+    # import pdb;
+    # pdb.set_trace()
+    problem = task_data_spec.prompt.format(problem)
+    user_message = {"role": "user", "content": problem}
+    # user prompt
+    assert task_data_spec.prompt is not None
+
+    message_list = [sys_message, user_message]
+    # import pdb;
+    # pdb.set_trace()
     message = tokenizer.apply_chat_template(
-        [user_message],
+        message_list,
         tokenize=False,
         add_generation_prompt=True,
         add_special_tokens=False,

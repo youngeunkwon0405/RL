@@ -1,5 +1,5 @@
 # Run from the root of NeMo-Reinforcer repo
-NUM_ACTOR_NODES=64
+NUM_ACTOR_NODES=32
 
 # Set up virtual environment directory
 VENV_DIR="$PWD/reinforcer_venv"

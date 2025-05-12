@@ -1,7 +1,7 @@
 # GRPO Algorithm Configuration
 grpo:
-  num_prompts_per_step: 16  #64 #32
-  num_generations_per_prompt: 1 #16 #64 #16 #16
+  num_prompts_per_step: 64  #64 #32
+  num_generations_per_prompt: 16 #16 #64 #16 #16
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
   max_num_steps: 1000000
   normalize_rewards: true
@@ -21,7 +21,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo-qwen-1b_speculative_32n_8b_target_newlr"
+  checkpoint_dir: "results/grpo-qwen-1b_speculative_8b_correct_prompt"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
@@ -33,14 +33,14 @@ checkpointing:
 
 policy:
   # Qwen/Qwen2.5-1.5B has tied weights which are only supported with dtensor policy with tp size 1 (https://github.com/NVIDIA/reinforcer/issues/227)
-  model_name: "Qwen/Qwen2.5-1.5B"
+  model_name: "agentica-org/DeepScaleR-1.5B-Preview"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 1024 #512
-  train_micro_batch_size: 2 #4
+  train_micro_batch_size: 1 #4
   generation_batch_size: 32 # Only used when generating using HF backend
-  logprob_batch_size: 2 #4
-  max_total_sequence_length: 4096
+  logprob_batch_size: 1 #4
+  max_total_sequence_length: 8192
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
@@ -103,7 +103,7 @@ target_policy:
   train_micro_batch_size: ${policy.train_micro_batch_size} #4
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: ${policy.logprob_batch_size} #4
-  max_total_sequence_length: 4096
+  max_total_sequence_length: 8192
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
@@ -136,8 +136,8 @@ target_policy:
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  prompt_file: "examples/prompts/cot.txt"
-  system_prompt_file: null
+  prompt_file: "examples/prompts/cot2.txt"
+  system_prompt_file: "examples/prompts/sys.txt"
   dataset_name: "OpenMathInstruct-2"
 
 env:
@@ -152,8 +152,8 @@ logger:
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "amnon_rl_experiments"
-    name: "grpo-math_qwen-1b-speculative_8btarget_2"
-    id: "grpo-math_qwen-1b-speculative_8btarget_2"
+    name: "grpo-math_qwen-1b-speculative_8b_new_prompt"
+    id: "grpo-math_qwen-1b-speculative_8b_new_prompt"
   tensorboard: {}
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)

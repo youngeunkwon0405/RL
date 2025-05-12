@@ -2,17 +2,17 @@
 generation:
   backend: "vllm" # only vllm is supported for evaluation
   max_new_tokens: ${generation.vllm_cfg.max_model_len}
-  temperature: 0.0
-  top_p: 1.0
+  temperature: 0.6
+  top_p: 0.95
   top_k: -1 # disable
   num_prompts_per_step: -1 # -1 means pass all prompts at once
-  model_name: "Qwen/Qwen2.5-Math-1.5B-Instruct"
+  model_name: "agentica-org/DeepScaleR-1.5B-Preview"
   stop_token_ids: null
   stop_strings: null
   vllm_cfg:
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.6
-    max_model_len: 4096
+    max_model_len: 21000
 
 target_generation:
   backend: "vllm" # only vllm is supported for evaluation
@@ -51,5 +51,5 @@ env:
     num_workers: 8
 
 cluster:
-  gpus_per_node: 2
+  gpus_per_node: 6
   num_nodes: 1
