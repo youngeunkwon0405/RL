@@ -31,7 +31,7 @@ MOUNTS = "/lustre:/lustre"
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Launch Slurm experiments with parameter sweeps")
-    parser.add_argument("script", type=str, help="Path to the Python script to run")
+    parser.add_argument("--script", type=str, help="Path to the Python script to run")
     parser.add_argument("--config", type=str, help="Path to the base YAML config file")
     parser.add_argument("--sweep", type=str, help="Path to the sweep config YAML file")
     parser.add_argument("--num-nodes", type=int, default=1, help="Number of nodes to use")
@@ -52,28 +52,57 @@ def load_yaml(file_path: str) -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def verify_sweep_config(sweep_config: Dict[str, Any], script_path: str) -> None:
-    """Verify that the sweep config is valid for the given script."""
-    if "script_name" not in sweep_config:
-        raise AssertionError(
-            f"Sweep config must contain a 'script_name' parameter that matches the target script.\n"
-            f"Expected script: {os.path.basename(script_path)}"
-        )
+def verify_with_sweep(sweep_config: Dict[str, Any], script_path: Optional[str], config_path: Optional[str]) -> Tuple[str, str]:
+    """
+    Verify the sweep config and determine the final script and config paths.
+
+    Returns:
+        Tuple[str, str]: The determined script path and config path.
+    Raises:
+        AssertionError: If inconsistencies are found or required paths are missing.
+    """
+    sweep_script_name = sweep_config.get("script_path")
+    sweep_config_path = sweep_config.get("config_path")
+
+    # Determine script path
+    if script_path is None:
+        if not sweep_script_name:
+            raise AssertionError(
+                "Script path must be provided either via command line or 'script_name' in the sweep config."
+            )
+        final_script_path = sweep_script_name
+    else:
+        final_script_path = script_path
+        if sweep_script_name and os.path.basename(final_script_path) != sweep_script_name:
+             raise AssertionError(
+                f"Command line script '{os.path.basename(final_script_path)}' does not match "
+                f"sweep config script_name '{sweep_script_name}'. Please ensure consistency."
+             )
+
+    # Determine config path
+    if config_path is None:
+        # config_path can be None if not provided by CLI or sweep
+        final_config_path = sweep_config_path 
+    else:
+        final_config_path = config_path
+        if sweep_config_path and final_config_path != sweep_config_path:
+            raise AssertionError(
+                f"Command line config '{final_config_path}' does not match "
+                f"sweep config config_path '{sweep_config_path}'. Please ensure consistency."
+            )
     
-    expected_script = sweep_config["script_name"]
-    actual_script = os.path.basename(script_path)
-    
-    if expected_script != actual_script:
+    if final_script_path is None:
         raise AssertionError(
-            f"Sweep config script_name '{expected_script}' does not match the target script '{actual_script}'.\n"
-            f"Please update the sweep config to use the correct script name."
+            "Script path must be provided either via --script in command line or 'script_path' in the sweep config."
         )
+
+    return final_script_path, final_config_path
 
 
 def generate_parameter_combinations(sweep_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Generate all combinations of parameters from the sweep config."""
     # Remove script_name from the parameters to sweep over
-    sweep_params = {k: v for k, v in sweep_config.items() if k != "script_name"}
+    sweep_params = {k: v for k, v in sweep_config.items() if k not in ["script_path", "config_path"]}
     
     # Extract parameter names and their values
     param_names = list(sweep_params.keys())
@@ -239,12 +268,14 @@ def print_experiment_info(
 def main():
     """Main entry point."""
     args, extra_args = parse_args()
+
+    script_path, config_path = args.script, args.config
     
     # Load sweep config if provided
     param_combinations = [{}]  # Default to no parameters
     if args.sweep:
         sweep_config = load_yaml(args.sweep)
-        verify_sweep_config(sweep_config, args.script)
+        script_path, config_path = verify_with_sweep(sweep_config, script_path, config_path)
         param_combinations = generate_parameter_combinations(sweep_config)
     
     # Print header
@@ -257,14 +288,14 @@ def main():
         param_overrides = format_parameter_override(params)
         
         # Generate job name if not provided
-        job_name = args.job_name or os.path.splitext(os.path.basename(args.script))[0]
+        job_name = args.job_name or os.path.splitext(os.path.basename(script_path))[0]
         if len(param_combinations) > 1:
             job_name = f"{job_name}_sweep_{i+1}"
         
         # Launch experiment
         cmd, job_id = launch_experiment(
-            script=args.script,
-            config=args.config,
+            script=script_path,
+            config=config_path,
             param_overrides=param_overrides,
             num_nodes=args.num_nodes,
             time=args.time,
