@@ -187,8 +187,6 @@ def llama_nemotron_math_data_processor(
     assert task_data_spec.prompt is not None
     
     message_list = [sys_message,user_message]
-    if planted_thinking_prompt is not None:
-        message_list.append({"role": "assistant", "content": planted_thinking_prompt})
     message = tokenizer.apply_chat_template(
         message_list,
         tokenize=False,
