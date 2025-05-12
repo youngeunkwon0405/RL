@@ -22,6 +22,7 @@ class ReplayBufferItem(TypedDict):
     reward: float
     critique: Optional[str]
     verdict: Optional[float]
+    task_name: str = "critic"
     # Store original messages if needed for complex reconstruction, or other metadata
     # For example, if the original prompt formatting was complex.
     # original_datum_dict: Optional[Dict[str, Any]] = None 
