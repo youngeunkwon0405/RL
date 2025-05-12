@@ -15,7 +15,7 @@ from typing import Any
 
 import torch
 
-from nemo_rl.algorithms.loss_functions import LossType
+from nemo_rl.algorithms.interfaces import LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 

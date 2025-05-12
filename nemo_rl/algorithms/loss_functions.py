@@ -11,12 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import enum
 from typing import Any, TypedDict
 
 import torch
 
-from nemo_rl.algorithms.interfaces import LossFunction
+from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     masked_mean,
@@ -27,11 +26,6 @@ from nemo_rl.models.dtensor.parallelize import (
 )
 
 Tensor = torch.Tensor
-
-
-class LossType(enum.Enum):
-    TOKEN_LEVEL = "token_level"
-    SEQUENCE_LEVEL = "sequence_level"
 
 
 class ClippedPGLossConfig(TypedDict):

@@ -42,7 +42,7 @@ from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 
 
-def parse_args():
+def parse_args() -> tuple[argparse.Namespace, list[str]]:
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Run GRPO training with configuration")
     parser.add_argument(
@@ -58,13 +58,13 @@ def parse_args():
 # ===============================================================================
 #                             Math Data Processor
 # ===============================================================================
-
+TokenizerType = AutoTokenizer
 
 # TaskDataProcessFnCallable
 def hf_data_processor(
     datum_dict: dict[str, Any],
     task_data_spec: TaskDataSpec,
-    tokenizer,
+    tokenizer: TokenizerType,
     max_seq_length: int,
     idx: int,
 ) -> DatumSpec:
@@ -115,7 +115,7 @@ def hf_data_processor(
 def math_data_processor(
     datum_dict: dict[str, Any],
     task_data_spec: TaskDataSpec,
-    tokenizer,
+    tokenizer: TokenizerType,
     max_seq_length: int,
     idx: int,
 ) -> DatumSpec:
@@ -178,7 +178,11 @@ def math_data_processor(
     return output
 
 
-def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
+def setup_data(
+    tokenizer: TokenizerType,
+    data_config: DataConfig,
+    env_configs: dict[str, Any],
+) -> tuple:
     print("\n▶ Setting up data...")
     math_task_spec = TaskDataSpec(
         task_name="math",
@@ -203,7 +207,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     )
     task_data_processors["math"] = (math_task_spec, hf_data_processor)
 
-    math_env = MathEnvironment.options(
+    math_env = MathEnvironment.options(  # type: ignore # it's wrapped with ray.remote
         runtime_env={
             "py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE,
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
@@ -230,7 +234,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     return dataset, val_dataset, task_to_env, task_to_env
 
 
-def main():
+def main() -> None:
     """Main entry point."""
     # Parse arguments
     args, overrides = parse_args()

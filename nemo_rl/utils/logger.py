@@ -876,7 +876,7 @@ def print_message_log_samples(
     console.rule("[bold bright_white on purple4]End of Samples")
 
 
-def get_next_experiment_dir(base_log_dir):
+def get_next_experiment_dir(base_log_dir: str) -> str:
     """Create a new experiment directory with an incremented ID.
 
     Args:

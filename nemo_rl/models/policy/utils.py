@@ -14,11 +14,13 @@
 
 import importlib
 import os
+from typing import Any
 
+import torch
 from transformers import AutoConfig
 
 
-def import_class_from_path(name):
+def import_class_from_path(name: str) -> Any:
     """Import a class from a string path (e.g. 'torch.optim.AdamW').
 
     Args:
@@ -32,7 +34,7 @@ def import_class_from_path(name):
     return cls_instance
 
 
-def get_gpu_info(model):
+def get_gpu_info(model: torch.nn.Module) -> dict:
     """Return information about the GPU being used by this worker."""
     import torch
 

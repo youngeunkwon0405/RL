@@ -13,7 +13,7 @@
 # limitations under the License.
 import time
 from contextlib import contextmanager
-from typing import Callable, Optional, Sequence, Union
+from typing import Callable, Generator, Optional, Sequence, Union
 
 import numpy as np
 
@@ -67,7 +67,7 @@ class Timer:
         "count": len,
     }
 
-    def __init__(self):
+    def __init__(self) -> None:
         # Dictionary mapping labels to lists of elapsed times
         # We store a list of times for each label rather than a single value
         # to support multiple timing runs with the same label (e.g., in loops)
@@ -106,7 +106,7 @@ class Timer:
         return elapsed
 
     @contextmanager
-    def time(self, label: str):
+    def time(self, label: str) -> Generator[None, None, None]:
         """Context manager for timing a block of code.
 
         Args:
