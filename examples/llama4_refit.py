@@ -23,7 +23,7 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # GPU Allocation
 MEGATRON_TP = 8
-VLLM_TP = 2
+VLLM_TP = 8
 
 # --- Megatron Config (Restored) ---
 config = {
@@ -221,6 +221,7 @@ if len(keys) > 0:
 for keys in split_keys:
     ipc_handles = policy.get_weights_ipc_handles(keys)
     vllm_policy.update_weights(ipc_handles)
+print("Done updating weights")
 policy.offload_after_refit()
 # vllm_policy.prepare_for_generation(tags=["kv_cache"])
 

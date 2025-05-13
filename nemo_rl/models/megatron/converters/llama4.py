@@ -158,11 +158,11 @@ mcore_te_to_hf_llama4 = {
          "hf": "language_model.model.layers.{gl}.feed_forward.shared_expert.down_proj.weight",
     },
     "decoder.layers.{l}.mlp.experts.linear_fc1.weight": { # MoE Experts gate_up_proj (needs transpose)
-         "tp": 0, # Matches fc1 row-parallel for the weight matrix itself (before expert dim)
+         "tp": 1, # Matches fc1 row-parallel for the weight matrix itself (before expert dim)
          "hf_func": transpose_expert_fc1,
     },
     "decoder.layers.{l}.mlp.experts.linear_fc2.weight": { # MoE Experts down_proj (needs transpose)
-         "tp": 1, # Matches fc2 column-parallel for the weight matrix itself (before expert dim)
+         "tp": 2, # Matches fc2 column-parallel for the weight matrix itself (before expert dim)
          "hf_func": transpose_expert_fc2,
     },
 
