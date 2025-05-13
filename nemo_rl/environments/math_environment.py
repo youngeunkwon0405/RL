@@ -14,7 +14,7 @@
 import contextlib
 import io
 import logging
-from typing import Optional, TypedDict
+from typing import Any, Optional, TypedDict
 
 import ray
 import torch
@@ -52,7 +52,7 @@ def _mute_output():
 class HFVerifyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
 
-    def __init__(self):
+    def __init__(self) -> None:
         logging.getLogger("math_verify").setLevel(logging.CRITICAL)
 
         # Use Latex and plain math extraction from predictions
@@ -113,7 +113,7 @@ class MathEnvironment(EnvironmentInterface):
             for _ in range(self.num_workers)
         ]
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         # shutdown all workers
         for worker in self.workers:
             ray.kill(worker)
@@ -192,8 +192,8 @@ class MathEnvironment(EnvironmentInterface):
         )
 
     def global_post_process_and_metrics(
-        self, batch: BatchedDataDict
-    ) -> tuple[BatchedDataDict, dict]:
+        self, batch: BatchedDataDict[Any]
+    ) -> tuple[BatchedDataDict[Any], dict[str, float | int]]:
         """Computes metrics for this environment given a global rollout batch.
 
         Every rank will run this function, so you're free to use distributed

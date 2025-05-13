@@ -98,7 +98,7 @@ class GRPOLoggerConfig(LoggerConfig):
 class MasterConfig(TypedDict):
     policy: PolicyConfig
     loss_fn: ClippedPGLossConfig
-    env_configs: dict[str, Any]
+    env: dict[str, Any]
     data: DataConfig
     grpo: GRPOConfig
     logger: GRPOLoggerConfig

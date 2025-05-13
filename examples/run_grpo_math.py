@@ -16,7 +16,7 @@ import argparse
 import os
 import pprint
 from collections import defaultdict
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 import torch
 from omegaconf import OmegaConf
@@ -86,7 +86,7 @@ def hf_data_processor(
         add_special_tokens=False,
     )
     user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
-    user_message["content"] = message
+    user_message["content"] = message[0]
     message_log.append(user_message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
@@ -183,7 +183,12 @@ def setup_data(
     tokenizer: TokenizerType,
     data_config: DataConfig,
     env_configs: dict[str, Any],
-) -> tuple:
+) -> tuple[
+    AllTaskProcessedDataset,
+    Optional[AllTaskProcessedDataset],
+    dict[str, EnvironmentInterface],
+    dict[str, EnvironmentInterface],
+]:
     print("\n▶ Setting up data...")
     math_task_spec = TaskDataSpec(
         task_name="math",
@@ -222,13 +227,17 @@ def setup_data(
         max_seq_length=data_config["max_input_seq_length"],
     )
 
-    val_dataset = AllTaskProcessedDataset(
-        data.formatted_ds["validation"],
-        tokenizer,
-        math_task_spec,
-        task_data_processors,
-        max_seq_length=data_config["max_input_seq_length"],
-    )
+    val_dataset: Optional[AllTaskProcessedDataset] = None
+    if data.formatted_ds["validation"]:
+        val_dataset = AllTaskProcessedDataset(
+            data.formatted_ds["validation"],
+            tokenizer,
+            math_task_spec,
+            task_data_processors,
+            max_seq_length=data_config["max_input_seq_length"],
+        )
+    else:
+        val_dataset = None
 
     task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
     task_to_env["math"] = math_env
@@ -271,6 +280,9 @@ def main() -> None:
 
     # setup tokenizer
     tokenizer = get_tokenizer(config["policy"]["tokenizer"])
+    assert config["policy"]["generation"] is not None, (
+        "A generation config is required for GRPO"
+    )
     config["policy"]["generation"] = configure_generation_config(
         config["policy"]["generation"], tokenizer
     )

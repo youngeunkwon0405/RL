@@ -12,10 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import warnings
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 import torch
 from datasets import Dataset
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from nemo_rl.data.interfaces import (
     FlatMessagesType,
@@ -25,6 +26,7 @@ from nemo_rl.data.interfaces import (
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 Tensor = torch.Tensor
+TokenizerType = PreTrainedTokenizerBase
 
 
 def message_log_to_flat_messages(
@@ -60,7 +62,7 @@ def message_log_to_flat_messages(
     tensor([1, 2, 3, 4, 5, 6, 7])
     ```
     """
-    result: dict[str, list] = {}
+    result: dict[str, list[Any]] = {}
 
     if len(message_log) == 0:
         return cast(FlatMessagesType, result)
@@ -361,7 +363,7 @@ def message_log_shape(message_log: LLMMessageLogType) -> list[dict[str, torch.Si
     return shapes
 
 
-def get_first_index_that_differs(str1, str2):
+def get_first_index_that_differs(str1: str, str2: str) -> int:
     """Get the first index that differs between two strings."""
     for i, (c1, c2) in enumerate(zip(str1, str2)):
         if c1 != c2:
@@ -371,7 +373,7 @@ def get_first_index_that_differs(str1, str2):
 
 def get_formatted_message_log(
     message_log: LLMMessageLogType,
-    tokenizer,
+    tokenizer: TokenizerType,
     task_data_spec: TaskDataSpec,
     add_bos_token: bool = True,
     add_eos_token: bool = True,
@@ -388,17 +390,20 @@ def get_formatted_message_log(
     """
     new_message_log = []
     prev_formatted_message = ""
+    message_log_strs: list[dict[str, str]] = cast(
+        list[dict[str, str]], message_log
+    )  # we just use the str:str parts here
 
     for i, message in enumerate(message_log):
-        formatted_message = tokenizer.apply_chat_template(
-            message_log[: i + 1],
+        formatted_message: str = tokenizer.apply_chat_template(  # type: ignore
+            message_log_strs[: i + 1],
             add_generation_prompt=False,
             tokenize=False,
             add_special_tokens=False,
         )
 
         ## get the length of the previous message, excluding the eos token (if present)
-        prev_message_len_no_eos = get_first_index_that_differs(
+        prev_message_len_no_eos: int = get_first_index_that_differs(
             prev_formatted_message,
             formatted_message,
         )

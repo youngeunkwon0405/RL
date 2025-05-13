@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Union
+from typing import Callable, Union
 
 import torch
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -335,7 +335,7 @@ def _parallelize_qwen(
     )
 
 
-PARALLIZE_FUNCTIONS = {
+PARALLIZE_FUNCTIONS: dict[type[torch.nn.Module], Callable[..., torch.nn.Module]] = {
     Qwen2ForCausalLM: _parallelize_qwen,
     Qwen3ForCausalLM: _parallelize_qwen,
     LlamaForCausalLM: _parallelize_llama,
