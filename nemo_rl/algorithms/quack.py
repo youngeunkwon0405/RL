@@ -575,6 +575,7 @@ def quack_train(
         metrics = {
             "loss": train_results["loss"].numpy(),
             "reward": repeated_batch["total_reward"].numpy(),
+            "critic_reward": critic_batch["total_reward"].numpy(),
             "grad_norm": train_results["grad_norm"].numpy(),
         }
         metrics.update(train_results["all_mb_metrics"])
