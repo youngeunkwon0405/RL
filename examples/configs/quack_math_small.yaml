@@ -39,7 +39,7 @@ actor:
   dtensor_cfg:
     enabled: true
     cpu_offload: False
-    sequence_parallel: false
+    sequence_parallel: true
     activation_checkpointing: false
     tensor_parallel_size: 8
   
