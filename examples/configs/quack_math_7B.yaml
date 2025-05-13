@@ -1,7 +1,7 @@
 # QUACK Algorithm Configuration
 quack:
   train_dataset_size: 1024
-  critic_inference_batch_size: 256
+  critic_inference_batch_size: 1024 # can handle large batch sizes
   train_dataset_batch_size: 32
   num_prompts_per_step: 32
   num_generations_per_prompt: 16
@@ -74,9 +74,9 @@ actor:
 
   generation:
     backend: "vllm"
-    max_new_tokens: ${actor.max_total_sequence_length}
+    max_new_tokens: 1024
     temperature: 1.0
-    top_p: 1.0
+    top_p: 0.95
     top_k: null
     stop_token_ids: null
     stop_strings: null
@@ -91,9 +91,9 @@ actor:
 critic:
   generation:
     backend: "vllm"
-    max_new_tokens: ${actor.max_total_sequence_length}
+    max_new_tokens: 1024
     temperature: 1.0
-    top_p: 1.0
+    top_p: 0.95
     top_k: null
     stop_token_ids: null
     stop_strings: null
@@ -116,7 +116,7 @@ critic_data:
   dataset_name: null  # we use data from replay buffer
 
 replay_buffer:
-  buffer_size: 1000000
+  buffer_size: 100000
 
 env:
   math:
@@ -132,7 +132,7 @@ logger:
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "quack-math"
-    name: "quack-logger"
+    name: "quack-logger-qwen-small"
   tensorboard: {}
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
@@ -140,4 +140,4 @@ logger:
 
 cluster:
   gpus_per_node: 8
-  num_nodes: 4
+  num_nodes: 8
