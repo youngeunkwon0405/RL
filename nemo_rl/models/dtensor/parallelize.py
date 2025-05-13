@@ -222,7 +222,7 @@ def _parallelize_llama(
 
     if activation_checkpointing:
         for i in range(len(model.model.layers)):
-            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
+            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)  # type: ignore
 
     for layer in model.model.layers:
         fully_shard(
@@ -323,7 +323,7 @@ def _parallelize_qwen(
 
     if activation_checkpointing:
         for i in range(len(model.model.layers)):
-            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)
+            model.model.layers[i].mlp = checkpoint_wrapper(model.model.layers[i].mlp)  # type: ignore
 
     for layer in model.model.layers:
         fully_shard(

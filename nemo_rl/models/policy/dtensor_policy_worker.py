@@ -194,7 +194,7 @@ class DTensorPolicyWorker:
         self._held_sharded_state_dict_reference: Optional[dict[str, torch.Tensor]] = (
             None
         )
-        self._held_streamed_param_reference = None
+        self._held_streamed_param_reference: Optional[dict[str, torch.Tensor]] = None
 
         if init_reference_model:
             self.reference_model_state_dict = get_cpu_state_dict(
@@ -225,7 +225,7 @@ class DTensorPolicyWorker:
                 for scheduler_cfg in self.cfg["scheduler"]:
                     if "name" in scheduler_cfg:
                         schedulers.append(
-                            import_class_from_path(cast(str, scheduler_cfg["name"]))(
+                            import_class_from_path(scheduler_cfg["name"])(
                                 self.optimizer, **scheduler_cfg["kwargs"]
                             )
                         )

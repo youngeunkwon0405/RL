@@ -168,7 +168,7 @@ class FSDP1PolicyWorker:
 
         # used for streaming update inference engine weights
         self._held_sharded_state_dict_reference: Optional[dict[str, Any]] = None
-        self._held_streamed_param_reference = None
+        self._held_streamed_param_reference: Optional[dict[str, Any]] = None
 
         # register_fsdp_forward_method(self.model, "generate")
         if init_optimizer:
@@ -192,7 +192,7 @@ class FSDP1PolicyWorker:
                 for scheduler_cfg in self.cfg["scheduler"]:
                     if "name" in scheduler_cfg:
                         schedulers.append(
-                            import_class_from_path(cast(str, scheduler_cfg["name"]))(
+                            import_class_from_path(scheduler_cfg["name"])(
                                 self.optimizer, **scheduler_cfg["kwargs"]
                             )
                         )
@@ -623,7 +623,7 @@ class FSDP1PolicyWorker:
                     generation_module = self.model.module
                 else:
                     generation_module = self.model
-                outputs = generation_module.generate(
+                outputs = generation_module.generate(  # type: ignore # we know it's a nn.Module
                     input_ids=left_padded_input_ids,
                     attention_mask=left_padded_attention_mask,
                     max_new_tokens=gen_cfg["max_new_tokens"],
@@ -828,7 +828,7 @@ class FSDP1PolicyWorker:
 
         # Collect info for streaming multiple tensors
         state_dict_info = []
-        for name, tensor in self._held_sharded_state_dict_reference.items():
+        for name, tensor in self._held_sharded_state_dict_reference.items():  # type: ignore
             # dtensor's numel will return complete tensor instead of only local tensor
             size_in_bytes = tensor.element_size() * tensor.numel()
             state_dict_info.append((name, size_in_bytes))
@@ -890,7 +890,7 @@ class FSDP1PolicyWorker:
         torch.cuda.empty_cache()
 
     @torch.no_grad()
-    def offload_before_refit(self):
+    def offload_before_refit(self) -> None:
         """Offload the optimizer and buffers to the CPU."""
         torch.randn(1).cuda()  # wake up torch allocator
         if not self.cfg["fsdp_offload_enabled"]:
@@ -911,7 +911,7 @@ class FSDP1PolicyWorker:
         )
 
     @torch.no_grad()
-    def offload_after_refit(self):
+    def offload_after_refit(self) -> None:
         # Offload as much as possible on the CPU
         self.model = self.manual_offload_to_cpu(self.model)
         self.model.eval()
@@ -949,7 +949,11 @@ class FSDP1PolicyWorker:
             buffer.data = buffer.data.to("cpu", non_blocking=True)
 
         if hasattr(model, "_fsdp_wrapped_module"):
-            self.manual_offload_to_cpu(model._fsdp_wrapped_module)
+            wrapped_module = model._fsdp_wrapped_module
+            assert isinstance(wrapped_module, torch.nn.Module), (
+                f"wrapped_module is not a torch.nn.Module: instead, {type(wrapped_module)}"
+            )
+            self.manual_offload_to_cpu(wrapped_module)
 
         return model
 
@@ -967,7 +971,11 @@ class FSDP1PolicyWorker:
             buffer.data = buffer.data.to("cuda", non_blocking=True)
 
         if hasattr(model, "_fsdp_wrapped_module"):
-            self.manual_load_to_gpu(model._fsdp_wrapped_module)
+            wrapped_module = model._fsdp_wrapped_module
+            assert isinstance(wrapped_module, torch.nn.Module), (
+                f"wrapped_module is not a torch.nn.Module: instead, {type(wrapped_module)}"
+            )
+            self.manual_load_to_gpu(wrapped_module)
 
         return model
 
@@ -1002,7 +1010,9 @@ class FSDP1PolicyWorker:
             tokenizer_path=tokenizer_path,
         )
 
-    def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
+    def load_checkpoint(
+        self, weights_path: str, optimizer_path: Optional[str] = None
+    ) -> None:
         """Load a checkpoint into the model."""
         load_checkpoint(
             model=self.model,
@@ -1012,6 +1022,6 @@ class FSDP1PolicyWorker:
             optimizer_path=optimizer_path,
         )
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         """Shutdown the policy."""
         #

@@ -38,7 +38,7 @@ class EnvironmentReturn(NamedTuple):
 
     observations: list[dict[str, str]]
     metadata: list[Optional[dict]]
-    next_stop_strings: list[Optional[list[str]]]
+    next_stop_strings: list[list[str] | None] | list[None]
     rewards: Tensor
     terminateds: Tensor
 

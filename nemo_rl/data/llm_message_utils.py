@@ -315,7 +315,6 @@ def batched_message_log_to_flat_message(
             continue
 
         # Filter out None values and validate consistency
-        # casting bc we break on str cases above
         values: list[Tensor | None] = cast(list[Tensor | None], values)
         tensors = cast(list[Tensor], [t for t in values if t is not None])
         _validate_tensor_consistency(tensors)
@@ -323,7 +322,7 @@ def batched_message_log_to_flat_message(
         # Create zero tensors for None values
         filled_values: list[Tensor] = [
             (
-                torch.zeros(0, dtype=tensors[0].dtype, device=tensors[0].device)
+                torch.zeros(0, dtype=tensors[0].dtype, device=tensors[0].device)  # type: ignore
                 if v is None
                 else v
             )
@@ -338,7 +337,7 @@ def batched_message_log_to_flat_message(
     return result, input_lengths_tensor
 
 
-def message_log_shape(message_log: LLMMessageLogType) -> list[dict[str, list[int]]]:
+def message_log_shape(message_log: LLMMessageLogType) -> list[dict[str, torch.Size]]:
     """Get the shape of the tensors in the message log.
 
     This utility function examines each message in the message log and reports
@@ -355,9 +354,9 @@ def message_log_shape(message_log: LLMMessageLogType) -> list[dict[str, list[int
         shape = {}
         for k in message.keys():
             if isinstance(message[k], Tensor):
-                shape[k] = message[k].shape
+                shape[k] = message[k].shape  # type: ignore # we know it's a tensor
             elif isinstance(message[k], list):
-                shape[k] = [message_log_shape(v) for v in message[k]]
+                shape[k] = [message_log_shape(v) for v in message[k]]  # type: ignore
         shapes.append(shape)
     return shapes
 

@@ -108,6 +108,7 @@ class GenerationConfig(TypedDict):
     top_k: int
     model_name: str
     stop_token_ids: list[int]
+    stop_strings: NotRequired[list[str]]
     pad_token_id: NotRequired[int]
 
 

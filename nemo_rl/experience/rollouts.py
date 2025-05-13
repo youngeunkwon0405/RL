@@ -24,6 +24,7 @@ from transformers import PreTrainedTokenizerBase
 from nemo_rl.data.interfaces import (
     DatumSpec,
     FlatMessagesType,
+    LLMMessageLogType,
 )
 from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
@@ -50,7 +51,7 @@ def generate_responses(
     input_lengths: torch.Tensor,
     include_logprobs: bool = True,
     greedy: bool = False,
-) -> tuple[BatchedDataDict[DatumSpec], list[torch.Tensor], dict]:
+) -> tuple[BatchedDataDict[DatumSpec], list[torch.Tensor], dict[str, float | int]]:
     """Generate responses from policy."""
     # Add stop_strings to generation_input_data if present in the batch
     if "stop_strings" in batch:
@@ -128,7 +129,7 @@ def calculate_rewards(
     task_names = batch["task_name"]
 
     # Group messages by task type
-    task_groups = {}
+    task_groups: dict[str, list[tuple[int, LLMMessageLogType]]] = {}
     for i, task_name in enumerate(task_names):
         if task_name not in task_groups:
             task_groups[task_name] = []
@@ -149,7 +150,7 @@ def calculate_rewards(
         env_info = [batch["extra_env_info"][i] for i in indices]
 
         # Submit task to environment and store future
-        future = task_to_env[task_name].step.remote(messages, env_info)
+        future = task_to_env[task_name].step.remote(messages, env_info)  # type: ignore # ray actor call
         futures.append(future)
         future_to_indices[future] = indices
 
@@ -254,7 +255,7 @@ def run_multi_turn_rollout(
         active_batch = current_batch.select_indices(active_indices)
         active_stop_strings = [current_stop_strings[i] for i in active_indices.tolist()]
 
-        active_flat_messages: FlatMessagesType
+        active_flat_messages: BatchedDataDict[FlatMessagesType]
         active_flat_messages, active_input_lengths = (
             batched_message_log_to_flat_message(
                 active_batch["message_log"],

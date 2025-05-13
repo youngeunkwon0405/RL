@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import torch
 from datasets import Dataset
@@ -56,7 +56,7 @@ class AllTaskProcessedDataset:
             dict[str, tuple[TaskDataSpec, TaskDataProcessFnCallable]],
             TaskDataProcessFnCallable,
         ],
-        max_seq_length=None,
+        max_seq_length: Optional[int] = None,
     ):
         self.dataset = dataset
         self.tokenizer = tokenizer
