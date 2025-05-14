@@ -633,7 +633,7 @@ def quack_train(
         # Logging
         # Log training data
         log_data = {"content": flat_messages["content"]}
-        log_data["rewards"] = critic_batch["extra_env_info"]["reward"].tolist()
+        log_data["rewards"] = [item['reward'] for item in critic_batch["extra_env_info"]]
         log_data["critic_reward"] = critic_batch["total_reward"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
