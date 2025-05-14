@@ -111,7 +111,7 @@ data:
     jsonl_path: ...
 
     # checks if it's too long on init
-    filter_long_samples: true
+    filter_long_samples: false
 
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
 
