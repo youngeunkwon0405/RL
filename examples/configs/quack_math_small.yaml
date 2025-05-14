@@ -99,7 +99,7 @@ critic:
     stop_strings: null
     vllm_cfg:
       tensor_parallel_size: 4
-      gpu_memory_utilization: 1.0   # 100%, we got a cluster dedicated to the critic
+      gpu_memory_utilization: 0.9   # almost 100%, we got a dedicated critic cluster
       max_model_len: ${actor.max_total_sequence_length}
       load_format: dummy
 
