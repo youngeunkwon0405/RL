@@ -540,7 +540,7 @@ def quack_train(
                     roles_to_train_on=["assistant"],
                 )
 
-                cat_and_padded, input_lengths = batched_message_log_to_flat_message(
+                flat_messages, input_lengths = batched_message_log_to_flat_message(
                     critic_batch["message_log"],
                     pad_value_dict={"token_ids": tokenizer.pad_token_id},
                     make_sequence_length_divisible_by=master_config["actor"][
@@ -550,9 +550,9 @@ def quack_train(
 
                 train_data: BatchedDataDict = BatchedDataDict(
                     {
-                        "input_ids": cat_and_padded["token_ids"],
+                        "input_ids": flat_messages["token_ids"],
                         "input_lengths": input_lengths,
-                        "token_mask": cat_and_padded["token_loss_mask"],
+                        "token_mask": flat_messages["token_loss_mask"],
                         "sample_mask": critic_batch["loss_multiplier"],
                     }
                 )
@@ -632,26 +632,22 @@ def quack_train(
 
         # Logging
         # Log training data
-        # log_data = {"content": flat_messages["content"]}
-        # log_data["rewards"] = rewards.tolist()
-        # log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
-        # log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
-        # log_data["input_lengths"] = input_lengths.tolist()
-        # logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
+        log_data = {"content": flat_messages["content"]}
+        log_data["rewards"] = critic_batch["extra_env_info"]["reward"].tolist()
+        log_data["critic_reward"] = critic_batch["total_reward"].tolist()
+        log_data["input_lengths"] = input_lengths.tolist()
+        logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
 
         print("\n📊 Training Results:")
         metrics = {
             "loss": train_results["loss"].numpy(),
-            "reward": repeated_batch["total_reward"].numpy(),
+            "reward": repeated_batch["total_reward"].numpy(),   # read from repeated_batch to reflect the reward of the latest generated answers
             "critic_reward": critic_batch["total_reward"].numpy(),
             "grad_norm": train_results["grad_norm"].numpy(),
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k == "num_valid_samples":
-                metrics[k] = np.sum(v).item()
-            else:
-                metrics[k] = np.mean(v).item()
+            metrics[k] = np.mean(v).item()
         metrics.update(rollout_metrics_actor)
 
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")

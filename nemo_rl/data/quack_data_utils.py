@@ -212,8 +212,9 @@ def critique_data_processor(
     """Process a ReplayBufferItem into a DatumSpec for the Critique Environment."""
     question = datum_dict["question"]
     answer = datum_dict["answer"]
+    reward = datum_dict["reward"]
 
-    extra_env_info = {}
+    extra_env_info = {"reward": reward}     # unused for now, later we can use it as privileged information
 
     message_log: LLMMessageLogType = []
     user_message = {
