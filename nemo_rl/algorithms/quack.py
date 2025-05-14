@@ -475,7 +475,7 @@ def quack_train(
             # check if we have enough samples in the replay buffer
             # we also make sure critic is refitted on the first step
             if not replay_buffer.can_sample(master_config["quack"]["train_dataset_size"]):
-                print(f"  ⚠️ Not enough samples in replay buffer ({replay_buffer.current_size()}/{master_config['quack']['train_dataset_size']}), skipping training for now...")
+                print(f"  ⚠️ Not enough samples in replay buffer ({len(replay_buffer)}/{master_config['quack']['train_dataset_size']}), skipping training for now...")
                 # still need to advance step and check max_num_steps
                 step += 1
                 if step >= master_config["quack"]["max_num_steps"]:
