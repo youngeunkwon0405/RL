@@ -59,7 +59,7 @@ class DPOConfig(TypedDict):
     preference_average_log_probs: bool
     sft_average_log_probs: bool
     ## TODO(@ashors) support other loss functions
-    ## https://github.com/NVIDIA/nemo-rl/issues/193
+    ## https://github.com/NVIDIA/NeMo-RL/issues/193
     # preference_loss: str
     # gt_reward_scale: float
     preference_loss_weight: float
@@ -270,7 +270,10 @@ def validate(
 
             else:
                 for k, v in val_results["all_mb_metrics"].items():
-                    val_metrics[k] += np.mean(v).item()
+                    if k in {"lr", "normalization_factor"}:
+                        val_metrics[k] += np.mean(v).item()
+                    else:
+                        val_metrics[k] += np.sum(v).item()
                 num_valid_batches += 1
 
             if val_batches > 0 and batch_idx >= val_batches - 1:
@@ -355,7 +358,6 @@ def dpo_train(
 
     policy.prepare_for_training()
 
-    final_checkpoint_saved = None
     total_num_epochs = min(
         max_num_epochs,
         math.ceil(master_config["dpo"]["max_num_steps"] / len(train_dataloader)),
@@ -380,8 +382,7 @@ def dpo_train(
             print(
                 f"\n{'=' * 25} Step {current_step}/{num_steps_in_this_epoch} {'=' * 25}"
             )
-
-            final_checkpoint_saved = False
+            val_metrics, validation_timings = None, None
 
             with timer.time("total_step_time"):
                 print("▶ Taking a training step...")
@@ -395,8 +396,13 @@ def dpo_train(
                     mbs=master_config["policy"]["train_micro_batch_size"] * 2,
                 )
 
+                is_last_step = total_steps >= master_config["dpo"]["max_num_steps"] or (
+                    current_epoch + 1 == max_num_epochs
+                    and current_step + 1 == len(train_dataloader)
+                )
+
                 # Run validation if it's a validation step
-                if val_period > 0 and total_steps % val_period == 0:
+                if is_last_step or (val_period > 0 and total_steps % val_period == 0):
                     val_metrics, timing_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
@@ -418,9 +424,12 @@ def dpo_train(
                     )
 
                 ## Checkpointing
-                if (
-                    master_config["checkpointing"]["enabled"]
-                    and total_steps % master_config["checkpointing"]["save_period"] == 0
+                dpo_save_state["consumed_samples"] += master_config["policy"][
+                    "train_global_batch_size"
+                ]
+                if master_config["checkpointing"]["enabled"] and (
+                    is_last_step
+                    or total_steps % master_config["checkpointing"]["save_period"] == 0
                 ):
                     dpo_save_state = get_dpo_save_state(
                         current_epoch,
@@ -437,12 +446,6 @@ def dpo_train(
                         train_dataloader,
                         policy,
                         timer,
-                    )
-                    final_checkpoint_saved = total_steps >= master_config["dpo"][
-                        "max_num_steps"
-                    ] or (
-                        current_epoch == total_num_epochs
-                        and current_step == num_steps_in_this_epoch
                     )
 
             losses = train_results["loss"]
@@ -470,47 +473,3 @@ def dpo_train(
 
         if current_epoch >= total_num_epochs:
             break
-
-    ## save a final checkpoint if needed
-    if master_config["checkpointing"]["enabled"] and final_checkpoint_saved is False:
-        ## check whether we need to run final validation
-        if (total_steps - 1) % val_period != 0:
-            val_metrics, timing_metrics, log_to_console = validate(
-                policy,
-                val_dataloader,
-                tokenizer,
-                loss_fn,
-                step=total_steps - 1,
-                master_config=master_config,
-                val_batches=dpo_config["val_batches"],
-                val_batch_size=dpo_config["val_global_batch_size"],
-                val_mbs=dpo_config["val_micro_batch_size"],
-            )
-            log_metrics(
-                log_to_console,
-                val_metrics,
-                timing_metrics,
-                total_steps - 1,
-                logger,
-                is_val=True,
-            )
-
-        dpo_save_state = get_dpo_save_state(
-            current_epoch - 1,
-            # if current_step is 0 after incrementing the step,
-            # the actual step that was run is the last step of the epoch
-            (current_step - 1)
-            % (min(len(train_dataloader), num_steps_in_this_epoch) + 1),
-            total_steps - 1,
-            val_metrics,
-            train_dataloader,
-        )
-        save_checkpoint(
-            checkpointer,
-            master_config,
-            dpo_save_state,
-            total_steps - 1,
-            train_dataloader,
-            policy,
-            timer,
-        )

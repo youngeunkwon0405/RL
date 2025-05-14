@@ -353,7 +353,6 @@ def sft_train(
 
     policy.prepare_for_training()
 
-    final_checkpoint_saved = None
     total_num_epochs = min(
         max_num_epochs,
         math.ceil(master_config["sft"]["max_num_steps"] / len(train_dataloader)),
@@ -378,8 +377,7 @@ def sft_train(
             print(
                 f"\n{'=' * 25} Step {current_step}/{num_steps_in_this_epoch} {'=' * 25}"
             )
-
-            final_checkpoint_saved = False
+            val_metrics, validation_timings = None, None
 
             with timer.time("total_step_time"):
                 # Prepare batch and generate responses
@@ -411,8 +409,13 @@ def sft_train(
                 print("▶ Taking a training step...")
                 train_results = policy.train(train_data, loss_fn)
 
+                is_last_step = total_steps >= master_config["sft"]["max_num_steps"] or (
+                    current_epoch + 1 == max_num_epochs
+                    and current_step + 1 == len(train_dataloader)
+                )
+
                 # Run validation if it's a validation step
-                if val_period > 0 and total_steps % val_period == 0:
+                if is_last_step or (val_period > 0 and total_steps % val_period == 0):
                     val_metrics, timing_metrics, log_to_console = validate(
                         policy,
                         val_dataloader,
@@ -435,9 +438,9 @@ def sft_train(
                     )
 
                 ## Checkpointing
-                if (
-                    master_config["checkpointing"]["enabled"]
-                    and total_steps % master_config["checkpointing"]["save_period"] == 0
+                if master_config["checkpointing"]["enabled"] and (
+                    is_last_step
+                    or total_steps % master_config["checkpointing"]["save_period"] == 0
                 ):
                     sft_save_state = get_sft_save_state(
                         current_epoch,
@@ -454,12 +457,6 @@ def sft_train(
                         train_dataloader,
                         policy,
                         timer,
-                    )
-                    final_checkpoint_saved = total_steps >= master_config["sft"][
-                        "max_num_steps"
-                    ] or (
-                        current_epoch == max_num_epochs
-                        and current_step == len(train_dataloader)
                     )
 
             losses = train_results["loss"]
@@ -494,47 +491,3 @@ def sft_train(
 
         if total_steps > master_config["sft"]["max_num_steps"]:
             break
-
-    ## save a final checkpoint if needed
-    if master_config["checkpointing"]["enabled"] and final_checkpoint_saved is False:
-        ## check whether we need to run final validation
-        if (total_steps - 1) % val_period != 0:
-            val_metrics, timing_metrics, log_to_console = validate(
-                policy,
-                val_dataloader,
-                tokenizer,
-                loss_fn,
-                step=total_steps - 1,
-                master_config=master_config,
-                sft_task_spec=sft_task_spec,
-                val_batches=sft_config["val_batches"],
-                val_batch_size=sft_config["val_global_batch_size"],
-                val_mbs=sft_config["val_micro_batch_size"],
-            )
-            log_metrics(
-                log_to_console,
-                val_metrics,
-                timing_metrics,
-                total_steps,
-                logger,
-                is_val=True,
-            )
-        sft_save_state = get_sft_save_state(
-            current_epoch - 1,
-            # if current_step is 0 after incrementing the step,
-            # the actual step that was run is the last step of the epoch
-            (current_step - 1)
-            % (min(len(train_dataloader), num_steps_in_this_epoch) + 1),
-            total_steps - 1,
-            val_metrics,
-            train_dataloader,
-        )
-        save_checkpoint(
-            checkpointer,
-            master_config,
-            sft_save_state,
-            total_steps - 1,
-            train_dataloader,
-            policy,
-            timer,
-        )

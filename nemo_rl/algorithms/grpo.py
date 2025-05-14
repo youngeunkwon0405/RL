@@ -325,16 +325,13 @@ def grpo_train(
             is_val=True,
         )
 
-    final_checkpoint_saved = None
-
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
     for batch in dataloader:
         print(
             f"\n{'=' * 25} Step {step}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
         )
-
-        final_checkpoint_saved = False
+        val_metrics, validation_timings = None, None
 
         with timer.time("total_step_time"):
             # Prepare batch
@@ -464,8 +461,12 @@ def grpo_train(
             with timer.time("policy_training"):
                 train_results = policy.train(train_data, loss_fn)
 
+            is_last_step = step + 1 == min(
+                master_config["grpo"]["max_num_steps"], len(dataloader)
+            )
+
             # Run validation if it's a validation step
-            if val_period > 0 and step % val_period == 0:
+            if is_last_step or (val_period > 0 and step % val_period == 0):
                 if NEED_REFIT and POLICY_GENERATION_STALE:
                     refit_policy_generation(
                         policy,
@@ -495,9 +496,9 @@ def grpo_train(
                 )
 
             ## Checkpointing
-            if (
-                master_config["checkpointing"]["enabled"]
-                and step % master_config["checkpointing"]["save_period"] == 0
+            if master_config["checkpointing"]["enabled"] and (
+                is_last_step
+                or step % master_config["checkpointing"]["save_period"] == 0
             ):
                 policy.prepare_for_training()
 
@@ -512,10 +513,6 @@ def grpo_train(
                     timer,
                 )
                 policy.offload_after_refit()
-
-                final_checkpoint_saved = step == min(
-                    master_config["grpo"]["max_num_steps"], len(dataloader)
-                )
 
         # Logging
         # Log training data
@@ -550,53 +547,6 @@ def grpo_train(
         step += 1
         if step >= master_config["grpo"]["max_num_steps"]:
             break
-
-    ## save a final checkpoint if needed
-    if master_config["checkpointing"]["enabled"] and final_checkpoint_saved is False:
-        ## check whether we need to run final validation
-        if (step - 1) % val_period != 0:
-            if NEED_REFIT and POLICY_GENERATION_STALE:
-                refit_policy_generation(
-                    policy,
-                    policy_generation,
-                    refit_buffer_size_gb,
-                )
-                POLICY_GENERATION_STALE = False
-            else:
-                policy_generation.prepare_for_generation()
-            val_metrics, timing_metrics, log_to_console = validate(
-                policy_generation,
-                val_dataloader,
-                tokenizer,
-                val_task_to_env,
-                step=step - 1,
-                master_config=master_config,
-            )
-            policy_generation.finish_generation()
-            log_metrics(
-                log_to_console,
-                val_metrics,
-                timing_metrics,
-                step - 1,
-                logger,
-                is_val=True,
-            )
-        grpo_save_state = get_grpo_save_state(
-            # if current_step is 0 after incrementing the step,
-            # the actual step that was run is the last step of the epoch
-            (step - 1)
-            % (min(len(dataloader), master_config["grpo"]["max_num_steps"]) + 1),
-            val_metrics,
-        )
-        save_checkpoint(
-            checkpointer,
-            master_config,
-            grpo_save_state,
-            step - 1,
-            dataloader,
-            policy,
-            timer,
-        )
 
 
 def validate(

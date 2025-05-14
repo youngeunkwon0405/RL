@@ -130,13 +130,19 @@ def surpress_user_warnings(f):
     return wrapper
 
 
-# need to surpress the masked tensor warnings from pytorch
-@surpress_user_warnings
 def masked_mean(
-    values: torch.Tensor, mask: torch.Tensor, dim: Optional[int] = None
-) -> torch.Tensor:
-    """Masks values with mask, and computes the mean of the values using the masked values."""
-    return (values * mask).sum(dim=dim) / (mask.sum(dim=dim) + 1e-8)
+    values,
+    mask,
+    dim: Optional[int] = None,
+    global_normalization_factor: Optional[torch.Tensor] = None,
+):
+    """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
+    normalization_factor = (
+        torch.sum(mask, dim=dim)
+        if global_normalization_factor is None
+        else global_normalization_factor
+    )
+    return torch.sum(values * mask, dim=dim) / (normalization_factor + 1e-8)
 
 
 def get_logprobs(
@@ -158,8 +164,12 @@ def get_logprobs(
             next_token_logits, data["input_ids"]
         )
     else:
-        next_token_logits = next_token_logits[:, :-1]  # Remove last position's logits
-        next_token_logprobs = torch.nn.functional.log_softmax(next_token_logits, dim=-1)
+        next_token_logits_wo_last = next_token_logits[
+            :, :-1
+        ]  # Remove last position's logits
+        next_token_logprobs = torch.nn.functional.log_softmax(
+            next_token_logits_wo_last, dim=-1
+        )
         next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
         token_logprobs = next_token_logprobs.gather(
             dim=-1, index=next_tokens.unsqueeze(-1)
@@ -418,10 +428,12 @@ def reduce_microbatch_metrics(metrics):
         dict: The reduced metrics
     """
     for k, v in metrics.items():
-        if k == "num_valid_samples":
-            metrics[k] = np.sum(v).item()
-        else:
+        ## TODO: update this following Sahil's PR
+        ## num_valid_toks and num_valid_seqs
+        if k in {"lr", "normalization_factor"}:
             metrics[k] = np.mean(v).item()
+        else:
+            metrics[k] = np.sum(v).item()
     return metrics
 
 
