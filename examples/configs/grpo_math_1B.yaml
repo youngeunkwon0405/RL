@@ -98,10 +98,22 @@ policy:
       load_format: dummy
 
 data:
+  train:
+    shuffle: False
+    seed: 420 # unused if shuffle is False
+    jsonl_path: ...
+
+    # checks if it's too long on init
+    filter_long_samples: false
+  val:
+    shuffle: False
+    seed: 420 # unused if shuffle is False
+    jsonl_path: ...
+
+    # checks if it's too long on init
+    filter_long_samples: true
+
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  prompt_file: "examples/prompts/cot.txt"
-  system_prompt_file: null
-  dataset_name: "OpenMathInstruct-2"
 
 env:
   math:

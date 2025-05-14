@@ -27,6 +27,8 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "debugpy>=1.8.0",
+    "jsonlines",
 ]
 
 [tool.setuptools]

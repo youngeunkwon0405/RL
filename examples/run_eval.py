@@ -23,7 +23,7 @@ from datasets import load_dataset
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
-from examples.run_grpo_math import math_data_processor
+from examples.run_grpo import math_data_processor
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import MathDataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset
