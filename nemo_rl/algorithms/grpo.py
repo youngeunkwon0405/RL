@@ -461,7 +461,7 @@ def grpo_train(
             with timer.time("policy_training"):
                 train_results = policy.train(train_data, loss_fn)
 
-            is_last_step = step + 1 == min(
+            is_last_step = step == min(
                 master_config["grpo"]["max_num_steps"], len(dataloader)
             )
 
@@ -481,7 +481,7 @@ def grpo_train(
                     val_dataloader,
                     tokenizer,
                     val_task_to_env,
-                    step=step + 1,
+                    step=step,
                     master_config=master_config,
                 )
                 policy_generation.finish_generation()
@@ -490,7 +490,7 @@ def grpo_train(
                     log_to_console,
                     val_metrics,
                     timing_metrics,
-                    step + 1,
+                    step,
                     logger,
                     is_val=True,
                 )
@@ -539,9 +539,7 @@ def grpo_train(
             "Avg Generation Length": rollout_metrics["mean_gen_tokens_per_sample"],
         }
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
-        log_metrics(
-            log_to_console, metrics, timing_metrics, step + 1, logger, is_val=False
-        )
+        log_metrics(log_to_console, metrics, timing_metrics, step, logger, is_val=False)
 
         timer.reset()
         step += 1

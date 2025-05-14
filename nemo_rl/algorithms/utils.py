@@ -468,8 +468,6 @@ def log_metrics(
         print(f"  • {k}: {v:.4f}")
     print(f"\n⏱️  {prefix.capitalize()} Timing:")
 
-    # Display total time first, separately
-    ## TODO: make this cleaner
     total_time = (
         timing_metrics["total_step_time"]
         if prefix == "train"

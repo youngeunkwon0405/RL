@@ -411,7 +411,7 @@ def sft_train(
 
                 is_last_step = total_steps >= master_config["sft"]["max_num_steps"] or (
                     current_epoch + 1 == max_num_epochs
-                    and current_step + 1 == len(train_dataloader)
+                    and current_step == len(train_dataloader)
                 )
 
                 # Run validation if it's a validation step
