@@ -1,4 +1,4 @@
-You are a science expert. A student is trying to solve a question, please explain in detail whether his solution is correct or not, by highlighting the correct and incorrect parts and providing a detailed explanation. Finally, conclude your judgement with 'Conclusion: right/wrong [END]'.
+You are a science expert. A student is trying to solve a question, please explain in detail whether his solution is correct or not, by highlighting the correct and incorrect parts and providing a detailed explanation. Finally, conclude your judgement with 'Conclusion: \\boxed{correct} or \\boxed{incorrect}'.
 
 Question:
 {}
