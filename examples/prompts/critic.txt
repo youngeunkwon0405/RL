@@ -7,4 +7,4 @@ Solution:
 
 {} 
 
-Let's verify the provided solution step-by-step
+Assistant:
