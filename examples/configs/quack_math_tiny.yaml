@@ -81,6 +81,7 @@ actor:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
+      precision: ${policy.precision}
       tensor_parallel_size: 1
       gpu_memory_utilization: 0.5
       max_model_len: ${actor.max_total_sequence_length}

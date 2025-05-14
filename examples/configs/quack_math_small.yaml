@@ -80,6 +80,7 @@ actor:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
+      precision: ${policy.precision}
       tensor_parallel_size: 4
       gpu_memory_utilization: 0.6
       max_model_len: ${actor.max_total_sequence_length}
@@ -97,6 +98,7 @@ critic:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
+      precision: ${policy.precision}
       tensor_parallel_size: 4
       gpu_memory_utilization: 0.9   # almost 100%, we got a dedicated critic cluster
       max_model_len: ${actor.max_total_sequence_length}
