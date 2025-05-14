@@ -29,46 +29,72 @@ from nemo_rl.environments.metrics import (
 from nemo_rl.environments.utils import chunk_list_to_workers
 
 
-def extract_verdict(critique: str) -> int:
+# def extract_verdict(critique: str) -> int:
+#     """
+#     Extract the verdict from the critique.
+#     Returns 1 if the verdict is "right" or "correct", and 0 otherwise.
+#     """
+#     try:
+#         verdict_text_to_parse = ""
+        
+#         # Try to find "Conclusion: " (case-insensitive)
+#         conclusion_marker = "Conclusion:"
+#         idx = critique.lower().find(conclusion_marker.lower())
+#         if idx != -1:
+#             verdict_text_to_parse = critique[idx + len(conclusion_marker):].strip()
+#         else:
+#             # Fallback to "Verdict: " (case-insensitive)
+#             verdict_marker = "Verdict:"
+#             idx = critique.lower().find(verdict_marker.lower())
+#             if idx != -1:
+#                 verdict_text_to_parse = critique[idx + len(verdict_marker):].strip()
+#             else:
+#                 # If no clear marker is found, a verdict cannot be reliably extracted.
+#                 return 0
+
+#         processed_verdict_text = verdict_text_to_parse.lower().replace("**", "")
+        
+#         # Check for positive keywords (e.g., "right", "correct")
+#         # Ensure they are not negated (e.g., "not right")
+#         is_positive = (
+#             ("right" in processed_verdict_text or "correct" in processed_verdict_text) and \
+#             ("not right" not in processed_verdict_text and "not correct" not in processed_verdict_text)
+#         )
+
+#         if is_positive:
+#             return 1
+        
+#         # For any other case (including explicit "wrong", "incorrect", or ambiguity), return 0.
+#         return 0
+
+#     except Exception:
+#         # In case of any error during parsing, default to 0.
+#         return 0
+
+
+def extract_verdict(critique):
     """
     Extract the verdict from the critique.
-    Returns 1 if the verdict is "right" or "correct", and 0 otherwise.
+    Returns 1 if the verdict is "right" and 0 if the verdict is "wrong".
     """
     try:
-        verdict_text_to_parse = ""
-        
-        # Try to find "Conclusion: " (case-insensitive)
-        conclusion_marker = "Conclusion:"
-        idx = critique.lower().find(conclusion_marker.lower())
-        if idx != -1:
-            verdict_text_to_parse = critique[idx + len(conclusion_marker):].strip()
-        else:
-            # Fallback to "Verdict: " (case-insensitive)
-            verdict_marker = "Verdict:"
-            idx = critique.lower().find(verdict_marker.lower())
-            if idx != -1:
-                verdict_text_to_parse = critique[idx + len(verdict_marker):].strip()
-            else:
-                # If no clear marker is found, a verdict cannot be reliably extracted.
-                return 0
+        # Find the verdict after "Conclusion: "
+        conclusion_start = critique.find("Conclusion")
+        if conclusion_start == -1:
+            return 0
 
-        processed_verdict_text = verdict_text_to_parse.lower().replace("**", "")
-        
-        # Check for positive keywords (e.g., "right", "correct")
-        # Ensure they are not negated (e.g., "not right")
-        is_positive = (
-            ("right" in processed_verdict_text or "correct" in processed_verdict_text) and \
-            ("not right" not in processed_verdict_text and "not correct" not in processed_verdict_text)
-        )
+        verdict_text = critique[conclusion_start + len("Conclusion: "):].strip().lower()
+        verdict_text = verdict_text.replace("**", "")
+        verdict_text = verdict_text
 
-        if is_positive:
+        # Check if verdict is either "right" or "wrong"
+        if "right" in verdict_text:
             return 1
-        
-        # For any other case (including explicit "wrong", "incorrect", or ambiguity), return 0.
-        return 0
-
-    except Exception:
-        # In case of any error during parsing, default to 0.
+        elif "wrong" in verdict_text:
+            return 0
+        else:
+            return 0
+    except:
         return 0
 
 
