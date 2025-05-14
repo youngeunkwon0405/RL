@@ -115,6 +115,7 @@ def setup(
     GenerationInterface,
     GenerationInterface,
     RayVirtualCluster,
+    RayVirtualCluster,
     NLLLoss,
     Logger,
     CheckpointManager,
@@ -125,7 +126,7 @@ def setup(
 
     Returns:
         Tuple of actor, actor_generation, critic_generation, 
-        cluster, loss_fn, logger, checkpointer, quack_save_state, master_config
+        actor_cluster, critic_cluster, loss_fn, logger, checkpointer, quack_save_state, master_config
     """
     # Extract individual configs for easier access
     actor_config = master_config["actor"]
@@ -171,18 +172,49 @@ def setup(
     print("\n▶ Setting up compute cluster...")
     assert actor_generation_config["backend"] == 'vllm', "Quack is pretty generation heavy, rerun with vllm backend."
     critic_generation_config["backend"] = 'vllm'
-    max_colocated_worker_groups = 1 + \
-        int(actor_generation_config["backend"] == 'vllm') + \
-        int(critic_generation_config["backend"] == 'vllm')
-    cluster = RayVirtualCluster(
-        name="quack_policy_cluster",
-        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
-        * cluster_config["num_nodes"],
+
+    total_nodes = cluster_config["num_nodes"]
+    actor_nodes = max(1, int(2 * total_nodes // 3))  # two parts for actor, one for critic
+    critic_nodes = max(1, total_nodes - actor_nodes) # Remaining nodes for critic, at least 1
+    
+    # Ensure total nodes used doesn't exceed available, adjust if necessary
+    if actor_nodes + critic_nodes > total_nodes and total_nodes > 0:
+        # This can happen if total_nodes is 1, actor_nodes becomes 1, critic_nodes becomes 1.
+        # Prioritize actor if only 1 node is available.
+        if total_nodes == 1:
+            actor_nodes = 1
+            critic_nodes = 0 # Critic will run on CPU or fail if GPU is required by its config
+        else: # if total_nodes > 1, and sum exceeds, reduce critic first
+            critic_nodes = total_nodes - actor_nodes
+
+
+    print(f"  Allocating {actor_nodes} nodes for actor cluster and {critic_nodes} nodes for critic cluster.")
+
+    actor_max_colocated_worker_groups = 1 + int(actor_generation_config["backend"] == 'vllm')
+    actor_cluster = RayVirtualCluster(
+        name="actor_cluster",
+        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]] * actor_nodes,
         use_gpus=True,
         num_gpus_per_node=cluster_config["gpus_per_node"],
-        max_colocated_worker_groups=max_colocated_worker_groups,
+        max_colocated_worker_groups=actor_max_colocated_worker_groups,
     )
-    print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
+    print(f"  ✓ Actor Ray cluster initialized with {actor_nodes} nodes")
+
+    critic_max_colocated_worker_groups = 1 # For the critic_generation vLLM
+    # Only create critic cluster if critic_nodes > 0
+    critic_cluster = None
+    if critic_nodes > 0:
+        critic_cluster = RayVirtualCluster(
+            name="critic_cluster",
+            bundle_ct_per_node_list=[cluster_config["gpus_per_node"]] * critic_nodes,
+            use_gpus=True,
+            num_gpus_per_node=cluster_config["gpus_per_node"],
+            max_colocated_worker_groups=critic_max_colocated_worker_groups,
+        )
+        print(f"  ✓ Critic Ray cluster initialized with {critic_nodes} nodes")
+    else:
+        print(f"  ℹ️ Critic cluster not initialized as 0 nodes are allocated. Critic might run on CPU or actor's resources if not vLLM, or fail.")
+
 
     # ==========================
     #   Training and Inference
@@ -191,20 +223,40 @@ def setup(
     # vllm model loading prefers clean environment, initialize actor_generation before actor (#52 will fix this)
     # model_name is needed for vLLM
     actor_generation_config["model_name"] = actor_config["model_name"]
-    critic_generation_config["model_name"] = actor_config["model_name"]
+    critic_generation_config["model_name"] = actor_config["model_name"] # Assuming critic uses the same base model
+    
     # vllm generation
-    actor_generation = VllmGeneration(cluster=cluster, config=actor_generation_config, name_prefix="vllm_actor")
-    critic_generation = VllmGeneration(cluster=cluster, config=critic_generation_config, name_prefix="vllm_critic")
+    actor_generation = VllmGeneration(cluster=actor_cluster, config=actor_generation_config, name_prefix="vllm_actor")
+    
+    critic_generation = None
+    if critic_cluster: # only initialize if critic cluster exists
+        critic_generation = VllmGeneration(cluster=critic_cluster, config=critic_generation_config, name_prefix="vllm_critic")
+    elif critic_generation_config["backend"] == 'vllm':
+        # If critic is vLLM but has no cluster, this is problematic.
+        # For now, let's try to put it on actor_cluster, though this defeats the purpose of separation.
+        # A better solution would be to require critic_nodes > 0 for vLLM critic.
+        print(f"  ⚠️ Warning: Critic backend is vLLM but no dedicated nodes allocated. Attempting to use actor_cluster for critic_generation.")
+        critic_generation = VllmGeneration(cluster=actor_cluster, config=critic_generation_config, name_prefix="vllm_critic_on_actor_cluster")
+    else:
+        # If critic is not vLLM, it might not need a Ray cluster or can use a default/local setup.
+        # This part of the logic might need to be adapted based on how non-vLLM critics are handled.
+        print(f"  ℹ️ Critic backend is not vLLM ('{critic_generation_config['backend']}'). critic_generation will not be a VllmGeneration instance on a dedicated cluster.")
+        # Placeholder: Initialize critic_generation appropriately if it's not vLLM and needs specific setup.
+        # For now, assuming if not vLLM, it might be run differently or this will lead to an error later if not handled.
+        pass
+
+
     # Worker groups are not initialized until the first call to run something on workergroups.
     # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
     actor_generation.finish_generation()
-    critic_generation.finish_generation()
+    if critic_generation and hasattr(critic_generation, 'finish_generation'): # Check if critic_generation is not None and has the method
+        critic_generation.finish_generation()
     print(
         f"  ✓ Using vLLM backend for generation with {actor_config['model_name']}"
     )
 
     actor = HfPolicy(
-        cluster=cluster,
+        cluster=actor_cluster, # Actor policy uses the actor_cluster
         config=actor_config,
         tokenizer=tokenizer,
         weights_path=Path(last_checkpoint_path) / "actor" / "weights"
@@ -226,7 +278,8 @@ def setup(
         actor,
         actor_generation,
         critic_generation,
-        cluster,
+        actor_cluster, # Return actor_cluster
+        critic_cluster, # Return critic_cluster
         loss_fn,
         logger,
         checkpointer,
@@ -352,7 +405,9 @@ def quack_train(
 
     # track if generation needs a refit before running
     ACTOR_GENERATION_STALE = True
-    CRITIC_GENERATION_STALE = lambda x: x % critic_refit_period == 0
+    # CRITIC_GENERATION_STALE = lambda x: x % critic_refit_period == 0
+    # Define CRITIC_GENERATION_STALE, ensuring critic_generation exists before checking its properties if any were needed
+    CRITIC_GENERATION_STALE = lambda current_step: critic_generation is not None and current_step % critic_refit_period == 0
 
     # Run validation at the start if configured
     if val_at_start and step == 0:
@@ -419,10 +474,22 @@ def quack_train(
             
             # check if we have enough samples in the replay buffer
             # we also make sure critic is refitted on the first step
-            if not replay_buffer.can_sample(master_config["quack"]["train_dataset_size"]) and CRITIC_GENERATION_STALE(step):
-                print(f"  ⚠️ Not enough samples in replay buffer, skipping training for now...")
+            if not replay_buffer.can_sample(master_config["quack"]["train_dataset_size"]):
+                print(f"  ⚠️ Not enough samples in replay buffer ({replay_buffer.current_size()}/{master_config['quack']['train_dataset_size']}), skipping training for now...")
+                # still need to advance step and check max_num_steps
+                step += 1
+                if step >= master_config["quack"]["max_num_steps"]:
+                    break
                 continue
             
+            if not critic_generation:
+                print(f"  ⚠️ Critic generation service is not available. Skipping training step as critiques cannot be generated.")
+                logger.log_metrics({f"error_step_{step+1}": "critic_generation_unavailable"}, step + 1, prefix="error")
+                step += 1
+                if step >= master_config["quack"]["max_num_steps"]:
+                    break
+                continue
+
             # get train dataset batch from replay buffer
             with timer.time("sampling_from_buffer"):
                 critic_dataset = replay_buffer.sample(master_config["quack"]["train_dataset_size"])
@@ -438,16 +505,17 @@ def quack_train(
             print(f"▶ Generating *CRITIQUES* for dataset of size {len(critic_dataset)}...")
             with timer.time("prepare_critic_for_generation"):
                 if NEED_REFIT_CRITIC and CRITIC_GENERATION_STALE(step):
+                    print(f"  Refitting critic generation for step {step +1}...")
                     refit(
-                        actor,
+                        actor, # Assuming actor weights are used for critic model, or critic has its own policy object
                         critic_generation,
                         refit_buffer_size_gb,
                     )
                 else:
+                    print(f"  Preparing critic generation (no refit) for step {step+1}...")
                     critic_generation.prepare_for_generation()
 
             with timer.time("critic_generation"):
-                critic_generation.prepare_for_generation()
                 critic_micro_batch_list = []
                 for critic_micro_batch in critic_iterator:
                     critic_micro_batch, rollout_metrics_critic = run_multi_turn_rollout(
@@ -613,6 +681,7 @@ def quack_train(
         timer.reset()
         step += 1
         if step >= master_config["quack"]["max_num_steps"]:
+            print(f"Reached max_num_steps ({master_config['quack']['max_num_steps']}). Stopping training.")
             break
 
 

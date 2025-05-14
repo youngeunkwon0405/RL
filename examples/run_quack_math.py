@@ -134,7 +134,7 @@ def main():
         actor,
         actor_generation,
         critic_generation,
-        cluster,
+        _, _,   # actor_cluster, critic_cluster
         loss_fn,
         logger,
         checkpointer,
