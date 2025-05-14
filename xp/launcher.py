@@ -226,6 +226,7 @@ def launch_experiment(
     default_args = [
         f"logger.log_dir={log_dir}",
         "logger.wandb_enabled=True",
+        f"logger.wandb.name={job_name}",
         f"checkpointing.checkpoint_dir={checkpoint_dir}",
         f"cluster.num_nodes={nodes}"
     ]
