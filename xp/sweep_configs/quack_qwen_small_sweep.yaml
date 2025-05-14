@@ -12,7 +12,7 @@ config_path: "examples/configs/quack_math_small.yaml"
 
 
 # Model configuration
-policy.model_name: ["Qwen/Qwen2.5-Math-7B", "Qwen/Qwen3-8B"]
+actor.model_name: ["Qwen/Qwen2.5-Math-7B", "Qwen/Qwen3-8B"]
 
 # Refit configuration
 quack.critic_refit_period: [1, 2, 4, 8]
