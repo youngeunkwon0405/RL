@@ -658,6 +658,7 @@ def quack_train(
 
         print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(repeated_batch['total_reward'].numpy()):.4f}")
+        print(f"  • Critic Reward: {np.mean(critic_batch['total_reward'].numpy()):.4f}")
         print(
             f"  • Mean Generation Length: {rollout_metrics_actor['mean_gen_tokens_per_sample']:.4f}"
         )
