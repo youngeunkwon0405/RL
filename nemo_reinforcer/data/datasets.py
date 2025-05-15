@@ -102,11 +102,6 @@ class AllTaskProcessedDataset:
             task_data_spec = self.default_task_data_spec
             task_data_processor = self.task_data_processors
 
-        print (f"DEBUG ABCABCABC")
-        print (f"task_data_processor: {task_data_processor}")
-        print (f"task_data_spec: {task_data_spec}")
-        print (f"idx: {idx}")
-        print (f"entry: {entry}")
         datum_spec = task_data_processor(
             entry, task_data_spec, self.tokenizer, self.max_seq_length, idx
         )

@@ -51,6 +51,7 @@ class HFVerifyWorker:
         Returns:
             List[float]. The rewards for each predicted response.
         """
+        
         results = []
         for response, ground_truth in zip(pred_responses, ground_truths):
             try:
@@ -71,6 +72,7 @@ class MathEnvironment(EnvironmentInterface):
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
 
     def __init__(self, cfg: MathEnvConfig):
+
         self.cfg = cfg
         self.num_workers = cfg["num_workers"]
         self.workers = [
@@ -166,6 +168,7 @@ class MathEnvironment(EnvironmentInterface):
         Every rank will run this function, so you're free to use distributed
         calculations if you'd prefer for heavy metrics.
         """
+
         batch["rewards"] = (
             batch["rewards"] * batch["is_end"]
         )  # set a reward of 0 for any incorrectly ended sequences
