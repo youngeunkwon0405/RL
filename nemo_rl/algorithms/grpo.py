@@ -543,7 +543,7 @@ def grpo_train(
 
         timer.reset()
         step += 1
-        if step >= master_config["grpo"]["max_num_steps"]:
+        if step > master_config["grpo"]["max_num_steps"]:
             break
 
 

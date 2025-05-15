@@ -462,7 +462,7 @@ def dpo_train(
             current_step += 1
             total_steps += 1
 
-            if total_steps >= master_config["dpo"]["max_num_steps"]:
+            if total_steps > master_config["dpo"]["max_num_steps"]:
                 return
 
         current_epoch += 1
