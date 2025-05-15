@@ -217,10 +217,10 @@ def test_shard_by_batch_size_dynamic():
     dynamic_batching_cfg: DynamicBatchingCfg = {
         "input_key": "data",
         "input_lengths_key": "sequence_lengths",
-        "sequence_length_round" : 4,
+        "sequence_length_round": 4,
         "max_tokens_per_microbatch": 32,
     }
-    
+
     shards, _ = batch.shard_by_batch_size(
         shards=2, dynamic_batching_cfg=dynamic_batching_cfg
     )
