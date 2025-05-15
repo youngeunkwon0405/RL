@@ -22,6 +22,8 @@ ckpts/
 coverage.json
 .coverage*
 test_assets/
+unit_results.json
+unit_results/
 
 # Cache
 uv_cache/

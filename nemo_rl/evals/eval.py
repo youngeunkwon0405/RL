@@ -138,7 +138,7 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
         master_config: Configuration settings.
     """
     # Run evaluation loop
-    score, count = 0.0, 0
+    score, has_prediction, count = 0.0, 0.0, 0
     for batch in dataloader:
         # get input prompt from message_log
         prompts = []
@@ -174,6 +174,7 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
         env_return = ray.get(env.step.remote(to_env, batch["extra_env_info"]))
 
         score += env_return.rewards.sum().item()
+        has_prediction += env_return.has_predictions.sum().item()
         count += len(env_return.rewards)
 
     # Cleanup before printing results
@@ -184,8 +185,10 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
     dataset_name = os.path.basename(master_config["data"]["dataset_name"])
     model_name = os.path.basename(master_config["generation"]["model_name"])
     average_score = score / count
+    prediction_ratio = has_prediction / count
 
     print("\n" + "=" * 60)
     print(f"{model_name=} {dataset_name=}")
     print(f"score={average_score:.2f} ({score}/{count})")
+    print(f"ratio of valid predictions={prediction_ratio:.2f} ({has_prediction}/{count})")
     print("=" * 60 + "\n")

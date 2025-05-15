@@ -27,7 +27,7 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES
 from nemo_rl.environments.interfaces import (
     EnvironmentInterface,
-    EnvironmentReturn,
+    MathEnvironmentReturn,
 )
 from nemo_rl.environments.metrics import (
     calculate_pass_rate_per_prompt,
@@ -72,7 +72,8 @@ class HFVerifyWorker:
         Returns:
             List[float]. The rewards for each predicted response.
         """
-        results = []
+        rewards = []
+        has_predictions = []
         for response, ground_truth in zip(pred_responses, ground_truths):
             try:
                 if self.extraction_config is not None:
@@ -83,10 +84,12 @@ class HFVerifyWorker:
                 else:
                     gold = parse(ground_truth)
                     pred = parse(response[-100:])  # avoid looking at the whole string
-                results.append(float(verify(gold, pred)))
+                rewards.append(float(verify(gold, pred)))
+                has_predictions.append(len(pred) > 0)
             except Exception:
-                results.append(0)
-        return results
+                rewards.append(0)
+                has_predictions.append(False)
+        return rewards, has_predictions
 
 
 class MathEnvironmentMetadata(TypedDict):
@@ -116,7 +119,7 @@ class MathEnvironment(EnvironmentInterface):
         self,
         message_log_batch: List[List[Dict[str, str]]],
         metadata: List[MathEnvironmentMetadata],
-    ) -> EnvironmentReturn:
+    ) -> MathEnvironmentReturn:
         """Runs a step in the math environment.
 
         Args:
@@ -159,30 +162,37 @@ class MathEnvironment(EnvironmentInterface):
 
         results = ray.get(futures)
 
-        # flatten the results
-        results = [item for sublist in results for item in sublist]
+        # Unpack the results
+        rewards = []
+        has_predictions = []
+        for rew, has_pred in results:
+            rewards += rew
+            has_predictions += has_pred
+
         observations = [
             {
                 "role": "environment",
                 "content": "Environment: correct"
-                if result
+                if reward
                 else "Environment: incorrect",
             }
-            for result in results
+            for reward in rewards
         ]
 
         # create a tensor of rewards and done flags
-        rewards = torch.tensor(results).cpu()
+        rewards = torch.tensor(rewards).cpu()
         done = torch.ones_like(rewards).cpu()
+        has_predictions = torch.tensor(has_predictions).cpu()
 
         next_stop_strings = [None] * len(message_log_batch)
 
-        return EnvironmentReturn(
+        return MathEnvironmentReturn(
             observations=observations,
             metadata=metadata,
             next_stop_strings=next_stop_strings,
             rewards=rewards,
             terminateds=done,
+            has_predictions=has_predictions,
         )
 
     def global_post_process_and_metrics(

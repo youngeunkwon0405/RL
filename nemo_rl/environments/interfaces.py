@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import abc
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 from torch import Tensor
 
@@ -20,7 +21,8 @@ from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 
-class EnvironmentReturn(NamedTuple):
+@dataclass
+class EnvironmentReturn:
     """Standard batched return type for environment step methods.
 
     **All elements are batched.**
@@ -42,6 +44,11 @@ class EnvironmentReturn(NamedTuple):
     next_stop_strings: List[Optional[List[str]]]
     rewards: Tensor
     terminateds: Tensor
+
+
+@dataclass
+class MathEnvironmentReturn(EnvironmentReturn):
+    has_predictions: Tensor
 
 
 class EnvironmentInterface(abc.ABC):
