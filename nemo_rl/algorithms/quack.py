@@ -190,7 +190,8 @@ def setup(
 
     print(f"  Allocating {actor_nodes} nodes for actor cluster and {critic_nodes} nodes for critic cluster.")
 
-    actor_max_colocated_worker_groups = 1 + int(actor_generation_config["backend"] == 'vllm')
+    actor_max_colocated_worker_groups = 1 + int(actor_generation_config["backend"] == 'vllm') + \
+        int(critic_generation_config["backend"] == 'vllm' and not critic_nodes)
     actor_cluster = RayVirtualCluster(
         name="actor_cluster",
         bundle_ct_per_node_list=[cluster_config["gpus_per_node"]] * actor_nodes,
