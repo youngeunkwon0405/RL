@@ -299,7 +299,7 @@ def grpo_train(
     refit_buffer_size_gb = master_config["policy"]["refit_buffer_size_gb"]
 
     # Run validation at the start if configured
-    if val_at_start and step == 0:
+    if val_at_start and step == 1:
         print("\n🔍 Running initial validation...")
         if NEED_REFIT and POLICY_GENERATION_STALE:
             refit_policy_generation(policy, policy_generation, refit_buffer_size_gb)

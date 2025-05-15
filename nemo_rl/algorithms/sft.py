@@ -328,7 +328,7 @@ def sft_train(
     max_num_epochs = sft_config["max_num_epochs"]
 
     # Run validation at the start if configured
-    if val_at_start and total_steps == 0:
+    if val_at_start and total_steps == 1:
         print("\n🔍 Running initial validation...")
         val_metrics, timing_metrics, log_to_console = validate(
             policy,
@@ -484,10 +484,7 @@ def sft_train(
             total_steps += 1
 
             if total_steps > master_config["sft"]["max_num_steps"]:
-                break
+                return
 
         current_epoch += 1
         current_step = 0  # Reset step counter for new epoch
-
-        if total_steps > master_config["sft"]["max_num_steps"]:
-            break

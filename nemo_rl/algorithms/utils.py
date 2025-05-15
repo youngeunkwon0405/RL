@@ -341,16 +341,12 @@ def setup_dataloaders(
     Returns:
         tuple: A 2-tuple containing (train_dataloader, val_dataloader).
     """
-    train_dataloader_kwargs = {
-        "dataset": train_dataset,
-        "batch_size": policy_config["train_global_batch_size"],
-        "shuffle": True,
-        "collate_fn": collate_fn,
-        "drop_last": True,
-    }
     train_dataloader = StatefulDataLoader(
-        **train_dataloader_kwargs,
-        generator=torch.Generator().manual_seed(algorithm_config["seed"]),
+        train_dataset,
+        batch_size=policy_config["train_global_batch_size"],
+        shuffle=True,
+        collate_fn=collate_fn,
+        drop_last=True,
     )
     if last_checkpoint_path is not None:
         dataloader_state_dict = torch.load(
@@ -372,6 +368,7 @@ def setup_dataloaders(
             ),
             shuffle=False,
             collate_fn=collate_fn,
+            drop_last=True,
         )
         print(f"  ✓ Validation dataloader loaded with {len(val_dataset)} samples")
 
