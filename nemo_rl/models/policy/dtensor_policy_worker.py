@@ -424,31 +424,6 @@ class DTensorPolicyWorker:
                             use_cache=False,
                         )
 
-                        # # concatenate all microbatches
-                        # input_ids = input_ids.reshape(
-                        #     (num_microbatches, -1, seq_len)
-                        # ).reshape(-1, seq_len)
-                        # attention_mask_input_all_ones = (
-                        #     attention_mask_input_all_ones.reshape(
-                        #         (num_microbatches, -1, seq_len)
-                        #     )
-                        #     .reshape(-1, seq_len)
-                        #     .to(input_ids.device)
-                        # )
-                        # position_ids = position_ids.reshape(
-                        #     (num_microbatches, -1, seq_len)
-                        # ).reshape(-1, seq_len).to(input_ids.device)
-                        # logging.debug(f"oooooooooooooooooo model input ooooooooooooooooooo")
-                        # logging.debug(f"{input_ids=}")
-                        # logging.debug(f"{attention_mask_input_all_ones=}")
-                        # logging.debug(f"{position_ids=}")
-                        # outputs = self.model(
-                        #     input_ids=input_ids,
-                        #     attention_mask=attention_mask_input_all_ones,
-                        #     position_ids=position_ids,
-                        #     use_cache=False,
-                        # )
-
                     # Get logprobs
                     if not hasattr(outputs, "logits"):
                         logits = self.model.lm_head(outputs.last_hidden_state)
