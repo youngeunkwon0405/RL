@@ -410,7 +410,7 @@ def sft_train(
                 train_results = policy.train(train_data, loss_fn)
 
                 is_last_step = total_steps >= master_config["sft"]["max_num_steps"] or (
-                    current_epoch + 1 == max_num_epochs
+                    current_epoch == max_num_epochs
                     and current_step == len(train_dataloader)
                 )
 
@@ -487,4 +487,4 @@ def sft_train(
                 return
 
         current_epoch += 1
-        current_step = 0  # Reset step counter for new epoch
+        current_step = 1  # Reset step counter for new epoch
