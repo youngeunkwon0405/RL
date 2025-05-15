@@ -405,9 +405,7 @@ def quack_train(
 
     # track if generation needs a refit before running
     ACTOR_GENERATION_STALE = True
-    # CRITIC_GENERATION_STALE = lambda x: x % critic_refit_period == 0
-    # Define CRITIC_GENERATION_STALE, ensuring critic_generation exists before checking its properties if any were needed
-    CRITIC_GENERATION_STALE = lambda current_step: critic_generation is not None and current_step % critic_refit_period == 0
+    CRITIC_GENERATION_STALE = lambda _: critic_generation is not None
 
     # Run validation at the start if configured
     if val_at_start and step == 0:
@@ -511,6 +509,7 @@ def quack_train(
                         critic_generation,
                         refit_buffer_size_gb,
                     )
+                    CRITIC_GENERATION_STALE = lambda current_step: current_step % critic_refit_period == 0
                 else:
                     print(f"  Preparing critic generation (no refit) for step {step+1}...")
                     critic_generation.prepare_for_generation()
