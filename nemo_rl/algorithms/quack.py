@@ -174,8 +174,8 @@ def setup(
     critic_generation_config["backend"] = 'vllm'
 
     total_nodes = cluster_config["num_nodes"]
-    actor_nodes = max(1, int(2 * total_nodes // 3))  # two parts for actor, one for critic
-    critic_nodes = max(1, total_nodes - actor_nodes) # Remaining nodes for critic, at least 1
+    critic_nodes = master_config["critic"]["num_nodes"] or 0
+    actor_nodes = total_nodes - critic_nodes
     
     # Ensure total nodes used doesn't exceed available, adjust if necessary
     if actor_nodes + critic_nodes > total_nodes and total_nodes > 0:
@@ -227,6 +227,12 @@ def setup(
     
     # vllm generation
     actor_generation = VllmGeneration(cluster=actor_cluster, config=actor_generation_config, name_prefix="vllm_actor")
+
+    # Worker groups are not initialized until the first call to run something on workergroups.
+    # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
+
+    # important to call this before initializing critic_generation, this will ensure offload
+    actor_generation.finish_generation()
     
     critic_generation = None
     if critic_cluster: # only initialize if critic cluster exists
@@ -246,9 +252,6 @@ def setup(
         pass
 
 
-    # Worker groups are not initialized until the first call to run something on workergroups.
-    # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
-    actor_generation.finish_generation()
     if critic_generation and hasattr(critic_generation, 'finish_generation'): # Check if critic_generation is not None and has the method
         critic_generation.finish_generation()
     print(
