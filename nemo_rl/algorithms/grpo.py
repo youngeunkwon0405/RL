@@ -79,7 +79,6 @@ class GRPOConfig(TypedDict):
     val_at_start: bool
     max_val_samples: int
     val_batch_size: int
-    seed: int
 
 
 class GRPOSaveState(TypedDict):
