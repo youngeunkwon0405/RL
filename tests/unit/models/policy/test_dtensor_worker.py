@@ -11,26 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import ray
-import pytest
-import pprint
-import torch
 import os
+import pprint
+
+import pytest
+import ray
+import torch
 
 # Define a custom marker for model configuration tests
 pytestmark = pytest.mark.modelconfig
 
-from nemo_reinforcer.algorithms.interfaces import LossFunction
-from nemo_reinforcer.algorithms.utils import get_tokenizer
-from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.models.generation.interfaces import configure_generation_config
-from nemo_reinforcer.models.policy import PolicyConfig
-from nemo_reinforcer.models.policy.hf_policy import HfPolicy
-from nemo_reinforcer.models.policy.dtensor_policy_worker import DTensorPolicyWorker
-from tests.unit.test_utils import simple_loss
-from tests.unit.conftest import TEST_ASSETS
 from transformers import AutoModelForCausalLM
+
+from nemo_rl.algorithms.interfaces import LossFunction
+from nemo_rl.algorithms.utils import get_tokenizer
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
+from nemo_rl.models.generation.interfaces import configure_generation_config
+from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.dtensor_policy_worker import DTensorPolicyWorker
+from nemo_rl.models.policy.hf_policy import HfPolicy
+from tests.unit.conftest import TEST_ASSETS
+from tests.unit.test_utils import simple_loss
 
 
 def create_test_config(
@@ -292,6 +294,10 @@ def training_setup(request, two_gpu_virtual_cluster):
         (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, True, False, True),
         (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, False, True, True),
         (TEST_ASSETS.TINY_QWEN2_MODEL_PATH, 1, True, True, True),
+        (TEST_ASSETS.TINY_QWEN3_MODEL_PATH, 1, True, True, False),
+        (TEST_ASSETS.TINY_QWEN3_MODEL_PATH, 1, True, False, True),
+        (TEST_ASSETS.TINY_QWEN3_MODEL_PATH, 1, False, True, True),
+        (TEST_ASSETS.TINY_QWEN3_MODEL_PATH, 1, True, True, True),
     ],
     indirect=True,
 )
@@ -419,6 +425,8 @@ def logprob_setup(request, two_gpu_virtual_cluster):
         (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 2, False, False, False),
         (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 2, False, True, False),
         (TEST_ASSETS.TINY_LLAMA_MODEL_PATH, 2, False, True, True),
+        (TEST_ASSETS.TINY_QWEN3_MODEL_PATH, 2, False, True, False),
+        (TEST_ASSETS.TINY_QWEN3_MODEL_PATH, 2, False, False, False),
     ],
     indirect=True,
 )

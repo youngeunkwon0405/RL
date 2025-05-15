@@ -11,17 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from nemo_reinforcer.distributed.virtual_cluster import (
-    _get_node_ip_and_free_port,
+import os
+from unittest.mock import MagicMock, patch
+
+import pytest
+import ray
+
+from nemo_rl.distributed.virtual_cluster import (
     PY_EXECUTABLES,
     RayVirtualCluster,
     ResourceInsufficientError,
+    _get_node_ip_and_free_port,
 )
-import ray
-import pytest
-import os
-from unittest.mock import patch, MagicMock
-import importlib
 
 
 def test_get_node_ip_and_free_port_does_not_start_with_zero():
@@ -67,7 +68,7 @@ def test_env_max_retries_default_value():
     with (
         patch.dict(os.environ, {}, clear=True),
         patch(
-            "nemo_reinforcer.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
+            "nemo_rl.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
         ) as mock_init,
     ):
         # Mock successful initialization
@@ -91,7 +92,7 @@ def test_env_max_retries_exhausted():
     with (
         patch.dict(os.environ, env_vars, clear=True),
         patch(
-            "nemo_reinforcer.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
+            "nemo_rl.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
         ) as mock_init,
         patch("time.sleep") as mock_sleep,
     ):
