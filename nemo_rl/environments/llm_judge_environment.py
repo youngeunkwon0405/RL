@@ -87,10 +87,10 @@ def extract_verdict(critique):
         verdict_text = verdict_text.replace("**", "")
         verdict_text = verdict_text
 
-        # Check if verdict is either "\\boxed{correct}" or "\\boxed{incorrect}"
-        if "\\boxed{correct}" in verdict_text:
+        # Check if verdict is either "right" or "wrong"
+        if "right" in verdict_text:
             return 1
-        elif "\\boxed{incorrect}" in verdict_text:
+        elif "wrong" in verdict_text:
             return 0
         else:
             return 0
