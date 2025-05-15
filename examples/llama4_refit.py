@@ -5,16 +5,16 @@ import torch
 
 from transformers import AutoTokenizer
 
-from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.distributed.virtual_cluster import RayVirtualCluster
-from nemo_reinforcer.models.megatron.converters import REGISTRY, ModelType
-from nemo_reinforcer.models.policy.megatron_policy import MegatronPolicy
-from nemo_reinforcer.models.generation.interfaces import GenerationOutputSpec, configure_generation_config
-from nemo_reinforcer.models.generation.vllm import VllmGeneration
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
+from nemo_rl.models.megatron.converters import REGISTRY, ModelType
+from nemo_rl.models.policy.megatron_policy import MegatronPolicy
+from nemo_rl.models.generation.interfaces import GenerationOutputSpec, configure_generation_config
+from nemo_rl.models.generation.vllm import VllmGeneration
 
 ray.init()
 
-model_name = "meta-llama/Llama-4-Scout-17B-16E-Instruct"
+model_name = "/root/checkpoints/llama4-scout-custom-init"
 # model_name = "meta-llama/Llama-3.1-8B-Instruct"
 # model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 
@@ -22,8 +22,8 @@ converter_type = ModelType.LLAMA4
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 
 # GPU Allocation
-MEGATRON_TP = 8
-VLLM_TP = 8
+MEGATRON_TP = 2
+VLLM_TP = 2
 
 # --- Megatron Config (Restored) ---
 config = {
@@ -63,7 +63,7 @@ config = {
         "converter_type": converter_type,
         "enabled": True,
         "empty_unused_memory_level": 1,
-        "converter_class": "Qwen2ForCausalLM",
+        "converter_class": "Llama4ForCausalLM",
         "optimizer": {
             "optimizer": "adam",
             "lr": 5.0e-6,
@@ -223,7 +223,7 @@ for keys in split_keys:
     vllm_policy.update_weights(ipc_handles)
 print("Done updating weights")
 policy.offload_after_refit()
-# vllm_policy.prepare_for_generation(tags=["kv_cache"])
+vllm_policy.prepare_for_generation(tags=["kv_cache"])
 
 # #compare shapes
 # all_match = True

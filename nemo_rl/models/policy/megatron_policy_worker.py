@@ -125,7 +125,7 @@ def setup_megatron_model(
         fault_tolerance.maybe_setup_simulated_fault(cfg.ft_config)
 
     # Set pytorch JIT layer fusion options and warmup JIT functions.
-    # set_jit_fusion_options(cfg.model_config, cfg.train_config.micro_batch_size)
+    set_jit_fusion_options(cfg.model_config, cfg.train_config.micro_batch_size)
 
     # Adjust the startup time so it reflects the largest value.
     # This will be closer to what scheduler will see (outside of
@@ -176,13 +176,13 @@ def setup_megatron_model(
         optimizer = None
         scheduler = None
 
-    # _update_model_config_funcs(
-    #     model,
-    #     cfg.model_config,
-    #     cfg.ddp_config,
-    #     optimizer,
-    #     align_grad_reduce=cfg.dist_config.align_grad_reduce,
-    # )
+    _update_model_config_funcs(
+        model,
+        cfg.model_config,
+        cfg.ddp_config,
+        optimizer,
+        align_grad_reduce=cfg.dist_config.align_grad_reduce,
+    )
     print("Model, optimizer, and learning rate scheduler built")
     torch.distributed.barrier()
 
@@ -194,14 +194,14 @@ def setup_megatron_model(
         checkpoint_exists(cfg.checkpoint_config.load)
         or checkpoint_exists(cfg.checkpoint_config.pretrained_checkpoint)
     ):
-        # load_checkpoint(
-        #     state,
-        #     model,
-        #     optimizer,
-        #     scheduler,
-        #     checkpointing_context=checkpointing_context,
-        #     skip_load_to_model_and_opt=HAVE_FSDP2 and cfg.dist_config.use_torch_fsdp2,
-        # )
+        load_checkpoint(
+            state,
+            model,
+            optimizer,
+            scheduler,
+            checkpointing_context=checkpointing_context,
+            skip_load_to_model_and_opt=HAVE_FSDP2 and cfg.dist_config.use_torch_fsdp2,
+        )
         print("Checkpoint loaded")
     torch.distributed.barrier()
 

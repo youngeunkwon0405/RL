@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# python /lustre/fsw/portfolios/coreai/users/yuya/nemo-rl/examples/run_grpo_math.py --config examples/configs/grpo_math_llama4.yaml
+
 import argparse
 import os
 import pprint
