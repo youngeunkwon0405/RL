@@ -424,9 +424,6 @@ def dpo_train(
                     )
 
                 ## Checkpointing
-                dpo_save_state["consumed_samples"] += master_config["policy"][
-                    "train_global_batch_size"
-                ]
                 if master_config["checkpointing"]["enabled"] and (
                     is_last_step
                     or total_steps % master_config["checkpointing"]["save_period"] == 0

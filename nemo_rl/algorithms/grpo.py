@@ -527,7 +527,7 @@ def grpo_train(
 
         metrics = {
             "loss": train_results["loss"].numpy(),
-            "reward": rewards.numpy(),
+            "reward": np.mean(rewards.numpy()),
             "grad_norm": train_results["grad_norm"].numpy(),
         }
         metrics.update(reduce_microbatch_metrics(train_results["all_mb_metrics"]))

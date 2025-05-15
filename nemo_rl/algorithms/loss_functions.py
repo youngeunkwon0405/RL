@@ -11,23 +11,18 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import enum
 from typing import Any, Tuple, TypedDict
 
 import torch
 
 from nemo_rl.algorithms.interfaces import LossFunction
+from nemo_rl.algorithms.types import LossType
 from nemo_rl.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
     get_logprobs,
     masked_mean,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-
-
-class LossType(enum.Enum):
-    TOKEN_LEVEL = "token_level"
-    SEQUENCE_LEVEL = "sequence_level"
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -265,7 +260,6 @@ class ClippedPGLossFn(LossFunction):
                 "kl_penalty": kl.item() / self.reference_policy_kl_penalty if kl else 0,
                 "token_mult_prob_error": mult_prob_error,
                 "sampling_importance_ratio": sample_importance_ratio.item(),
-                "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
             },
         )
@@ -314,8 +308,6 @@ class NLLLoss(LossFunction):
 
         return loss, {
             "loss": loss.item() if loss.ndim == 0 else loss,
-            "num_unmasked_tokens": mask.sum().item(),
-            "num_valid_samples": sample_mask.sum().item(),
         }
 
 
@@ -499,9 +491,6 @@ class DPOLossFn(LossFunction):
             + self.preference_loss_weight * preference_loss
         )
 
-        ## divide by 2 because we're summing over (chosen, rejected) pairs
-        num_valid_samples = data["sample_mask"].sum() / 2
-
         return dpo_loss, {
             "loss": dpo_loss.item(),
             "sft_loss": sft_loss_chosen.item(),
@@ -509,5 +498,4 @@ class DPOLossFn(LossFunction):
             "accuracy": accuracy.item(),
             "rewards_chosen_mean": rewards_chosen_mean.item(),
             "rewards_rejected_mean": rewards_rejected_mean.item(),
-            "num_valid_samples": num_valid_samples.item(),
         }

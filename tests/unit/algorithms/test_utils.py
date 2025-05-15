@@ -266,16 +266,18 @@ def test_save_checkpoint(mock_checkpointer_config):
 
 def test_reduce_microbatch_metrics():
     metrics = {
-        "num_valid_samples": [1, 2, 3],
+        "global_valid_seqs": [1, 2, 3],
+        "global_valid_toks": [4, 5, 6],
         "loss": [0.1, 0.2, 0.3],
         "accuracy": [0.8, 0.9, 1.0],
     }
 
     reduced = reduce_microbatch_metrics(metrics)
 
-    assert reduced["num_valid_samples"] == 6  # Sum
-    assert abs(reduced["loss"] - 0.2) < 1e-6  # Mean
-    assert abs(reduced["accuracy"] - 0.9) < 1e-6  # Mean
+    assert abs(reduced["global_valid_seqs"] - 2) < 1e-5  # Mean
+    assert abs(reduced["global_valid_toks"] - 5) < 1e-5  # Mean
+    assert abs(reduced["loss"] - 0.6) < 1e-5  # Sum
+    assert abs(reduced["accuracy"] - 2.7) < 1e-5  # Sum
 
 
 def test_log_metrics():
