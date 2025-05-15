@@ -41,6 +41,7 @@ from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
     to_local_if_dtensor,
 )
+from nemo_rl.models.huggingface.common import ModelFlag
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.utils import (
     get_gpu_info,
@@ -157,6 +158,9 @@ class DTensorPolicyWorker:
         )
         # caching since this property is not always preserved after FSDP
         self.num_tied_weights = len(find_tied_parameters(self.model))
+        self.skip_tie_check = os.environ.get(
+            "NRL_SKIP_TIED_WEIGHT_CHECK"
+        ) or ModelFlag.SKIP_DTENSOR_TIED_WEIGHTS_CHECK.matches(model_name)
 
         self.tokenizer = tokenizer
         # ------------------------------------------------
@@ -271,16 +275,15 @@ class DTensorPolicyWorker:
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
-        skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
+        # Check if the model has tied weights
         if (
             self.num_tied_weights != 0
             and self.cfg["dtensor_cfg"]["tensor_parallel_size"] > 1
-            and not skip_tie_check
+            and not self.skip_tie_check
         ):
             raise ValueError(
                 f"Using dtensor policy with tp size {self.cfg['dtensor_cfg']['tensor_parallel_size']} for model ({self.cfg['model_name']}) that has tied weights (num_tied_weights={self.num_tied_weights}) is not supported (https://github.com/NVIDIA/NeMo-RL/issues/227). Please use dtensor policy with tensor parallel == 1 instead."
             )
-
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]
         if mbs is None:
@@ -312,26 +315,29 @@ class DTensorPolicyWorker:
                     "sample_mask must be present in the data!"
                 )
                 ## get the normalization factor for the loss
-                if loss_fn.loss_type == LossType.TOKEN_LEVEL:
-                    assert "token_mask" in global_batch, (
-                        "token_mask must be present in the data when using token-level loss"
+                local_valid_seqs = torch.sum(global_batch["sample_mask"])
+
+                if not "token_mask" in global_batch:
+                    local_valid_toks = (
+                        local_valid_seqs * global_batch["input_ids"].shape[1]
                     )
-                    ## get number of tokens in the global batch
-                    total_valid_tokens_or_seqs = torch.sum(
+                else:
+                    local_valid_toks = torch.sum(
                         global_batch["token_mask"][:, 1:]
                         * global_batch["sample_mask"].unsqueeze(-1)
                     )
-                    torch.distributed.all_reduce(
-                        total_valid_tokens_or_seqs, group=self.dp_mesh.get_group()
+
+                to_reduce = torch.tensor([local_valid_seqs, local_valid_toks]).cuda()
+                torch.distributed.all_reduce(to_reduce, group=self.dp_mesh.get_group())
+                global_valid_seqs, global_valid_toks = to_reduce[0], to_reduce[1]
+
+                if (
+                    hasattr(loss_fn, "loss_type")
+                    and loss_fn.loss_type == LossType.TOKEN_LEVEL
+                ):
+                    assert "token_mask" in global_batch, (
+                        "token_mask must be present in the data when using token-level loss"
                     )
-                elif loss_fn.loss_type == LossType.SEQUENCE_LEVEL:
-                    ## get number of valid samples in the global batch
-                    total_valid_tokens_or_seqs = torch.sum(global_batch["sample_mask"])
-                    torch.distributed.all_reduce(
-                        total_valid_tokens_or_seqs, group=self.dp_mesh.get_group()
-                    )
-                else:
-                    raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
 
                 self.optimizer.zero_grad()
                 mb_losses = []
@@ -383,16 +389,17 @@ class DTensorPolicyWorker:
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
 
-                    loss, loss_metrics = loss_fn(logits, mb, total_valid_tokens_or_seqs)
+                    loss, loss_metrics = loss_fn(
+                        logits, mb, global_valid_seqs, global_valid_toks
+                    )
                     ## scale by the number of global batches so we get the correct
                     ## value when summing metrics across all microbatches
                     for k in loss_metrics.keys():
                         loss_metrics[k] /= num_global_batches
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                    loss_metrics["normalization_factor"] = (
-                        total_valid_tokens_or_seqs.cpu()
-                    )
+                    loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
+                    loss_metrics["global_valid_toks"] = global_valid_toks.item()
 
                     # Backward pass
                     if not eval_mode:

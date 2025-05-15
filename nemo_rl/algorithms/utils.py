@@ -134,7 +134,7 @@ def masked_mean(
     values,
     mask,
     dim: Optional[int] = None,
-    global_normalization_factor: Optional[torch.Tensor] = None,
+    global_normalization_factor: Optional[torch.Tensor | float] = None,
 ):
     """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
     normalization_factor = (
@@ -428,9 +428,7 @@ def reduce_microbatch_metrics(metrics):
         dict: The reduced metrics
     """
     for k, v in metrics.items():
-        ## TODO: update this following Sahil's PR
-        ## num_valid_toks and num_valid_seqs
-        if k in {"lr", "normalization_factor"}:
+        if k in {"lr", "global_valid_seqs", "global_valid_toks"}:
             metrics[k] = np.mean(v).item()
         else:
             metrics[k] = np.sum(v).item()
