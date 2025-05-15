@@ -14,16 +14,18 @@
 
 import argparse
 import os
+import math
 import pprint
 from functools import partial
 from typing import Any, Dict
 
+from tqdm import tqdm
 from omegaconf import OmegaConf
 from transformers import AutoTokenizer
 
 from nemo_rl.algorithms.sft import MasterConfig, setup, sft_train
 from nemo_rl.algorithms.utils import get_tokenizer
-from nemo_rl.data import DataConfig, hf_datasets
+from nemo_rl.data import DataConfig, hf_datasets, json_datasets
 from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.data.interfaces import DatumSpec, TaskDataSpec
 from nemo_rl.data.llm_message_utils import get_formatted_message_log
@@ -101,6 +103,10 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
             data_config["input_key"],
             data_config["output_key"],
         )
+    elif data_cls == "scp":
+        data = json_datasets.SCPDataset(
+            data_config["data_path"]
+        )
     else:
         raise ValueError(f"Unknown dataset class: {data_cls}")
     print(
@@ -136,6 +142,24 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
     )
 
     return train_dataset, val_dataset, sft_task_spec
+
+
+def print_length_distribution(dataset, val_dataset):
+    lengths = []
+    for datum_dict in tqdm(dataset):
+        lengths.append(datum_dict["length"])
+        if len(lengths) == 18000:
+            break
+    for datum_dict in tqdm(val_dataset):
+        lengths.append(datum_dict["length"])
+        if len(lengths) == 20000:
+            break
+    max_length = max(lengths)
+    max_log = math.ceil(math.log(max_length) / math.log(2))
+    for i in range(10, max_log + 1):
+        threshold = 2 ** i
+        ratio = sum(l <= threshold for l in lengths) / len(lengths)
+        print(f"lengths <= {threshold}: {ratio:.2%}")
 
 
 def main():
@@ -190,6 +214,7 @@ def main():
         sft_save_state,
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
+
     sft_train(
         policy,
         train_dataloader,

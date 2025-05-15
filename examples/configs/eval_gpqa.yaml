@@ -6,13 +6,13 @@ generation:
   top_p: 1.0
   top_k: -1 # disable
   num_prompts_per_step: -1 # -1 means pass all prompts at once
-  model_name: "Qwen/Qwen3-1.7B"
+  model_name: "Qwen/Qwen3-0.6B"
   stop_token_ids: null
   stop_strings: null
   vllm_cfg:
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.9
-    max_model_len: 16384
+    max_model_len: 32768
 
 tokenizer:
   name: ${generation.model_name} ## specify if you'd like to use a tokenizer different from the model's default
