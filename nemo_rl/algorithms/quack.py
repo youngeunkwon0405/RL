@@ -539,7 +539,7 @@ def quack_train(
                 print("▶ Preparing batch...")
 
                 critic_buffer_items = convert_critic_rollouts_to_buffer_items(critic_batch)
-                train_dataset = setup_data(critic_buffer_items, tokenizer, master_config["fit_data"], "fit")
+                train_dataset = setup_data(critic_buffer_items, tokenizer, master_config["fit_data"], "fit", modify_loss_multiplier=master_config["quack"]["verdict_loss_correction"])
                 # Collate all samples from the dataset into a single batch
                 train_dataset_samples = [train_dataset[i] for i in range(len(train_dataset))]
                 train_dataset = rl_collate_fn(train_dataset_samples)

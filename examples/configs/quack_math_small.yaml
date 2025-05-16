@@ -11,6 +11,7 @@ quack:
   val_at_start: false
   max_val_samples: 256
   val_batch_size: 256
+  verdict_loss_correction: true   # if true, we only train on samples where the math environment and the critique agree on the correctness of the answer
   #train_dataset_batch_size: 32
 
 checkpointing:

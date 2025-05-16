@@ -345,6 +345,7 @@ def fit_data_processor(
     max_seq_length: int,
     idx: int,
     apply_chat_template: bool = True,
+    modify_loss_multiplier: bool = True,
 ) -> DatumSpec:
     """Process a ReplayBufferItem into a DatumSpec for training the actor."""
     question = datum_dict["question"]
@@ -392,8 +393,9 @@ def fit_data_processor(
 
     length = sum(len(m["token_ids"]) for m in message_log)
 
-    loss_multiplier = 1.0 * verdict_is_correct  # TODO(mfathi): make this controllable in config
     loss_multiplier = 1.0
+    if modify_loss_multiplier:  # NOTE: the only training signal is the verdict!
+        loss_multiplier = 1.0 * verdict_is_correct  # TODO(mfathi): make this controllable in config
     if length > max_seq_length:
         # make smaller and mask out
         for message in message_log:
@@ -419,7 +421,7 @@ TASK_TO_DATA_PROCESSOR = {
     "fit": fit_data_processor,
 }
 
-def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config: DataConfig, task_name: str):
+def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config: DataConfig, task_name: str, **kwargs):
     print(f"\n▶ Setting up {task_name} data...")
     task_spec = TaskDataSpec(
         task_name=task_name,
@@ -427,7 +429,7 @@ def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config:
         system_prompt_file=data_config["system_prompt_file"],
     )
     data_processor = TASK_TO_DATA_PROCESSOR[task_name]
-    data_processor = functools.partial(data_processor, apply_chat_template=data_config["apply_chat_template"])
+    data_processor = functools.partial(data_processor, apply_chat_template=data_config["apply_chat_template"], **kwargs)
     # task_data_processors = defaultdict(
     #     lambda: (task_spec, data_processor)
     # )
