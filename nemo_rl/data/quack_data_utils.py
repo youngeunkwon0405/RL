@@ -1,3 +1,4 @@
+import functools
 from collections import defaultdict
 from typing import Dict, Any, Optional, List, TypedDict, Union
 import random
@@ -153,6 +154,7 @@ def prompt_data_processor(
     tokenizer,
     max_seq_length: int,
     idx: int,
+    apply_chat_template: bool = True,
 ) -> DatumSpec:
     """Process a datum dictionary (directly loaded from data/hf_datasets/openmathinstruct2.py) into a DatumSpec for the Math Environment."""
     user_message = datum_dict["messages"]
@@ -167,14 +169,16 @@ def prompt_data_processor(
         "role": "user",
         "content": task_data_spec.prompt.format(problem),
     }
-    message = tokenizer.apply_chat_template(
-        [user_message],
-        tokenize=False,
-        add_generation_prompt=True,
-        add_special_tokens=False,
-    )
+
+    if apply_chat_template:
+        message = tokenizer.apply_chat_template(
+            [user_message],
+            tokenize=False,
+            add_generation_prompt=True,
+            add_special_tokens=False,
+        )
+        user_message["content"] = message
     user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
-    user_message["content"] = message
     message_log.append(user_message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
@@ -208,6 +212,7 @@ def critique_data_processor(
     tokenizer,
     max_seq_length: int,
     idx: int,
+    apply_chat_template: bool = True,
 ) -> DatumSpec:
     """Process a ReplayBufferItem into a DatumSpec for the Critique Environment."""
     question = datum_dict["question"]
@@ -221,14 +226,15 @@ def critique_data_processor(
         "role": "user",
         "content": task_data_spec.prompt.format(question, answer),
     }
-    message = tokenizer.apply_chat_template(
-        [user_message],
-        tokenize=False,
-        add_generation_prompt=True,
-        add_special_tokens=False,
-    )
+    if apply_chat_template:
+        message = tokenizer.apply_chat_template(
+            [user_message],
+            tokenize=False,
+            add_generation_prompt=True,
+            add_special_tokens=False,
+        )
+        user_message["content"] = message
     user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
-    user_message["content"] = message
     message_log.append(user_message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
@@ -268,6 +274,7 @@ def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config:
         system_prompt_file=data_config["system_prompt_file"],
     )
     data_processor = TASK_TO_DATA_PROCESSOR[task_name]
+    data_processor = functools.partial(data_processor, apply_chat_template=data_config["apply_chat_template"])
     # task_data_processors = defaultdict(
     #     lambda: (task_spec, data_processor)
     # )
