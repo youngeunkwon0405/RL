@@ -140,7 +140,7 @@ def convert_critic_rollouts_to_buffer_items(rollout_batch: "BatchedDataDict[Datu
             # print(f"Warning: 'question' or 'answer' or 'reward' not found in extra_env_info for item {i}. Skipping.")
             continue
 
-        answer = None
+        critique = None
         # The last assistant message is considered the answer for the current interaction
         for message_item in reversed(message_log):
             if message_item.get("role") == "assistant":
@@ -149,7 +149,7 @@ def convert_critic_rollouts_to_buffer_items(rollout_batch: "BatchedDataDict[Datu
                     critique = critique_content
                     break
         
-        if answer is None:
+        if critique is None:
             # print(f"Warning: No 'assistant' message with content found for item {i}. Skipping.")
             continue
 
@@ -408,7 +408,7 @@ def fit_data_processor(
         "extra_env_info": extra_env_info,
         "loss_multiplier": loss_multiplier,
         "idx": idx,
-        "task_name": "critic",
+        "task_name": "fit",
     }
     return output
 
