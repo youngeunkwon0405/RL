@@ -540,7 +540,9 @@ def quack_train(
 
                 buffer_items = convert_critic_rollouts_to_buffer_items(critic_batch)
                 train_dataset = setup_data(buffer_items, tokenizer, master_config["fit_data"], "fit")
-                train_dataset = rl_collate_fn(train_dataset)
+                # Collate all samples from the dataset into a single batch
+                train_dataset_samples = [train_dataset[i] for i in range(len(train_dataset))]
+                train_dataset = rl_collate_fn(train_dataset_samples)
 
                 ## add loss mask based on role to every message
                 add_loss_mask_to_message_log(
