@@ -165,9 +165,10 @@ def prompt_data_processor(
     }
 
     message_log: LLMMessageLogType = []
+    message = task_data_spec.prompt.format(problem)
     user_message = {
         "role": "user",
-        "content": task_data_spec.prompt.format(problem),
+        "content": message,
     }
 
     if apply_chat_template:
@@ -222,9 +223,10 @@ def critique_data_processor(
     extra_env_info = {"reward": reward}     # unused for now, later we can use it as privileged information
 
     message_log: LLMMessageLogType = []
+    message = task_data_spec.prompt.format(question, answer)
     user_message = {
         "role": "user",
-        "content": task_data_spec.prompt.format(question, answer),
+        "content": message,
     }
     if apply_chat_template:
         message = tokenizer.apply_chat_template(
