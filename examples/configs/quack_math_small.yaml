@@ -22,8 +22,7 @@ checkpointing:
   save_period: 10
 
 actor:
-  # Qwen/Qwen2.5-1.5B has tied weights which are only supported with dtensor policy with tp size 1 (https://github.com/NVIDIA/NeMo-RL/issues/227)
-  model_name: "Qwen/Qwen2.5-Math-7B"
+  model_name: "Qwen/Qwen3-8B"
   tokenizer:
     name: ${actor.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 256
