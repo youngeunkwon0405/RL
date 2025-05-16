@@ -97,6 +97,35 @@ policy:
       # For Gemma models, we need to use "auto" due to a vllm bug
       load_format: dummy
 
+    placement:
+      node: 0
+      gpus: [0]  # bundle indices for the policy generation network
+  placement:
+    node: 0
+    gpus: [0] # bundle indices for the policy network
+
+llm_judge_generation:
+  # LLM judge (evaluation) model configuration
+  model_name: "Qwen/Qwen2.5-1.5B"
+  tokenizer:
+    name: ${llm_judge_generation.model_name} ## specify if you'd like to use a tokenizer different from the model's default
+  backend: "vllm"
+  max_new_tokens: 4096
+  temperature: 0.0             # greedy / deterministic for scoring
+  top_p: 1.0
+  top_k: null
+  stop_token_ids: null
+  stop_strings: null
+  vllm_cfg:
+    precision: ${policy.precision}
+    tensor_parallel_size: 1
+    gpu_memory_utilization: 0.8
+    max_model_len: 4096
+    load_format: auto
+  placement:
+    node: 0
+    gpus: [1] # judge-vLLM goes to GPU-1
+
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
   prompt_file: "examples/prompts/cot.txt"
@@ -106,6 +135,8 @@ data:
 
 env:
   math:
+    num_workers: 8
+  llm_judge:
     num_workers: 8
 
 logger:
@@ -123,5 +154,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 1
+  gpus_per_node: 2
   num_nodes: 1
