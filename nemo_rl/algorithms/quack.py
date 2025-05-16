@@ -538,8 +538,8 @@ def quack_train(
             with timer.time("data_processing"):
                 print("▶ Preparing batch...")
 
-                buffer_items = convert_critic_rollouts_to_buffer_items(critic_batch)
-                train_dataset = setup_data(buffer_items, tokenizer, master_config["fit_data"], "fit")
+                critic_buffer_items = convert_critic_rollouts_to_buffer_items(critic_batch)
+                train_dataset = setup_data(critic_buffer_items, tokenizer, master_config["fit_data"], "fit")
                 # Collate all samples from the dataset into a single batch
                 train_dataset_samples = [train_dataset[i] for i in range(len(train_dataset))]
                 train_dataset = rl_collate_fn(train_dataset_samples)
@@ -648,13 +648,17 @@ def quack_train(
         log_data["input_lengths"] = input_lengths.tolist()
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
 
+        # Aggregate metrics
+        metrics = {}
+        metrics["loss"] = train_results["loss"].numpy()
+        metrics["reward"] = repeated_batch["total_reward"].numpy()  # read from repeated_batch to reflect the reward of the latest generated answers
+        metrics["critic_batch_verdict"] = np.array([item['verdict'] for item in critic_buffer_items])
+        train_batch_reward = np.array([item['reward'] for item in critic_buffer_items])
+        metrics["critic_batch_reward"] = np.where(train_batch_reward == metrics['critic_batch_verdict'], 1.0, 0.0)
+        metrics["grad_norm"] = train_results["grad_norm"].numpy()
+        
+
         print("\n📊 Training Results:")
-        metrics = {
-            "loss": train_results["loss"].numpy(),
-            "reward": repeated_batch["total_reward"].numpy(),   # read from repeated_batch to reflect the reward of the latest generated answers
-            "critic_reward": critic_batch["total_reward"].numpy(),
-            "grad_norm": train_results["grad_norm"].numpy(),
-        }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
             metrics[k] = np.mean(v).item()
@@ -664,10 +668,9 @@ def quack_train(
 
         print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(repeated_batch['total_reward'].numpy()):.4f}")
-        print(f"  • Critic Reward: {np.mean(critic_batch['total_reward'].numpy()):.4f}")
-        print(
-            f"  • Mean Generation Length: {rollout_metrics_actor['mean_gen_tokens_per_sample']:.4f}"
-        )
+        print(f"  • Critic Batch Reward: {np.mean(metrics['critic_batch_reward']):.4f}")
+        print(f"  • Critic Batch Verdict: {np.mean(metrics['critic_batch_verdict']):.4f}")
+        print(f"  • Mean Generation Length: {rollout_metrics_actor['mean_gen_tokens_per_sample']:.4f}")
 
         print("\n⏱️  Timing:")
         # Display total time first, separately
