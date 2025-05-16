@@ -284,6 +284,7 @@ def critique_data_processor(
     max_seq_length: int,
     idx: int,
     apply_chat_template: bool = True,
+    hint_critic: bool = False,
 ) -> DatumSpec:
     """Process a ReplayBufferItem into a DatumSpec for the Critique Environment."""
     question = datum_dict["question"]
@@ -302,6 +303,9 @@ def critique_data_processor(
         "role": "user",
         "content": message,
     }
+    if hint_critic:
+        hint = "correct" if reward == 1.0 else "incorrect"
+        message = message + f"\n\n*Hint*: The provided answer by the student is {hint}."
     if apply_chat_template:
         message = tokenizer.apply_chat_template(
             [user_message],

@@ -496,7 +496,7 @@ def quack_train(
             # get train dataset batch from replay buffer
             with timer.time("sampling_from_buffer"):
                 critic_dataset = replay_buffer.sample(master_config["quack"]["train_dataset_size"])
-                critic_dataset = setup_data(critic_dataset, tokenizer, master_config["critic_data"], "critic")
+                critic_dataset = setup_data(critic_dataset, tokenizer, master_config["critic_data"], "critic", hint_critic=master_config["quack"]["hint_critic"])
                 critic_iterator = DataLoader(
                     critic_dataset, 
                     batch_size=master_config["quack"]["critic_inference_batch_size"], 
