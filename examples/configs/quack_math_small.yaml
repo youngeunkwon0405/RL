@@ -43,7 +43,7 @@ actor:
     tensor_parallel_size: 4
 
   dynamic_batching:
-    enabled: True
+    enabled: false
     train_mb_tokens: ${mul:${actor.max_total_sequence_length}, ${actor.train_micro_batch_size}}
     logprob_mb_tokens: ${mul:${actor.max_total_sequence_length}, ${actor.logprob_batch_size}}
     sequence_length_round: 64
