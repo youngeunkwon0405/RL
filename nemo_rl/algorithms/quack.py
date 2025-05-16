@@ -36,6 +36,7 @@ from nemo_rl.data.llm_message_utils import (
 from nemo_rl.data.quack_data_utils import (
     setup_data,
     convert_actor_rollouts_to_buffer_items,
+    convert_critic_rollouts_to_buffer_items,
     ReplayBuffer,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -537,14 +538,18 @@ def quack_train(
             with timer.time("data_processing"):
                 print("▶ Preparing batch...")
 
+                buffer_items = convert_critic_rollouts_to_buffer_items(critic_batch)
+                train_dataset = setup_data(buffer_items, tokenizer, master_config["fit_data"], "fit")
+                train_dataset = rl_collate_fn(train_dataset)
+
                 ## add loss mask based on role to every message
                 add_loss_mask_to_message_log(
-                    critic_batch["message_log"],
+                    train_dataset["message_log"],
                     roles_to_train_on=["assistant"],
                 )
 
                 flat_messages, input_lengths = batched_message_log_to_flat_message(
-                    critic_batch["message_log"],
+                    train_dataset["message_log"],
                     pad_value_dict={"token_ids": tokenizer.pad_token_id},
                     make_sequence_length_divisible_by=master_config["actor"][
                         "make_sequence_length_divisible_by"
@@ -556,7 +561,7 @@ def quack_train(
                         "input_ids": flat_messages["token_ids"],
                         "input_lengths": input_lengths,
                         "token_mask": flat_messages["token_loss_mask"],
-                        "sample_mask": critic_batch["loss_multiplier"],
+                        "sample_mask": train_dataset["loss_multiplier"],
                     }
                 )
 

@@ -23,7 +23,7 @@ class ReplayBufferItem(TypedDict):
     reward: float
     critique: Optional[str]
     verdict: Optional[float]
-    task_name: str = "critic"
+    task_name: Optional[str]
     # Store original messages if needed for complex reconstruction, or other metadata
     # For example, if the original prompt formatting was complex.
     # original_datum_dict: Optional[Dict[str, Any]] = None 
@@ -94,6 +94,76 @@ def convert_actor_rollouts_to_buffer_items(rollout_batch: "BatchedDataDict[Datum
         buffer_items.append(replay_item)
 
     return buffer_items
+
+
+def convert_critic_rollouts_to_buffer_items(rollout_batch: "BatchedDataDict[DatumSpec]") -> List[ReplayBufferItem]:
+    """
+    Converts a batch of rollouts into a list of ReplayBufferItems.
+
+    Args:
+        rollout_batch: A BatchedDataDict containing DatumSpec items from run_multi_turn_rollout.
+                       This batch is expected to have 'message_log', 'extra_env_info', 
+                       and 'total_reward' keys.
+    """
+    buffer_items: List[ReplayBufferItem] = []
+    
+    if not rollout_batch or not rollout_batch.size:
+        return
+
+    if "message_log" not in rollout_batch or \
+       "extra_env_info" not in rollout_batch or \
+       "total_reward" not in rollout_batch:
+        # Consider logging a warning or raising an error if essential keys are missing
+        # For example: print("Warning: rollout_batch is missing essential keys.")
+        return
+
+    batch_size = rollout_batch.size
+
+    for i in range(batch_size):
+        try:
+            message_log = rollout_batch["message_log"][i]
+            extra_info = rollout_batch["extra_env_info"][i]
+            # Ensure total_reward exists for the item and is a tensor
+            reward_tensor = rollout_batch["total_reward"][i]
+            if not hasattr(reward_tensor, "item"): # Basic check if it's tensor-like
+                # print(f"Warning: reward for item {i} is not a tensor. Skipping.")
+                continue
+            verdict_value = reward_tensor.item()
+        except (IndexError, KeyError) as e:
+            # print(f"Warning: Data for item {i} is incomplete (error: {e}). Skipping.")
+            continue
+
+        question = extra_info.get("question")
+        answer = extra_info.get("answer")
+        reward = extra_info.get("reward")
+        if question is None or answer is None or reward is None:
+            # print(f"Warning: 'question' or 'answer' or 'reward' not found in extra_env_info for item {i}. Skipping.")
+            continue
+
+        answer = None
+        # The last assistant message is considered the answer for the current interaction
+        for message_item in reversed(message_log):
+            if message_item.get("role") == "assistant":
+                critique_content = message_item.get("content")
+                if critique_content is not None:
+                    critique = critique_content
+                    break
+        
+        if answer is None:
+            # print(f"Warning: No 'assistant' message with content found for item {i}. Skipping.")
+            continue
+
+        replay_item = ReplayBufferItem(
+            question=str(question),
+            answer=str(answer),
+            reward=float(reward),
+            critique=str(critique),
+            verdict=float(verdict_value),
+        )
+        buffer_items.append(replay_item)
+
+    return buffer_items
+
 
 
 class ReplayBuffer(Dataset):
@@ -220,7 +290,11 @@ def critique_data_processor(
     answer = datum_dict["answer"]
     reward = datum_dict["reward"]
 
-    extra_env_info = {"reward": reward}     # unused for now, later we can use it as privileged information
+    extra_env_info = {
+        "question": question,
+        "answer": answer,
+        "reward": reward,  # unused for now, later we can use it as privileged information
+    }     
 
     message_log: LLMMessageLogType = []
     message = task_data_spec.prompt.format(question, answer)
@@ -261,11 +335,88 @@ def critique_data_processor(
     return output
     
 # ===============================================================================
+#                             Fit Data Processor
+# ===============================================================================
+
+def fit_data_processor(
+    datum_dict: Dict[str, Any],
+    task_data_spec: TaskDataSpec,
+    tokenizer,
+    max_seq_length: int,
+    idx: int,
+    apply_chat_template: bool = True,
+) -> DatumSpec:
+    """Process a ReplayBufferItem into a DatumSpec for training the actor."""
+    question = datum_dict["question"]
+    answer = datum_dict["answer"]
+    reward = datum_dict["reward"]
+    critique = datum_dict["critique"]
+    verdict = datum_dict["verdict"]
+    verdict_is_correct = reward == verdict
+
+    extra_env_info = {}
+
+    message_log: LLMMessageLogType = []
+
+    message = task_data_spec.prompt.format(question, answer)
+    user_message = {
+        "role": "user",
+        "content": message,
+    }
+    if apply_chat_template:
+        message = tokenizer.apply_chat_template(
+            [user_message],
+            tokenize=False,
+            add_generation_prompt=True,
+            add_special_tokens=False,
+        )
+        user_message["content"] = message
+    user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
+    message_log.append(user_message)
+
+    message = critique
+    assistant_message = {
+        "role": "assistant",
+        "content": message,
+    }
+    if apply_chat_template:
+        message = tokenizer.apply_chat_template(
+            [assistant_message],
+            tokenize=False,
+            add_generation_prompt=True,
+            add_special_tokens=False,
+        )
+        assistant_message["content"] = message
+    assistant_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
+    message_log.append(assistant_message)
+
+    length = sum(len(m["token_ids"]) for m in message_log)
+
+    loss_multiplier = 1.0 * verdict_is_correct  # TODO(mfathi): make this controllable in config
+    loss_multiplier = 1.0
+    if length > max_seq_length:
+        # make smaller and mask out
+        for message in message_log:
+            message["token_ids"] = message["token_ids"][
+                : min(4, max_seq_length // len(message_log))
+            ]
+        loss_multiplier = 0.0
+
+    output = {
+        "message_log": message_log,
+        "length": length,
+        "extra_env_info": extra_env_info,
+        "loss_multiplier": loss_multiplier,
+        "idx": idx,
+        "task_name": "critic",
+    }
+    return output
+
 
 TASK_TO_DATA_PROCESSOR = {
     "math": prompt_data_processor,
     "critic": critique_data_processor,
-    #TODO: Add fit data processor
+    "fit": fit_data_processor,
 }
 
 def setup_data(data: Union[Dataset, Any], tokenizer: AutoTokenizer, data_config: DataConfig, task_name: str):

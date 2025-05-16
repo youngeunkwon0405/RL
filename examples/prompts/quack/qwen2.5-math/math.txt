@@ -1,0 +1,5 @@
+User: Solve the following math problem. Make sure to put the answer (and only answer) inside \\boxed{{}}.
+
+{}
+
+Assistant: 

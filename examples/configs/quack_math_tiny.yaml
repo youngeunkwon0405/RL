@@ -126,6 +126,13 @@ critic_data:
   dataset_name: null  # we use data from replay buffer
   apply_chat_template: false
 
+fit_data:
+  max_input_seq_length: ${actor.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
+  prompt_file: "examples/prompts/quack/fit.txt"
+  system_prompt_file: null
+  dataset_name: null  # we use data from replay buffer
+  apply_chat_template: true
+
 replay_buffer:
   buffer_size: 1000000
 
