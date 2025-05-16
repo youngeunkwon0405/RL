@@ -1,0 +1,14 @@
+# Sample sweep configuration for QUACK math experiments
+# Each parameter can have a list of values to sweep over
+# The launcher will generate all possible combinations
+
+# Required parameter that must match the target script name
+script_path: "examples/run_quack_math.py"
+
+# Optional: Path to the base YAML config file
+# Can be overridden by the --config command-line argument
+# If null and --config is not provided, no base config will be used
+config_path: "examples/configs/quack_math_small.yaml" 
+
+# Refit configuration
+quack.critic_refit_period: [1, 2, 4, 8]
