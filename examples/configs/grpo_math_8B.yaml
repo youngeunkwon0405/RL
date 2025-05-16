@@ -22,6 +22,10 @@ policy:
   dtensor_cfg:
     enabled: False
 
+  dynamic_batching:
+    train_mb_tokens: 4096
+    logprob_mb_tokens: 8192
+
   optimizer:
     name: "torch.optim.AdamW"
     kwargs:
@@ -55,9 +59,6 @@ policy:
       tensor_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
-      # For most cases, use "dummy" to load the initial weights, since they will be overwritten during refit
-      # For Gemma models, we need to use "auto" due to a vllm bug
-      load_format: dummy
 
 cluster:
   gpus_per_node: 8

@@ -12,6 +12,14 @@ cluster.md
 ```
 
 ```{toctree}
+:caption: 🚀 E2E Examples
+:hidden:
+
+guides/grpo-deepscaler.md
+guides/sft-openmathinstruct2.md
+```
+
+```{toctree}
 :caption: 📚 Guides
 :hidden:
 
@@ -19,7 +27,9 @@ adding-new-models.md
 guides/sft.md
 guides/dpo.md
 guides/grpo.md
+guides/grpo-deepscaler.md
 guides/eval.md
+model-quirks.md
 ```
 
 ```{toctree}
