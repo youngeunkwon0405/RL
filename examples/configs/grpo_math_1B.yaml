@@ -21,6 +21,7 @@ loss_fn:
   use_on_policy_kl_approximation: false
   use_importance_sampling_correction: false
   token_level_loss: true
+  use_generation_logprobs_in_ppo_baseline: false
 
 checkpointing:
   enabled: true

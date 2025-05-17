@@ -105,6 +105,10 @@ class ClippedPGLossFn(LossFunction):
             "use_importance_sampling_correction"
         ]
 
+        self.use_generation_logprobs_in_ppo_baseline = cfg[
+            "use_generation_logprobs_in_ppo_baseline"
+        ]
+
         self.loss_type = (
             LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
         )
@@ -189,7 +193,11 @@ class ClippedPGLossFn(LossFunction):
 
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
-            ratios = (curr_logprobs - prev_logprobs).exp()
+            if self.use_generation_logprobs_in_ppo_baseline:
+                ratios = (generation_logprobs - prev_logprobs).exp()
+            else:
+                ratios = (curr_logprobs - prev_logprobs).exp()
+
             ratios_clamped = ratios.clamp(
                 1.0 - self.ratio_clip_min, 1.0 + self.ratio_clip_max
             )
