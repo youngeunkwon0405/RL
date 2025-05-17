@@ -388,7 +388,7 @@ def fit_data_processor(
         message = tokenizer.apply_chat_template(
             [assistant_message],
             tokenize=False,
-            add_generation_prompt=True,
+            add_generation_prompt=False,    # SET TO FALSE!!
             add_special_tokens=False,
         )
         assistant_message["content"] = message
