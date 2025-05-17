@@ -194,7 +194,7 @@ class ClippedPGLossFn(LossFunction):
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
             if self.use_generation_logprobs_in_ppo_baseline:
-                ratios = (generation_logprobs - prev_logprobs).exp()
+                ratios = (curr_logprobs - generation_logprobs).exp()
             else:
                 ratios = (curr_logprobs - prev_logprobs).exp()
 
