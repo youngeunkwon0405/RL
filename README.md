@@ -60,7 +60,7 @@ What you can expect:
 
 Clone **NeMo RL**.
 ```sh
-git clone git@github.com:NVIDIA/NeMo-RL.git
+git clone git@github.com:NVIDIA/NeMo-RL.git nemo-rl
 cd nemo-rl
 ```
 
@@ -111,11 +111,11 @@ You can override any of the parameters listed in the yaml configuration file. Fo
 
 ```sh
 uv run python examples/run_grpo_math.py \
-  policy.model_name="Llama-3.2-1B-Instruct" \
+  policy.model_name="meta-llama/Llama-3.2-1B-Instruct" \
   checkpointing.checkpoint_dir="results/llama1b_math" \
   logger.wandb_enabled=True \
   logger.wandb.name="grpo-llama1b_math" \
-  logger.num_val_samples_to_print=10 \
+  logger.num_val_samples_to_print=10
 ```
 
 ### GRPO Multi-node
