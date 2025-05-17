@@ -65,7 +65,6 @@ from nemo_rl.utils.timer import Timer
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
-    max_num_steps: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
@@ -168,11 +167,27 @@ def setup(
     # ==========================
     #           Data
     # ==========================
+    shuffle_train = master_config["data"]["train"]["shuffle"]
+    shuffle_val = master_config["data"]["val"]["shuffle"]
+
+    train_data_generator = None
+    val_data_generator = None
+
+    if shuffle_train:
+        train_data_generator = torch.Generator()
+        train_data_generator.manual_seed(master_config["data"]["train"]["seed"])
+
+    if shuffle_val:
+        val_data_generator = torch.Generator()
+        val_data_generator.manual_seed(master_config["data"]["val"]["seed"])
+
     dataloader = StatefulDataLoader(
         dataset,
         batch_size=grpo_config["num_prompts_per_step"],
-        shuffle=False,
+        shuffle=shuffle_train,
+        generator=train_data_generator,
         collate_fn=rl_collate_fn,
+        drop_last=master_config["data"]["train"]["drop_last"],
     )
     if last_checkpoint_path is not None:
         dataloader_state_dict = torch.load(
@@ -189,8 +204,10 @@ def setup(
         val_dataloader = StatefulDataLoader(
             val_dataset,
             batch_size=grpo_config["val_batch_size"],
-            shuffle=False,
+            shuffle=shuffle_val,
             collate_fn=rl_collate_fn,
+            generator=val_data_generator,
+            drop_last=master_config["data"]["val"]["drop_last"],
         )
         print(f"  ✓ Validation dataloader loaded with {len(val_dataset)} samples")
 
@@ -342,6 +359,9 @@ def grpo_train(
     val_at_start = master_config["grpo"]["val_at_start"]
     refit_buffer_size_gb = master_config["policy"]["refit_buffer_size_gb"]
 
+    num_epochs = master_config["grpo"]["num_epochs"]
+    max_num_steps = num_epochs * len(dataloader)
+
     # Run validation at the start if configured
     if val_at_start and step == 0:
         print("\n🔍 Running initial validation...")
@@ -365,9 +385,7 @@ def grpo_train(
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
     for batch in dataloader:
-        print(
-            f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
-        )
+        print(f"\n{'=' * 25} Step {step + 1}/{max_num_steps} {'=' * 25}")
         val_metrics, validation_timings = None, None
 
         with timer.time("total_step_time"):
@@ -498,9 +516,7 @@ def grpo_train(
             with timer.time("policy_training"):
                 train_results = policy.train(train_data, loss_fn)
 
-            is_last_step = step + 1 == min(
-                master_config["grpo"]["max_num_steps"], len(dataloader)
-            )
+            is_last_step = step + 1 == min(max_num_steps, len(dataloader))
 
             # Run validation if it's a validation step
             if is_last_step or (val_period > 0 and (step + 1) % val_period == 0):
@@ -608,7 +624,7 @@ def grpo_train(
 
         timer.reset()
         step += 1
-        if step >= master_config["grpo"]["max_num_steps"]:
+        if step >= max_num_steps:
             break
 
 
