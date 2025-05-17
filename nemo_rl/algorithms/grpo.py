@@ -377,6 +377,7 @@ def grpo_train(
             val_task_to_env,
             step=0,
             master_config=master_config,
+            logger=logger,
         )
         policy_generation.finish_generation()
         logger.log_metrics(val_metrics, step, prefix="validation")
@@ -536,6 +537,7 @@ def grpo_train(
                     val_task_to_env,
                     step=step + 1,
                     master_config=master_config,
+                    logger=logger,
                 )
                 policy_generation.finish_generation()
                 logger.log_metrics(
@@ -583,6 +585,7 @@ def grpo_train(
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
+        table = logger.log_batched_dict_as_table(log_data, prefix="train", step=step)
 
         print("\n📊 Training Results:")
         metrics = {
@@ -597,6 +600,7 @@ def grpo_train(
             else:
                 metrics[k] = np.sum(v).item()
         metrics.update(rollout_metrics)
+        metrics["table"] = table
 
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
@@ -635,6 +639,7 @@ def validate(
     val_task_to_env: Dict[str, EnvironmentInterface],
     step: int,
     master_config: MasterConfig,
+    logger: Logger,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -678,6 +683,20 @@ def validate(
             )
             all_message_logs.extend(to_env)
 
+            if batch_idx == 0:
+                for interaction in val_batch["message_log"][0]:
+                    if interaction["role"] == "user":
+                        prompt = interaction["content"]
+                    elif interaction["role"] == "assistant":
+                        response = interaction["content"]
+                    else:
+                        environment = interaction["content"]
+
+                reward = val_batch["total_reward"][0].item()
+                table = logger.log_table_contents(
+                    step, prompt, response, environment, reward, "validation"
+                )
+
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
         avg_length = sum(total_lengths) / len(total_lengths)
@@ -685,6 +704,7 @@ def validate(
         val_metrics = {
             "accuracy": accuracy,
             "avg_length": avg_length,
+            "table": table,
         }
 
         # Print sample conversations only once at the end of validation
