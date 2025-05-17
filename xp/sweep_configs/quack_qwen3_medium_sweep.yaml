@@ -11,7 +11,7 @@ script_path: "examples/run_quack_math.py"
 config_path: "examples/configs/quack_math_medium.yaml" 
 
 # Refit configuration
-quack.critic_refit_period: [4, 8, 16, 32]
+quack.critic_refit_period: [4, 16]
 
 # loss correction
 quack.verdict_loss_correction: [true, false]
