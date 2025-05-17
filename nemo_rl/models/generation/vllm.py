@@ -60,7 +60,9 @@ class VllmGenerationWorker:
 
     @staticmethod
     def configure_worker(
-        num_gpus: int | float, bundle_indices: Optional[tuple] = None
+        num_gpus: int | float,
+        bundle_indices: Optional[tuple] = None,
+        seed_offset: int = 0,
     ) -> tuple[dict, dict, dict]:
         """Provides complete worker configuration for vLLM tensor parallelism.
 
@@ -96,7 +98,7 @@ class VllmGenerationWorker:
             node_idx = 1, bundle_indices = [4, 5, 6, 7] -> seed = 1*1024 + 1
             """
             bundle_id = local_bundle_indices[0] // len(local_bundle_indices)
-            seed = node_idx * 1024 + bundle_id
+            seed = node_idx * 1024 + bundle_id + seed_offset
             init_kwargs["seed"] = seed
 
         is_part_of_tp_workers = (
