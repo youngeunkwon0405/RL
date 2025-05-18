@@ -2,13 +2,14 @@
 
 <!-- markdown all in one -->
 - [Nemo RL: A Scalable and Efficient Post-Training Library](#nemo-rl-a-scalable-and-efficient-post-training-library)
+  - [📣 News](#-news)
   - [Features](#features)
   - [Prerequisites](#prerequisites)
   - [GRPO](#grpo)
     - [GRPO Single Node](#grpo-single-node)
     - [GRPO Multi-node](#grpo-multi-node)
       - [GRPO Qwen2.5-32B](#grpo-qwen25-32b)
-    - [GRPO Multi-Turn/Tool-Use](#grpo-multi-turn)
+      - [GRPO Multi-Turn](#grpo-multi-turn)
   - [Supervised Fine-Tuning (SFT)](#supervised-fine-tuning-sft)
     - [SFT Single Node](#sft-single-node)
     - [SFT Multi-node](#sft-multi-node)
@@ -62,6 +63,12 @@ Clone **NeMo RL**.
 ```sh
 git clone git@github.com:NVIDIA/NeMo-RL.git nemo-rl
 cd nemo-rl
+```
+
+<!--
+```sh
+git clone git@github.com:NVIDIA/NeMo-RL.git nemo-rl
+cd nemo-rl
 
 # If you are using the Megatron backend, download the pinned versions of Megatron-LM and NeMo submodules 
 # by running:
@@ -74,6 +81,7 @@ cd nemo-rl
 # **NOTE**: this setting will not download **new** or remove **old** submodules with the branch's changes.
 # You will have to run the full `git submodule update --init --recursive` command in these situations.
 ```
+-->
 
 Install `uv`.
 ```sh
