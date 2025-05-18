@@ -48,7 +48,7 @@ for tbevent in $TB_EVENTS; do
     fi
     
     # Copy the event file with redacted hostname to the experiment subdirectory
-    uv run --with tensorboard tools/copy_tbevent_maybe_redact.py "$tbevent" "$TMP_DIR/$exp_name/$redacted_event_path"
+    uv run --with tensorboard --no-project tools/copy_tbevent_maybe_redact.py "$tbevent" "$TMP_DIR/$exp_name/$redacted_event_path"
     
     echo "[$exp_name] Copied $tbevent to $TMP_DIR/$exp_name/$redacted_event_path"
 done
