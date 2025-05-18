@@ -23,15 +23,6 @@ from tensorboard.backend.event_processing import event_accumulator
 from tensorboard.plugins.hparams import plugin_data_pb2
 from torch.utils.tensorboard import SummaryWriter
 
-#    tensorboard_available = True
-# except ImportError:
-#    tensorboard_available = False
-
-# Skip all tests in this module if tensorboard/torch cannot be imported
-# pytestmark = pytest.mark.skipif(not tensorboard_available, reason="Tensorboard/Torch library not found")
-
-# --- Helper Functions ---
-
 
 def extract_hparams_from_event_file(file_path: str) -> dict | None:
     """Extracts HParams dictionary from a single TensorBoard event file."""
