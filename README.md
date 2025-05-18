@@ -66,6 +66,7 @@ cd nemo-rl
 ```
 
 <!--
+# TODO: Replace the above instructions once we have a real mcore example
 ```sh
 git clone git@github.com:NVIDIA/NeMo-RL.git nemo-rl
 cd nemo-rl
