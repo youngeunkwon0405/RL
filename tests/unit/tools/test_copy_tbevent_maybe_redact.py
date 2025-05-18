@@ -13,9 +13,6 @@ script_dir = os.path.abspath(
 )
 sys.path.insert(0, script_dir)
 
-# Attempt to import tensorboard and the script, skipping tests if tensorboard is not found
-# try:
-# Use SummaryWriter for creating test files
 import copy_tbevent_maybe_redact as script_under_test
 
 # Needed for reading back and verifying hparams
@@ -142,9 +139,6 @@ def temp_dir():
     """Pytest fixture for creating a temporary directory."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield tmpdir
-
-
-# --- Test Cases ---
 
 
 def test_copy_passthrough_no_hparams(temp_dir):
