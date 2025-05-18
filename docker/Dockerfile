@@ -31,7 +31,6 @@ COPY pyproject.toml uv.lock ./
 COPY --link 3rdparty/ ./3rdparty/
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/nemo_rl_venv
-ENV VIRTUAL_ENV=/opt/nemo_rl_venv
 ENV UV_LINK_MODE=copy
 
 # Create and activate virtual environment
@@ -62,3 +61,6 @@ LABEL com.nvidia.build.id="${NVIDIA_BUILD_ID}"
 LABEL com.nvidia.build.ref="${NVIDIA_BUILD_REF}"
 
 COPY . /opt/nemo-rl
+
+# Make hermetic the default target instead of release since that's the recommended container
+FROM hermetic
