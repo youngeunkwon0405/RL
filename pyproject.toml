@@ -78,7 +78,6 @@ docs = [
 dev = [
     "pre-commit==3.6.0",
     "ruff==0.9.9",
-    "debugpy>=1.8.0",
 ]
 test = [
     "pytest>=7.0.0",
