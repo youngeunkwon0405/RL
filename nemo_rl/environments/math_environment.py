@@ -123,6 +123,10 @@ class MathEnvironment(EnvironmentInterface):
         # Extract the assistant's responses from the message history
         # Each message list should have at least one assistant response
         assistant_response_batch = []
+        
+        #print (f"message_log_batch={message_log_batch}")
+        #print (f"metadata={metadata}")
+        
         for conversation in message_log_batch:
             assistant_responses = [
                 interaction["content"]

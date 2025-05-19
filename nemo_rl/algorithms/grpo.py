@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, TypedDict
+from typing import Any, Dict, Optional, Tuple, TypedDict, Callable
 
 import numpy as np
 import torch
@@ -306,6 +306,22 @@ def refit_policy_generation(
 
 
 # ===============================================================================
+# A function that converts a list of key-value pairs returned by the environment
+# into a dictionary of measurements for logging
+# The key-value pairs are given as key_with_letters_digits_underscores: numerical_value
+# ===============================================================================
+def convert_env_response_to_log_dict(env_response: str) -> Dict[str, float]:
+    log_dict = {}
+    for line in env_response.split("\n"):
+        if ":" in line:
+            key, value = line.split(":")
+            try:
+                log_dict[key.strip()] = float(value.strip())
+            except ValueError:
+                pass
+    return log_dict
+
+# ===============================================================================
 # Training & Validation
 # ===============================================================================
 
@@ -323,6 +339,7 @@ def grpo_train(
     checkpointer: CheckpointManager,
     grpo_save_state: Optional[GRPOSaveState],
     master_config: MasterConfig,
+    #train_metric_fn: Optional[Callable[[str, Dict[str, float]], Dict[str, float]]] = None)
 ):
     """Run GRPO training algorithm."""
     timer = Timer()
@@ -406,6 +423,7 @@ def grpo_train(
                     greedy=False,
                 )
                 policy_generation.finish_generation()
+
 
             # Calculate rewards & advantages
             print("▶ Processing rewards...")
@@ -561,6 +579,27 @@ def grpo_train(
         log_data["input_lengths"] = input_lengths.tolist()
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
 
+
+        # Look for training measurements to log in the environment messages
+        measurement_dicts = []
+        for i, message_log in enumerate(repeated_batch["message_log"]):
+            measurement_dict = {}
+            for j, message in enumerate(message_log):
+                if message["role"] == "environment":
+                    measurement_dict = convert_env_response_to_log_dict(message["content"])
+                    break
+            measurement_dicts.append(measurement_dict)
+        
+        # Log the measurements - Find keys that appear in all measurement_dicts
+        environment_metrics = {}
+        for key in measurement_dicts[0].keys():
+            values = [measurement_dict.get(key, None) for measurement_dict in measurement_dicts]
+            # if some value is None, skip this key
+            if any(value is None for value in values):
+                continue
+            environment_metrics[key] = values
+        #import pdb; p=pdb.Pdb(); p.prompt='breakpoint-train-loop:)'; p.set_trace()
+        
         print("\n📊 Training Results:")
         metrics = {
             "loss": train_results["loss"].numpy(),
@@ -568,6 +607,7 @@ def grpo_train(
             "grad_norm": train_results["grad_norm"].numpy(),
         }
         metrics.update(train_results["all_mb_metrics"])
+        metrics.update(environment_metrics)
         for k, v in metrics.items():
             if k == "num_valid_samples":
                 metrics[k] = np.sum(v).item()
@@ -649,6 +689,8 @@ def validate(
             total_rewards.extend(rewards.tolist())
             total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
 
+            #import pdb; p = pdb.Pdb(); p.prompt='breakpoint-validate:)'; p.set_trace()
+            
             # Collect message logs for later display
             to_env = get_keys_from_message_log(
                 val_batch["message_log"], ["role", "content"]

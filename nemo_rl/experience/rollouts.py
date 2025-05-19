@@ -292,6 +292,7 @@ def run_multi_turn_rollout(
         # Calculate rewards and get environment feedback
         env_output: EnvironmentReturn = calculate_rewards(active_batch, task_to_env)
 
+        #import pdb; p=pdb.Pdb(); p.prompt='breakpoint-run_multiturn_rollout_in_rollouts.py:)'; p.set_trace()
         total_rewards[active_indices] += env_output.rewards
 
         # Update message log for ALL active samples with env observation

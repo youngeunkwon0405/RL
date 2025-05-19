@@ -5,7 +5,7 @@ generation:
   temperature: 0.6
   top_p: 0.95 # was 1 but doesn't compare with ido's
   top_k: -1 # disable
-  num_prompts_per_step: -1 # -1 means pass all prompts at once
+  num_prompts_per_step: 65 # -1 means pass all prompts at once
   model_name: "nvidia/Llama-3.1-Nemotron-Nano-8B-v1"
   stop_token_ids: null
   stop_strings: null
@@ -28,7 +28,7 @@ data:
   dataset_key: "train"
   problem_key: "problem"
   solution_key: "answer"
-  planted_thinking_prompt : "<think>" #none #"<think>Thinking . . . . . . . . . . . . . . . . ."
+  planted_thinking_prompt : none #"<think>" #none #"<th]ink>Thinking . . . . . . . . . . . . . . . . ."
 
 env:
   math:
@@ -40,3 +40,4 @@ cluster:
 
 debug:
   outfile: none
+  output_generation: false

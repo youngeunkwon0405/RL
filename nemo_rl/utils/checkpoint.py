@@ -78,7 +78,7 @@ class CheckpointManager:
         self.metric_name = config["metric_name"]
         self.higher_is_better = config["higher_is_better"]
         self.keep_top_k = config["keep_top_k"]
-
+        
     def init_tmp_checkpoint(
         self,
         step: int,
