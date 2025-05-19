@@ -477,8 +477,8 @@ def quack_train(
             
             # check if we have enough samples in the replay buffer
             # we also make sure critic is refitted on the first step
-            if not replay_buffer.can_sample(master_config["quack"]["train_dataset_size"]):
-                print(f"  ⚠️ Not enough samples in replay buffer ({len(replay_buffer)}/{master_config['quack']['train_dataset_size']}), skipping training for now...")
+            if not replay_buffer.can_sample(master_config["quack"]["num_quacks_per_step"]):
+                print(f"  ⚠️ Not enough samples in replay buffer ({len(replay_buffer)}/{master_config['quack']['num_quacks_per_step']}), skipping training for now...")
                 # still need to advance step and check max_num_steps
                 step += 1
                 if step >= master_config["quack"]["max_num_steps"]:
@@ -495,11 +495,11 @@ def quack_train(
 
             # get train dataset batch from replay buffer
             with timer.time("sampling_from_buffer"):
-                critic_dataset = replay_buffer.sample(master_config["quack"]["train_dataset_size"])
+                critic_dataset = replay_buffer.sample(master_config["quack"]["num_quacks_per_step"])
                 critic_dataset = setup_data(critic_dataset, tokenizer, master_config["critic_data"], "critic", hint_critic=master_config["quack"]["hint_critic"])
                 critic_iterator = DataLoader(
                     critic_dataset, 
-                    batch_size=master_config["quack"]["critic_inference_batch_size"], 
+                    batch_size=master_config["quack"]["critic_inference_batch_size"] // master_config["quack"]["num_critic_generations_per_prompt"], 
                     shuffle=False, 
                     collate_fn=rl_collate_fn
                 )
@@ -522,6 +522,7 @@ def quack_train(
             with timer.time("critic_generation"):
                 critic_micro_batch_list = []
                 for critic_micro_batch in critic_iterator:
+                    critic_micro_batch = critic_micro_batch.repeat_interleave(master_config["quack"]["num_critic_generations_per_prompt"])
                     critic_micro_batch, rollout_metrics_critic = run_multi_turn_rollout(
                         policy_generation=critic_generation,
                         input_batch=critic_micro_batch,
