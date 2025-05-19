@@ -41,7 +41,7 @@ actor:
     enabled: true
     cpu_offload: False
     sequence_parallel: true
-    activation_checkpointing: true
+    activation_checkpointing: false
     tensor_parallel_size: 8
 
   dynamic_batching:
