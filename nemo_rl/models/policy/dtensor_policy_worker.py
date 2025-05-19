@@ -396,6 +396,19 @@ class DTensorPolicyWorker:
                 "rank": torch.distributed.get_rank(),
                 "all_mb_metrics": dict(mb_metrics),
             }
+            
+            #get and print sum of all weights in the model
+            sum_of_weights = 0
+            metrics["sums"] = {}
+            for name, param in self.model.state_dict().items():
+                if isinstance(param, torch.Tensor):
+                    if "lm_head" in name:
+                        continue
+                    psum = param.to(torch.bfloat16).sum()
+                    #print(f"Sum of {name}: {psum}")
+                    sum_of_weights += psum
+                    metrics["sums"][name] = psum.item()
+            print(f"Sum of all weights in the model: {sum_of_weights}")
 
             return metrics
 

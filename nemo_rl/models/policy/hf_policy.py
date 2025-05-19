@@ -183,6 +183,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             "loss": results[0]["global_loss"],
             "grad_norm": results[0]["grad_norm"],
         }
+        aggregated_results["sums"] = results[0]["sums"]
 
         # Aggregate metrics across all workers
         all_mb_metrics = defaultdict(list)

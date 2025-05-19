@@ -19,6 +19,7 @@ import numpy as np
 import ray
 from ray.util.queue import Queue
 from transformers import AutoTokenizer
+import torch
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -70,7 +71,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker",
             config,
             tokenizer=tokenizer,
-            checkpoint_dir=None,
+            checkpoint_dir=weights_path,
             worker_sharding_annotations=self.sharding_annotations,
             pre_init_communication_queue=pre_init_queue,
             init_optimizer=init_optimizer,
@@ -165,6 +166,8 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         # Aggregate the results
         aggregated_results = {}
         aggregated_results["loss"] = results[0]["global_loss"]
+        aggregated_results["grad_norm"] = torch.tensor(results[0]["grad_norm"], device="cpu")
+        # aggregated_results["sums"] = results[0]["sums"]
 
         # Aggregate metrics across all workers
         all_mb_metrics = defaultdict(list)
@@ -256,7 +259,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         # Collect IPC handles from all workers
         worker_handles = ray.get(
             [
-                worker.get_weights_ipc_handles.remote(keys)
+                worker.get_weights_ipc_handles.remote(keys=keys)
                 for worker in self.worker_group.workers
             ]
         )

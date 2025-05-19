@@ -692,12 +692,12 @@ class RayWorkerGroup:
 
                 # Call the method on the worker with its data slice
                 future = getattr(worker, method_name).remote(
-                    worker_data, **common_kwargs
+                    data=worker_data, **common_kwargs
                 )
                 futures.append(future)
             else:
                 # If this worker doesn't need data, just call the method with None
-                future = getattr(worker, method_name).remote(None, **common_kwargs)
+                future = getattr(worker, method_name).remote(data=None, **common_kwargs)
                 futures.append(future)
 
         return MultiWorkerFuture(
