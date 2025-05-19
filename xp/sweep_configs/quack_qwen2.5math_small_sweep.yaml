@@ -17,6 +17,12 @@ actor.model_name: ["Qwen/Qwen2.5-Math-7B"]
 # Refit configuration
 quack.critic_refit_period: [1, 2, 4, 8]
 
+# loss correction
+quack.verdict_loss_correction: [true, false]
+
+# hint critic
+quack.hint_critic: [true, false]
+
 # Ensure no chat template is used
 data.apply_chat_template: [false]
 critic_data.apply_chat_template: [false]
