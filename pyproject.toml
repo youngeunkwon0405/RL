@@ -67,6 +67,12 @@ test = [
     "pytest-timeout",
     "pytest-cov",
 ]
+ifeval = [
+    "absl-py",
+    "langdetect",
+    "nltk==3.9.1",
+    "immutabledict",
+]
 
 
 [tool.black]

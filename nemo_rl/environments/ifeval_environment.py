@@ -93,7 +93,7 @@ class IFEvalEnvironmentMetadata(TypedDict):
 
 
 @ray.remote
-class HFVerifyWorker:
+class IFEvalVerifyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
 
     def __init__(self):
@@ -143,8 +143,8 @@ class IFEvalEnvironment(EnvironmentInterface):
         self.cfg = cfg
         self.num_workers = cfg["num_workers"]
         self.workers = [
-            HFVerifyWorker.options(
-                runtime_env={"py_executable": HFVerifyWorker.DEFAULT_PY_EXECUTABLE}
+            IFEvalVerifyWorker.options(
+                runtime_env={"py_executable": IFEvalVerifyWorker.DEFAULT_PY_EXECUTABLE}
             ).remote()
             for _ in range(self.num_workers)
         ]
