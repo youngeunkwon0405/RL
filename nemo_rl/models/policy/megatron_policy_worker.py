@@ -304,6 +304,7 @@ class MegatronPolicyWorker:
             "pipeline_model_parallel_size"
         ]
         model_cfg.expert_tensor_parallel_size = self.cfg.get("expert_tensor_parallel_size", 1)
+        model_cfg.sequence_parallel = self.cfg.get("expert_tensor_parallel_size", False)
         model_cfg.context_parallel_size = self.cfg[
             "context_parallel_size"
         ]  # not supported right now
@@ -637,7 +638,7 @@ class MegatronPolicyWorker:
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
 
-                return torch.tensor(0.0), {"logprobs": token_logprobs}
+                return torch.tensor(0.0).cuda(), {"logprobs": token_logprobs}
 
             return output_tensor, collection_fn
 
