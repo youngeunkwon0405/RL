@@ -31,7 +31,8 @@ actor:
   train_micro_batch_size: 2
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
-  max_total_sequence_length: 16384
+  # max_total_sequence_length: 16384
+  max_total_sequence_length: 4096
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
