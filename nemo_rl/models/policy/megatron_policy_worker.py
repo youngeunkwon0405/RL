@@ -49,7 +49,7 @@ from megatron.inference.text_generation.mcore_engine_server import (
 )
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron import fault_tolerance
-from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint
+from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint, save_checkpoint
 from nemo.tron.config import (
     CheckpointConfig,
     ConfigContainer,
@@ -210,8 +210,6 @@ def setup_megatron_model(
 
 @ray.remote
 class MegatronPolicyWorker:
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
-
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
 
@@ -446,6 +444,18 @@ class MegatronPolicyWorker:
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
+        torch.cuda.empty_cache()
+        self.model.zero_grad_buffer()
+        if hasattr(self.model, 'inference_params'):
+            self.model.inference_params = None
+
+        # Reset any cached attention states
+        for module in self.model.modules():
+            if hasattr(module, 'reset_inference_cache'):
+                module.reset_inference_cache()
+            if hasattr(module, '_inference_key_value_memory'):
+                module._inference_key_value_memory = None
+
         if gbs is None:
             gbs = self.cfg["train_global_batch_size"]
         if mbs is None:
@@ -507,8 +517,8 @@ class MegatronPolicyWorker:
                 )
                 # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
                 # so we must gather across mp ranks
-                grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
-                num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(
+                grad_norm: float = reduce_max_stat_across_model_parallel_group(grad_norm)
+                num_zeros_in_grad: float = reduce_max_stat_across_model_parallel_group(
                     num_zeros_in_grad
                 )
 
@@ -552,6 +562,7 @@ class MegatronPolicyWorker:
 
                     loss_metrics["lr"] = curr_lr
                     loss_metrics["wd"] = curr_wd
+                    loss_metrics["grad_norm"] = grad_norm
                     torch.distributed.broadcast_object_list(
                         [loss_metrics],
                         src=get_pipeline_model_parallel_last_rank(),
@@ -582,6 +593,7 @@ class MegatronPolicyWorker:
             "global_loss": loss.cpu(),
             "rank": torch.distributed.get_rank(),
             "all_mb_metrics": dict(mb_metrics),
+            "grad_norm": mb_metrics["grad_norm"][-1], # TODO @sahilj: return an average or something later
         }
         return metrics
 
@@ -946,8 +958,7 @@ class MegatronPolicyWorker:
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         return param_info
 
-    @torch.no_grad()
-    def get_weights_ipc_handles(self, keys):
+    def get_weights_ipc_handles(self, keys=None):
         """Get IPC handles for the requested Megatron model weights.
 
         Args:
@@ -1051,6 +1062,7 @@ class MegatronPolicyWorker:
         )
 
     def move_model(self, model, device):
+        # return model
         for name, item in model.state_dict().items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device=device, non_blocking=True, copy=True)
@@ -1061,12 +1073,133 @@ class MegatronPolicyWorker:
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None,
         offload_to_cpu: bool = True,
     ):
-        pass
+        """Save a training checkpoint.
+
+        Args:
+            weights_path: The specific directory path where the checkpoint will be saved.
+            optimizer_path: If not None, optimizer and scheduler states are saved if they exist.
+            offload_to_cpu: bool = True. NeMo's distributed checkpointing saves from device.
+                            This flag is noted but doesn't change distributed save behavior.
+        """
+        if not torch.distributed.is_initialized():
+            raise RuntimeError(
+                "Distributed process group is not initialized. Cannot save checkpoint."
+            )
+
+        if self.mcore_state is None or self.model is None:
+            raise RuntimeError(
+                "Megatron core state or model is not initialized. Cannot save checkpoint."
+            )
+
+        original_save_path = self.mcore_state.cfg.checkpoint_config.save
+        save_dir = os.path.dirname(weights_path)
+        release_name = os.path.basename(weights_path)
+
+        try:
+            self.mcore_state.cfg.checkpoint_config.save = save_dir
+
+            optimizer_to_save = None
+            scheduler_to_save = None
+
+            if optimizer_path is not None:
+                if self.optimizer is not None:
+                    optimizer_to_save = self.optimizer
+                if self.scheduler is not None:
+                    scheduler_to_save = self.scheduler
+            
+            # Ensure model is in eval mode for consistent saving, unless actively training
+            # This is a common practice, though NeMo's save might handle this.
+            # For safety, if not in training loop, setting to eval.
+            is_training = self.model.training
+            if not is_training:
+                self.model.eval()
+
+            save_checkpoint(
+                state=self.mcore_state,
+                model=self.model,
+                optimizer=optimizer_to_save,
+                opt_param_scheduler=scheduler_to_save,
+                checkpointing_context=self.checkpointing_context,
+                release_name=release_name,
+            )
+            print(f"Saved checkpoint to {weights_path}")
+
+            if not is_training: # Restore training state if it was changed
+                self.model.train()
+
+        except Exception as e:
+            print(f"Failed to save checkpoint to {weights_path}: {e}")
+            raise
+        finally:
+            self.mcore_state.cfg.checkpoint_config.save = original_save_path
 
     def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
-        pass
+        """Load a training checkpoint.
+
+        Args:
+            weights_path: The exact directory path from which to load the checkpoint.
+            optimizer_path: If not None, attempts to load optimizer and scheduler states
+                            if self.optimizer and self.scheduler are initialized.
+        """
+        if not torch.distributed.is_initialized():
+            raise RuntimeError(
+                "Distributed process group is not initialized. Cannot load checkpoint."
+            )
+
+        if self.mcore_state is None or self.model is None:
+            raise RuntimeError(
+                "Megatron core state or model is not initialized. Cannot load checkpoint."
+            )
+
+        original_pretrained_checkpoint = (
+            self.mcore_state.cfg.checkpoint_config.pretrained_checkpoint
+        )
+        original_load_path = self.mcore_state.cfg.checkpoint_config.load
+
+        try:
+            # Set pretrained_checkpoint to the specific path for loading
+            self.mcore_state.cfg.checkpoint_config.pretrained_checkpoint = weights_path
+            # Nullify load to ensure pretrained_checkpoint takes precedence if logic prefers one
+            self.mcore_state.cfg.checkpoint_config.load = None
+
+            optimizer_to_load = None
+            scheduler_to_load = None
+
+            if optimizer_path is not None:
+                if self.optimizer is not None:
+                    optimizer_to_load = self.optimizer
+                else:
+                    if get_rank_safe() == 0:
+                        print("Warning: Optimizer state loading requested, but self.optimizer is None. Optimizer state will not be loaded.")
+                if self.scheduler is not None:
+                    scheduler_to_load = self.scheduler
+                else:
+                     if get_rank_safe() == 0:
+                        print("Warning: Scheduler state loading requested, but self.scheduler is None. Scheduler state will not be loaded.")
+            
+            # Model should be on device before loading. load_checkpoint expects this.
+            # self.model.to('cuda') # Already handled by setup and prepare_for_training/inference
+
+            load_checkpoint(
+                state=self.mcore_state,
+                model=self.model,
+                optimizer=optimizer_to_load,
+                opt_param_scheduler=scheduler_to_load,
+                checkpointing_context=self.checkpointing_context,
+            )
+            print(f"Loaded checkpoint from {weights_path}")
+
+        except Exception as e:
+            print(f"Failed to load checkpoint from {weights_path}: {e}")
+            raise
+        finally:
+            self.mcore_state.cfg.checkpoint_config.pretrained_checkpoint = (
+                original_pretrained_checkpoint
+            )
+            self.mcore_state.cfg.checkpoint_config.load = original_load_path
 
     def shutdown(self):
         """Shutdown the policy."""

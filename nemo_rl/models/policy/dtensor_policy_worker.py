@@ -30,9 +30,6 @@ from transformers.integrations.accelerate import find_tied_parameters
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import (
-    PY_EXECUTABLES,
-)
 from nemo_rl.models.dtensor.parallelize import (
     _parallelize_model,
     clip_grad_by_total_norm_,
@@ -95,8 +92,6 @@ def get_cpu_state_dict(
 
 @ray.remote
 class DTensorPolicyWorker:
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
-
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
 
@@ -335,6 +330,10 @@ class DTensorPolicyWorker:
                     else:
                         logits = outputs.logits
 
+                    # Divide logits by temperature
+                    if "generation" in self.cfg and self.cfg["generation"] is not None:
+                        logits.div_(self.cfg["generation"]["temperature"])
+
                     loss, loss_metrics = loss_fn(logits, mb)
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
@@ -371,9 +370,11 @@ class DTensorPolicyWorker:
 
                     # Update parameters
                     self.optimizer.step()
-                    self.scheduler.step()
 
                 losses.append(torch.tensor(mb_losses).sum().item())
+
+            # increment scheduler after all batches in rollout are processed
+            self.scheduler.step()
 
             # Compute global loss across all ranks
             with torch.no_grad():
@@ -395,6 +396,19 @@ class DTensorPolicyWorker:
                 "rank": torch.distributed.get_rank(),
                 "all_mb_metrics": dict(mb_metrics),
             }
+            
+            #get and print sum of all weights in the model
+            sum_of_weights = 0
+            metrics["sums"] = {}
+            for name, param in self.model.state_dict().items():
+                if isinstance(param, torch.Tensor):
+                    if "lm_head" in name:
+                        continue
+                    psum = param.to(torch.bfloat16).sum()
+                    #print(f"Sum of {name}: {psum}")
+                    sum_of_weights += psum
+                    metrics["sums"][name] = psum.item()
+            print(f"Sum of all weights in the model: {sum_of_weights}")
 
             return metrics
 
