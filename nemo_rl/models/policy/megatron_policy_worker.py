@@ -305,6 +305,7 @@ class MegatronPolicyWorker:
         ]
         model_cfg.expert_tensor_parallel_size = self.cfg.get("expert_tensor_parallel_size", 1)
         model_cfg.sequence_parallel = self.cfg.get("expert_tensor_parallel_size", False)
+        model_cfg.expert_model_parallel_size = self.cfg.get("expert_model_parallel_size", 1)
         model_cfg.context_parallel_size = self.cfg[
             "context_parallel_size"
         ]  # not supported right now
