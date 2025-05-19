@@ -40,6 +40,7 @@ policy:
   max_total_sequence_length: 256
   precision: "bfloat16"
   tensor_model_parallel_size: 8
+  sequence_parallel: True
   expert_tensor_parallel_size: ${policy.tensor_model_parallel_size}
   pipeline_model_parallel_size: 1
   pipeline_dtype: "bfloat16"
