@@ -137,7 +137,7 @@ class IFEvalVerifyWorker:
 
 @ray.remote
 class IFEvalEnvironment(EnvironmentInterface):
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
+    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.IFEVAL
 
     def __init__(self, cfg: IFEvalEnvConfig):
         self.cfg = cfg

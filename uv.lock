@@ -1894,6 +1894,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+ifeval = [
+    { name = "absl-py" },
+    { name = "immutabledict" },
+    { name = "langdetect" },
+    { name = "nltk" },
+]
 vllm = [
     { name = "vllm" },
 ]
@@ -1918,12 +1924,6 @@ docs = [
     { name = "sphinx-autodoc2" },
     { name = "sphinx-copybutton" },
 ]
-ifeval = [
-    { name = "absl-py" },
-    { name = "immutabledict" },
-    { name = "langdetect" },
-    { name = "nltk" },
-]
 test = [
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -1932,13 +1932,17 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "absl-py", marker = "extra == 'ifeval'" },
     { name = "accelerate", specifier = ">=0.26" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets" },
     { name = "debugpy", specifier = ">=1.8.0" },
     { name = "hydra-core" },
+    { name = "immutabledict", marker = "extra == 'ifeval'" },
     { name = "jsonlines" },
+    { name = "langdetect", marker = "extra == 'ifeval'" },
     { name = "math-verify" },
+    { name = "nltk", marker = "extra == 'ifeval'", specifier = "==3.9.1" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
     { name = "omegaconf" },
@@ -1951,7 +1955,7 @@ requires-dist = [
     { name = "vllm", marker = "extra == 'vllm'", specifier = "==0.8.4" },
     { name = "wandb" },
 ]
-provides-extras = ["vllm"]
+provides-extras = ["vllm", "ifeval"]
 
 [package.metadata.requires-dev]
 build = [
@@ -1971,12 +1975,6 @@ docs = [
     { name = "sphinx-autobuild" },
     { name = "sphinx-autodoc2" },
     { name = "sphinx-copybutton" },
-]
-ifeval = [
-    { name = "absl-py" },
-    { name = "immutabledict" },
-    { name = "langdetect" },
-    { name = "nltk", specifier = "==3.9.1" },
 ]
 test = [
     { name = "pytest", specifier = ">=7.0.0" },

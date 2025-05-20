@@ -174,7 +174,7 @@ def main():
 
     if not args.config:
         args.config = os.path.join(
-            os.path.dirname(__file__), "configs", "grpo_math_1B.yaml"
+            os.path.dirname(__file__), "configs", "grpo_ifeval_1B.yaml"
         )
 
     config = load_config(args.config)
