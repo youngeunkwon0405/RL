@@ -34,12 +34,17 @@ from nemo_rl.data.interfaces import (
     TaskDataProcessFnCallable,
     TaskDataSpec,
 )
+from nemo_rl.distributed.ray_actor_environment_registry import (
+    get_actor_python_env,
+)
 from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
+
+OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
@@ -215,7 +220,9 @@ def setup_data(
 
     math_env = MathEnvironment.options(  # type: ignore # it's wrapped with ray.remote
         runtime_env={
-            "py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE,
+            "py_executable": get_actor_python_env(
+                "nemo_rl.environments.math_environment.MathEnvironment"
+            ),
             "env_vars": dict(os.environ),  # Pass thru all user environment variables
         }
     ).remote(env_configs["math"])

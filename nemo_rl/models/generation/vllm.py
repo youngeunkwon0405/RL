@@ -22,7 +22,6 @@ import torch
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import (
-    PY_EXECUTABLES,
     RayVirtualCluster,
 )
 from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
@@ -33,6 +32,7 @@ from nemo_rl.models.generation.interfaces import (
     GenerationOutputSpec,
     verify_right_padding,
 )
+from nemo_rl.models.huggingface.common import ModelFlag
 
 
 class VllmSpecificArgs(TypedDict):
@@ -41,7 +41,6 @@ class VllmSpecificArgs(TypedDict):
     max_model_len: int
     # Additional arguments for vLLM inserted by nemo rl based on the context of when vllm is used
     skip_tokenizer_init: bool
-    load_format: str
 
 
 class VllmConfig(GenerationConfig):
@@ -51,8 +50,6 @@ class VllmConfig(GenerationConfig):
 
 @ray.remote
 class VllmGenerationWorker:
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.VLLM
-
     def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
 
@@ -157,7 +154,8 @@ class VllmGenerationWorker:
             self.SamplingParams = vllm.SamplingParams
         except ImportError:
             raise ImportError(
-                "vLLM is not installed. Please check that VllmGenerationWorker.DEFAULT_PY_EXECUTABLE covers the vllm dependency. "
+                "vLLM is not installed. Please check that the py_executable in the runtime_env of VllmGenerationWorker "
+                "covers the vllm dependency. You may have to update nemo_rl/distributed/ray_actor_environment_registry.py. "
                 "If you are working interactively, you can install by running  `uv sync --extra vllm` anywhere in the repo."
             )
         vllm_kwargs: dict[str, Any] = copy.deepcopy(self.cfg.get("vllm_kwargs", {}))
@@ -183,15 +181,20 @@ class VllmGenerationWorker:
             # For non-TP mode, explicitly set executor to None to avoid Ray issues
             vllm_kwargs["distributed_executor_backend"] = None
 
+        load_format = self.cfg["vllm_cfg"]["load_format"]
+        if ModelFlag.VLLM_LOAD_FORMAT_AUTO.matches(self.model_name):
+            load_format = "auto"
+
         self.llm = vllm.LLM(
             model=self.model_name,
             # Training pipeline will set this to "dummy" and eval will load real weights using 'auto'
-            load_format=self.cfg["vllm_cfg"]["load_format"],
+            load_format=load_format,
             skip_tokenizer_init=self.cfg["vllm_cfg"]["skip_tokenizer_init"],
             tensor_parallel_size=self.cfg["vllm_cfg"]["tensor_parallel_size"],
             gpu_memory_utilization=self.cfg["vllm_cfg"]["gpu_memory_utilization"],
-            enable_prefix_caching=True,
-            dtype="auto",
+            # Disable prefix caching for devices with compute capability < 8 (Volta) due to vllm segfault.
+            enable_prefix_caching=torch.cuda.get_device_capability()[0] >= 8,
+            dtype=self.cfg["vllm_cfg"]["precision"],
             seed=seed,
             # Don't use cuda-graph by default as it leads to convergence issue (see https://github.com/NVIDIA/NeMo-RL/issues/186)
             enforce_eager=True,
@@ -454,10 +457,9 @@ class VllmGenerationWorker:
                 "Attempting to update weights with either an uninitialized vLLM or non-model-owner"
             )
             # Use collective_rpc to delegate to the UpdatableVllmInternalWorker implementation
-            self.llm.collective_rpc(
+            return self.llm.collective_rpc(
                 "update_weights_from_ipc_handles", args=(ipc_handles,)
-            )
-            return True
+            )[0]
         except Exception as e:
             print(f"Error updating weights: {e}")
             return False
@@ -510,7 +512,9 @@ class VllmGeneration(GenerationInterface):
         self.tensor_parallel_size = self.cfg["vllm_cfg"]["tensor_parallel_size"]
 
         # Create worker builder for VllmGenerationWorker
-        worker_builder = RayWorkerBuilder(VllmGenerationWorker, config)
+        worker_builder = RayWorkerBuilder(
+            "nemo_rl.models.generation.vllm.VllmGenerationWorker", config
+        )
 
         if self.tensor_parallel_size > 1:
             # For tensor parallelism, create node-aware worker groups

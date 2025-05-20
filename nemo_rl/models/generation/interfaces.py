@@ -15,6 +15,7 @@ from abc import ABC, abstractmethod
 from typing import Any, NotRequired, Optional, TypedDict, Union
 
 import torch
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
@@ -110,6 +111,29 @@ class GenerationConfig(TypedDict):
     stop_token_ids: list[int]
     stop_strings: NotRequired[list[str]]
     pad_token_id: NotRequired[int]
+
+
+def configure_generation_config(
+    config: GenerationConfig, tokenizer: PreTrainedTokenizerBase, is_eval=False
+):
+    """Apply specific configurations to generation config."""
+    # tokenizer setting
+    config["pad_token_id"] = tokenizer.pad_token_id
+    if config["stop_token_ids"] is None:
+        config["stop_token_ids"] = [tokenizer.eos_token_id]
+
+    # vllm setting
+    if config["backend"] == "vllm":
+        # set load_format
+        config["vllm_cfg"]["load_format"] = "auto" if is_eval else "dummy"
+
+        # set skip_tokenizer_init
+        if is_eval or config["stop_strings"] is not None:
+            config["vllm_cfg"]["skip_tokenizer_init"] = False
+        else:
+            config["vllm_cfg"]["skip_tokenizer_init"] = True
+
+    return config
 
 
 class GenerationDatumSpec(TypedDict):

@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Mapping, Optional, TypedDict, cast
+from typing import Any, Callable, Mapping, Optional, TypedDict
 
 import ray
 import requests
@@ -709,10 +709,19 @@ def print_message_log_samples(
     configure_rich_logging(level="INFO")
 
     if not message_logs or not rewards:
+        print("⚠️  No message logs or rewards to display")
         return
 
     if num_samples <= 0:
         return
+
+    if not message_logs:
+        print("⚠️ No valid message logs to display")
+        return
+
+    assert len(message_logs) == len(rewards), (
+        "Message logs and rewards must have the same length"
+    )
 
     # Sample up to num_samples (or all if less)
     num_to_show = min(num_samples, len(message_logs))
@@ -822,31 +831,31 @@ def print_message_log_samples(
         content = re.sub(r"\[(?![a-z_]+\s|/[a-z_]+\])", "\\[", content)
         return f"[{role_color}]{content}[/]"
 
+    # Extract messages from a message log
+    def extract_messages(message_log):
+        def format_message(role, content):
+            role = role.upper()
+            if role == "SYSTEM":
+                return f"[bold #8A2BE2]{role}:[/] {safe_render(content, '#8A2BE2')}"
+            elif role == "USER":
+                return f"[bold #4682B4]{role}:[/] {safe_render(content, '#4682B4')}"
+            elif role == "ASSISTANT":
+                return f"[bold #2E8B57]{role}:[/] {safe_render(content, '#2E8B57')}"
+            else:
+                return f"[bold]{role}:[/] {safe_render(content, 'bright_white')}"
+
+        messages = []
+        for msg in message_log:
+            if isinstance(msg, dict) and "role" in msg and "content" in msg:
+                messages.append(format_message(msg["role"], msg["content"]))
+        return messages
+
     for i, idx in enumerate(indices):
         message_log = message_logs[idx]
         reward = rewards[idx]
 
-        # Format each message in the conversation
-        message_parts = []
-        for msg in message_log:
-            role = cast(str, msg.get("role", "unknown")).upper()
-            content = cast(str, msg.get("content", ""))
-
-            # Choose color based on role - using muted, elegant colors
-            if role == "SYSTEM":
-                message_parts.append(
-                    f"[bold #8A2BE2]{role}:[/] {safe_render(content, '#8A2BE2')}"
-                )
-            elif role == "USER":
-                message_parts.append(
-                    f"[bold #4682B4]{role}:[/] {safe_render(content, '#4682B4')}"
-                )
-            elif role == "ASSISTANT":
-                message_parts.append(
-                    f"[bold #2E8B57]{role}:[/] {safe_render(content, '#2E8B57')}"
-                )
-            else:
-                message_parts.append(f"[bold]{role}:[/] {content}")
+        # Extract messages from the sample
+        message_parts = extract_messages(message_log)
 
         # Get reward emoji
         emoji = get_reward_emoji(reward)
@@ -864,6 +873,10 @@ def print_message_log_samples(
             color = "red"
 
         content = "\n\n".join(message_parts)
+
+        # If we have no content to display, show a placeholder
+        if not content.strip():
+            content = "[italic]No message content to display[/]"
 
         panel = Panel(
             content,

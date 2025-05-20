@@ -125,8 +125,8 @@ def masked_mean(
     values: torch.Tensor,
     mask: torch.Tensor,
     dim: Optional[int] = None,
-    global_normalization_factor: Optional[torch.Tensor] = None,
-) -> torch.Tensor:
+    global_normalization_factor: Optional[torch.Tensor | float] = None,
+):
     """Computes the mean of a microbatch, using a global statistic as the normalization factor."""
     normalization_factor = (
         torch.sum(mask, dim=dim)

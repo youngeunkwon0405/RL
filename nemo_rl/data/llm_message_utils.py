@@ -104,6 +104,7 @@ def get_keys_from_message_log(
     """Return a new LLMMessageLogType containing only the specified keys from each message.
 
     Args:
+        message_log: Original message log to extract keys from
         keys: List of keys to keep in each message
 
     Returns:
@@ -377,6 +378,7 @@ def get_formatted_message_log(
     task_data_spec: TaskDataSpec,
     add_bos_token: bool = True,
     add_eos_token: bool = True,
+    add_generation_prompt: bool = False,
 ) -> LLMMessageLogType:
     """Format and tokenize chat messages using the specified template.
 
@@ -384,6 +386,9 @@ def get_formatted_message_log(
         message_log: List of message dicts with 'role' and 'content' keys
         tokenizer: Tokenizer for converting text to token IDs
         task_data_spec: Task spec for this dataset.
+        add_bos_token: Whether to add bos token to first message if it is not already present. Default: True
+        add_eos_token: Whether to add eos token to last message if it is not already present. Default: True
+        add_generation_prompt: Whether to include assistant's generation prompt in user messages. Default: False
 
     Returns:
         The message log with updated 'token_ids' and 'content' fields.
@@ -394,10 +399,20 @@ def get_formatted_message_log(
         list[dict[str, str]], message_log
     )  # we just use the str:str parts here
 
+    if task_data_spec.prompt:
+        message_log = [
+            {
+                "role": "user",
+                "content": task_data_spec.prompt.format(message_log[0]["content"]),
+            }
+        ] + message_log[1:]
+
     for i, message in enumerate(message_log):
-        formatted_message: str = tokenizer.apply_chat_template(  # type: ignore
-            message_log_strs[: i + 1],
-            add_generation_prompt=False,
+        # If enabled, add_generation_prompt is only used on user messages to include
+        # the assistant's generation prompt as part of the user message.
+        formatted_message = tokenizer.apply_chat_template(  # type: ignore
+            message_log[: i + 1],
+            add_generation_prompt=add_generation_prompt and message["role"] == "user",
             tokenize=False,
             add_special_tokens=False,
         )

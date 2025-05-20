@@ -33,9 +33,6 @@ from transformers.integrations.accelerate import find_tied_parameters
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.virtual_cluster import (
-    PY_EXECUTABLES,
-)
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
     GenerationOutputSpec,
@@ -59,8 +56,6 @@ from nemo_rl.utils.native_checkpoint import (
 
 @ray.remote
 class FSDP1PolicyWorker:
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
-
     def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
 
@@ -97,7 +92,10 @@ class FSDP1PolicyWorker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
-            torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
+            # Always load the model in float32 to keep master weights in float32.
+            # Keeping the master weights in lower precision has shown to cause issues with convergence.
+            # https://github.com/NVIDIA/NeMo-RL/issues/279 will fix the issue of CPU OOM for larger models.
+            torch_dtype=torch.float32,
             **sliding_window_overwrite(
                 model_name
             ),  # due to https://github.com/huggingface/transformers/issues/38002
@@ -281,22 +279,29 @@ class FSDP1PolicyWorker:
                     "sample_mask must be present in the data!"
                 )
                 ## get the normalization factor for the loss
-                if loss_fn.loss_type == LossType.TOKEN_LEVEL:
-                    assert "token_mask" in global_batch, (
-                        "token_mask must be present in the data when using token-level loss"
+                local_valid_seqs = torch.sum(global_batch["sample_mask"])
+
+                if not "token_mask" in global_batch:
+                    local_valid_toks = (
+                        local_valid_seqs * global_batch["input_ids"].shape[1]
                     )
-                    ## get number of tokens in the global batch
-                    total_valid_tokens_or_seqs = torch.sum(
+                else:
+                    local_valid_toks = torch.sum(
                         global_batch["token_mask"][:, 1:]
                         * global_batch["sample_mask"].unsqueeze(-1)
                     )
-                    torch.distributed.all_reduce(total_valid_tokens_or_seqs)
-                elif loss_fn.loss_type == LossType.SEQUENCE_LEVEL:
-                    ## get number of valid samples in the global batch
-                    total_valid_tokens_or_seqs = torch.sum(global_batch["sample_mask"])
-                    torch.distributed.all_reduce(total_valid_tokens_or_seqs)
-                else:
-                    raise ValueError(f"Unknown loss type: {loss_fn.loss_type}")
+
+                to_reduce = torch.tensor([local_valid_seqs, local_valid_toks]).cuda()
+                torch.distributed.all_reduce(to_reduce)
+                global_valid_seqs, global_valid_toks = to_reduce[0], to_reduce[1]
+
+                if (
+                    hasattr(loss_fn, "loss_type")
+                    and loss_fn.loss_type == LossType.TOKEN_LEVEL
+                ):
+                    assert "token_mask" in global_batch, (
+                        "token_mask must be present in the data when using token-level loss"
+                    )
 
                 self.optimizer.zero_grad()
                 mb_losses = []
@@ -334,16 +339,17 @@ class FSDP1PolicyWorker:
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
 
-                    loss, loss_metrics = loss_fn(logits, mb, total_valid_tokens_or_seqs)
+                    loss, loss_metrics = loss_fn(
+                        logits, mb, global_valid_seqs, global_valid_toks
+                    )
                     ## scale by the number of global batches so we get the correct
                     ## value when summing metrics across all microbatches
                     for k in loss_metrics.keys():
                         loss_metrics[k] /= num_global_batches
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                    loss_metrics["normalization_factor"] = (
-                        total_valid_tokens_or_seqs.cpu()
-                    )
+                    loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
+                    loss_metrics["global_valid_toks"] = global_valid_toks.item()
 
                     # Backward pass
                     if not eval_mode:
