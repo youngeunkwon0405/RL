@@ -37,7 +37,7 @@ from nemo_rl.distributed.collectives import (
 DictT = TypeVar("DictT", bound=Mapping[str, Any])
 
 
-class DynamicBatchingCfg(TypedDict):
+class DynamicBatchingArgs(TypedDict):
     """Configuration settings for dynamic batching.
 
     Pass this to 'shard_by_batch_size()' to preprocess batches for dynamic batching.
@@ -190,6 +190,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         reordered_indices = [idx[1] for idx in reordered]
 
         for k, v in self.data.items():
+            sorted_v: torch.Tensor | list[Any]
             if torch.is_tensor(v):
                 sorted_v = v.index_select(
                     dim=0, index=torch.IntTensor(reordered_indices)
@@ -203,8 +204,8 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         shards: int,
         batch_size: Optional[int] = None,
         allow_uneven_shards: bool = False,
-        dynamic_batching_cfg: DynamicBatchingCfg = None,
-    ) -> list["SlicedDataDict"]:
+        dynamic_batching_args: Optional[DynamicBatchingArgs] = None,
+    ) -> list["SlicedDataDict"] | tuple[list["SlicedDataDict"], list[int]]:
         """Shards a batch by first dividing it into chunks of size batch_size, then further dividing each chunk into shards equal parts. Finally aggregates the sub-shards by their position.
 
         If batch_size is None, there will be no chunking beforehand (will default to the total batch size).
@@ -218,7 +219,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             batch_size (int): The size of each initial chunk.
             allow_uneven_shards (bool): Whether to allow shards to be unevenly sized.
                                         If True, the last shard may be smaller than the others.
-            dynamic_batching_cfg (dict): If passed, preprocess batch for dynamic batching. This
+            dynamic_batching_args (dict): If passed, preprocess batch for dynamic batching. This
                                             dict requires two keys:
                                             1. max_tokens_per_microbatch (int): the maximum
                                                 number of tokens in a microbatch
@@ -232,6 +233,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
         Returns:
             list[BatchedDataDict]: A list of BatchedDataDicts, length equal to shards.
+            If dynamic_batching_args is passed, returns a tuple of the list of BatchedDataDicts and the sorted indices.
 
         Examples:
         ```{doctest}
@@ -303,13 +305,13 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         # if using dynamic microbatching, preprocess the data by sorting the data
         # by the sequence lengths. This ensures each DP rank receives samples of about
         # equal sequence lengths which improves load balancing
-        if dynamic_batching_cfg is not None:
+        if dynamic_batching_args is not None:
             data = {}
             batch_sorted_indices = []
             for chunk_idx in range(num_chunks):
                 chunk_start = chunk_idx * batch_size
                 chunk_end = (chunk_idx + 1) * batch_size
-                chunk_seqlens = self.data[dynamic_batching_cfg["input_lengths_key"]][
+                chunk_seqlens = self.data[dynamic_batching_args["input_lengths_key"]][
                     chunk_start:chunk_end
                 ]
                 # sort the indices by sequence lengths
@@ -327,6 +329,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
             # finally reorder the data along the sorted sequence len indices
             for k, v in self.data.items():
+                sorted_v: torch.Tensor | list[Any]
                 if torch.is_tensor(v):
                     sorted_v = v.index_select(
                         dim=0, index=torch.IntTensor(batch_sorted_indices)
@@ -378,8 +381,8 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
         # map inputs to microbatches such that the total number tokens in
         # a microbatch is as close to (including padding tokens) 'max_tokens_per_microbatch'
-        if dynamic_batching_cfg is not None:
-            max_tokens_per_microbatch = dynamic_batching_cfg[
+        if dynamic_batching_args is not None:
+            max_tokens_per_microbatch = dynamic_batching_args[
                 "max_tokens_per_microbatch"
             ]
             micro_batch_indices = []
@@ -398,7 +401,9 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                     chunk_start = chunk_idx * shard_size
                     chunk_end = (chunk_idx + 1) * shard_size
                     for shard in aggregated_shards:
-                        input_lengths = shard[dynamic_batching_cfg["input_lengths_key"]]
+                        input_lengths = shard[
+                            dynamic_batching_args["input_lengths_key"]
+                        ]
                         seq_len = input_lengths[chunk_start:chunk_end][
                             shard_indice
                         ].item()
@@ -407,10 +412,10 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                         )
 
                     # pad to nearest multiple specified
-                    sequence_length_round = dynamic_batching_cfg[
+                    sequence_length_round = dynamic_batching_args[
                         "sequence_length_round"
                     ]
-                    unpadded_seqlen = data[dynamic_batching_cfg["input_key"]].shape[1]
+                    unpadded_seqlen = data[dynamic_batching_args["input_key"]].shape[1]
 
                     padded_seqlen = (
                         (max_seqlen_this_shard_indice + sequence_length_round - 1)
@@ -468,7 +473,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         batch = self.slice(start, end)
         if self.micro_batch_indices is not None:
             batch.micro_batch_indices = [self.micro_batch_indices[batch_idx]]
-            batch.micro_batch_lengths = [self.micro_batch_lengths[batch_idx]]
+            batch.micro_batch_lengths = [self.micro_batch_lengths[batch_idx]]  # type: ignore # This exists if idxs do
 
         return batch
 
@@ -525,7 +530,9 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             Iterator["SlicedDataDict"]: An iterator that yield dynamic microbatches
         """
         assert (
-            self.micro_batch_indices is not None and len(self.micro_batch_indices) == 1
+            self.micro_batch_indices is not None
+            and len(self.micro_batch_indices) == 1
+            and self.micro_batch_lengths is not None
         )
 
         for seqlen, (start_idx, end_idx) in zip(

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-from typing import Any
+from typing import Any, Optional
 
 from datasets import Dataset, load_dataset
 
@@ -81,7 +81,7 @@ class OpenMathInstruct2Dataset:
         seed: int = 42,
         test_size: float = 0.05,
         output_key: str = "expected_answer",
-        prompt_file: str = None,
+        prompt_file: Optional[str] = None,
     ):
         """Initialize the OpenMathInstruct2 dataset with train/validation split.
 

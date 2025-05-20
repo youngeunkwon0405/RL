@@ -393,25 +393,25 @@ def get_formatted_message_log(
     Returns:
         The message log with updated 'token_ids' and 'content' fields.
     """
-    new_message_log = []
+    new_message_log: LLMMessageLogType = []
     prev_formatted_message = ""
     message_log_strs: list[dict[str, str]] = cast(
         list[dict[str, str]], message_log
     )  # we just use the str:str parts here
 
     if task_data_spec.prompt:
-        message_log = [
+        message_log_strs = [
             {
                 "role": "user",
-                "content": task_data_spec.prompt.format(message_log[0]["content"]),
+                "content": task_data_spec.prompt.format(message_log_strs[0]["content"]),
             }
-        ] + message_log[1:]
+        ] + message_log_strs[1:]
 
-    for i, message in enumerate(message_log):
+    for i, message in enumerate(message_log_strs):
         # If enabled, add_generation_prompt is only used on user messages to include
         # the assistant's generation prompt as part of the user message.
-        formatted_message = tokenizer.apply_chat_template(  # type: ignore
-            message_log[: i + 1],
+        formatted_message: str = tokenizer.apply_chat_template(  # type: ignore
+            message_log_strs[: i + 1],
             add_generation_prompt=add_generation_prompt and message["role"] == "user",
             tokenize=False,
             add_special_tokens=False,
@@ -435,7 +435,7 @@ def get_formatted_message_log(
                 elif not message_chunk.startswith(tokenizer.bos_token):
                     message_chunk = tokenizer.bos_token + message_chunk
 
-        if i == len(message_log) - 1:
+        if i == len(message_log_strs) - 1:
             message_chunk = message_chunk.rstrip("\n")
             if add_eos_token:
                 if tokenizer.eos_token is None:

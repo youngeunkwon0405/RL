@@ -19,7 +19,11 @@ import ray
 from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict, DynamicBatchingCfg
+from nemo_rl.distributed.batched_data_dict import (
+    BatchedDataDict,
+    DynamicBatchingArgs,
+    SlicedDataDict,
+)
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 from nemo_rl.models.generation.interfaces import (
@@ -92,12 +96,13 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
                 "Dynamic batch is only supported for DTensor policy."
             )
             self.use_dynamic_batches = True
-            self.dynamic_batching_cfg: DynamicBatchingCfg = {
+            self.dynamic_batching_args: DynamicBatchingArgs = {
                 "input_key": "input_ids",
                 "input_lengths_key": "input_lengths",
                 "sequence_length_round": config["dynamic_batching"][
                     "sequence_length_round"
                 ],
+                "max_tokens_per_microbatch": 0,  # Override this in each different call (presumably different sizes)
             }
         else:
             self.use_dynamic_batches = False
@@ -146,17 +151,19 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
+        sharded_data: list[SlicedDataDict]
+        unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
-            self.dynamic_batching_cfg["max_tokens_per_microbatch"] = self.cfg[
+            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(
+            sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
                 self.dp_size,
                 batch_size=None,
-                dynamic_batching_cfg=self.dynamic_batching_cfg,
+                dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
-            sharded_data = data.shard_by_batch_size(
+            sharded_data = data.shard_by_batch_size(  # type: ignore
                 self.dp_size,
                 batch_size=None,
             )
@@ -184,17 +191,19 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
 
         Returns: Identical to get_logprobs.
         """
+        sharded_data: list[SlicedDataDict]
+        unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
-            self.dynamic_batching_cfg["max_tokens_per_microbatch"] = self.cfg[
+            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(
+            sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
                 self.dp_size,
                 batch_size=None,
-                dynamic_batching_cfg=self.dynamic_batching_cfg,
+                dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
-            sharded_data = data.shard_by_batch_size(
+            sharded_data = data.shard_by_batch_size(  # type: ignore
                 self.dp_size,
                 batch_size=None,
             )
@@ -231,13 +240,13 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
         micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
         # Shard and replicate the batch
         if self.use_dynamic_batches:
-            self.dynamic_batching_cfg["max_tokens_per_microbatch"] = self.cfg[
+            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["train_mb_tokens"]
             sharded_data, _ = data.shard_by_batch_size(
                 self.dp_size,
                 batch_size=batch_size,
-                dynamic_batching_cfg=self.dynamic_batching_cfg,
+                dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
             sharded_data = data.shard_by_batch_size(

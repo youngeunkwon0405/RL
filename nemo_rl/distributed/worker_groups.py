@@ -125,7 +125,7 @@ class RayWorkerBuilder:
             module = importlib.import_module(module_name)
             worker_class = getattr(module, class_name)
             worker_kwargs = dict(self.init_kwargs)
-            options = deepcopy(extra_options)
+            options: dict[str, Any] = deepcopy(extra_options)
 
             # Use the worker's configuration interface if available
             if hasattr(worker_class, "configure_worker"):
@@ -143,10 +143,10 @@ class RayWorkerBuilder:
                 if env_vars:
                     if "runtime_env" not in options:
                         options["runtime_env"] = {"env_vars": {}}
-                    if "env_vars" not in options["runtime_env"]:
-                        options["runtime_env"]["env_vars"] = {}
+                    if "env_vars" not in options["runtime_env"]:  # type: ignore
+                        options["runtime_env"]["env_vars"] = {}  # type: ignore
                     for k, v in env_vars.items():
-                        options["runtime_env"]["env_vars"][k] = v
+                        options["runtime_env"]["env_vars"][k] = v  # type: ignore
 
                 # Apply initialization parameters
                 if init_kwargs:
@@ -243,7 +243,7 @@ class RayWorkerBuilder:
             options["runtime_env"]["py_executable"] = venv_python
 
         initializer_options = {"runtime_env": options["runtime_env"]}
-        isolated_initializer = self.IsolatedWorkerInitializer.options(
+        isolated_initializer = self.IsolatedWorkerInitializer.options(  # type: ignore # @ray.remote call
             **initializer_options
         ).remote(self.ray_actor_class_fqn, *self.args, **self.kwargs)
         worker = ray.get(

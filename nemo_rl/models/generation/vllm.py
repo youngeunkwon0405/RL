@@ -20,7 +20,7 @@ from typing import Any, NotRequired, Optional, TypedDict, Union, cast
 import ray
 import torch
 
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict, SlicedDataDict
 from nemo_rl.distributed.virtual_cluster import (
     RayVirtualCluster,
 )
@@ -41,6 +41,8 @@ class VllmSpecificArgs(TypedDict):
     max_model_len: int
     # Additional arguments for vLLM inserted by nemo rl based on the context of when vllm is used
     skip_tokenizer_init: bool
+    load_format: NotRequired[str]
+    precision: NotRequired[str]
 
 
 class VllmConfig(GenerationConfig):
@@ -378,7 +380,7 @@ class VllmGenerationWorker:
                 - texts: List of generated text responses
         """
         # Extract stop_strings if provided, else use default from config
-        batch_stop_strings: list[list[str]] = data.get(
+        batch_stop_strings: list[list[str] | None] = data.get(
             "stop_strings", [self.cfg.get("stop_strings")] * len(data["prompts"])
         )
 
@@ -581,7 +583,9 @@ class VllmGeneration(GenerationInterface):
         )
 
         # Shard the data across the tied worker groups
-        sharded_data = data.shard_by_batch_size(self.dp_size, allow_uneven_shards=True)
+        sharded_data: list[SlicedDataDict] = data.shard_by_batch_size(
+            self.dp_size, allow_uneven_shards=True
+        )  # type: ignore
         future_bundle = self.worker_group.run_all_workers_multiple_data(
             "generate",
             sharded_data,
