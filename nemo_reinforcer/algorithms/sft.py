@@ -35,6 +35,7 @@ from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 from nemo_reinforcer.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_reinforcer.models.interfaces import PolicyInterface
 from nemo_reinforcer.models.policy.hf_policy import HfPolicy
+from nemo_reinforcer.models.policy.megatron_policy import MegatronPolicy
 from nemo_reinforcer.models.policy import PolicyConfig
 from nemo_reinforcer.utils.checkpoint import CheckpointManager, CheckpointingConfig
 from nemo_reinforcer.utils.logger import Logger, LoggerConfig
@@ -87,7 +88,7 @@ def setup(
     train_dataset: AllTaskProcessedDataset,
     val_dataset: AllTaskProcessedDataset,
 ) -> Tuple[
-    HfPolicy,
+    PolicyInterface,
     RayVirtualCluster,
     StatefulDataLoader,
     StatefulDataLoader,
@@ -181,19 +182,27 @@ def setup(
     #   Training
     # ==========================
     print("\n▶ Setting up model...")
-    policy = HfPolicy(
-        cluster=cluster,
-        config=policy_config,
-        tokenizer=tokenizer,
-        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy" / "optimizer"
-        if last_checkpoint_path
-        else None,
-        init_optimizer=True,
-        init_reference_model=False,
-    )
+    if "megatron_cfg" in policy_config and policy_config["megatron_cfg"]["enabled"]:
+        policy = MegatronPolicy(
+            cluster=cluster,
+            config=policy_config,
+            tokenizer=tokenizer,
+            init_reference_model=False,
+        )
+    else:
+        policy = HfPolicy(
+            cluster=cluster,
+            config=policy_config,
+            tokenizer=tokenizer,
+            weights_path=Path(last_checkpoint_path) / "policy" / "weights"
+            if last_checkpoint_path
+            else None,
+            optimizer_path=Path(last_checkpoint_path) / "policy" / "optimizer"
+            if last_checkpoint_path
+            else None,
+            init_optimizer=True,
+            init_reference_model=False,
+        )
     loss_fn = NLLLoss()
     print(f"  ✓ Model initialized")
 

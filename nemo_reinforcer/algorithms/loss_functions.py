@@ -27,7 +27,7 @@ from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
 # get_logprobs_from_vocab_parallel_logits,
 # )
 from nemo_reinforcer.distributed.model_utils import from_parallel_logits_to_logprobs
-from megatron.core.parallel_state import get_tensor_model_parallel_group, get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size, get_pipeline_model_parallel_group, get_pipeline_model_parallel_rank, get_pipeline_model_parallel_world_size
+# from megatron.core.parallel_state import get_tensor_model_parallel_group, get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size, get_pipeline_model_parallel_group, get_pipeline_model_parallel_rank, get_pipeline_model_parallel_world_size
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -218,6 +218,8 @@ class NLLLoss(LossFunction):
         data: BatchedDataDict,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
+        vocab_parallel_rank: Optional[int] = None,
+        vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
     ) -> Tuple[torch.Tensor, dict]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
@@ -228,7 +230,16 @@ class NLLLoss(LossFunction):
         next_token_logits = next_token_logits.to(torch.float32)
 
         # Gather the logprobs for the actual next tokens
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+        if vocab_parallel_group is not None:
+            token_logprobs = from_parallel_logits_to_logprobs(
+                next_token_logits,
+                data["input_ids"],
+                vocab_start_index=vocab_parallel_rank * next_token_logits.shape[-1],
+                vocab_end_index=(vocab_parallel_rank + 1) * next_token_logits.shape[-1],
+                group=vocab_parallel_group,
+                inference_only=False,
+            )
+        elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             token_logprobs = get_logprobs_from_vocab_parallel_logits(
                 next_token_logits, data["input_ids"]
             )

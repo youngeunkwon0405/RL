@@ -130,7 +130,7 @@ def gather_and_convert_params(
 
                 # Convert the parameter using the provided function or mapping.
                 if recipe.get("hf_func", None) is not None:
-                    hf_mapping = recipe["hf_func"](full_param, model_cfg)
+                    hf_mapping = recipe["hf_func"](full_param, model_cfg, gk)
                     hf_mapping = {
                         k.format_map(format_dict): v for k, v in hf_mapping.items()
                     }

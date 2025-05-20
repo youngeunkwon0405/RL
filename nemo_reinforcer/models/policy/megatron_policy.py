@@ -291,14 +291,18 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         self,
         weights_path: str,
         optimizer_path: Optional[str] = None,
+        tokenizer_path: Optional[str] = None,
         offload_to_cpu: bool = True,
+        save_hf: bool = False,
     ):
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
             weights_path,
             optimizer_path,
+            tokenizer_path,
             offload_to_cpu=offload_to_cpu,
+            save_hf=save_hf,
             only_on="all_tied_workers",
         )
         ray.get(futures)

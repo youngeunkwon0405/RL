@@ -21,16 +21,19 @@ from .common import (
 )
 from .llama import mcore_te_to_hf_llama
 from .qwen2 import mcore_te_to_hf_qwen2
+from .deepseek import mcore_te_to_hf_deepseek
 
 
 class ModelType(Enum):
     LLAMA = "LlamaForCausalLM"
     QWEN2 = "Qwen2ForCausalLM"
+    DEEPSEEK = "DeepSeek"
 
 
 REGISTRY = {
     ModelType.LLAMA: mcore_te_to_hf_llama,
     ModelType.QWEN2: mcore_te_to_hf_qwen2,
+    ModelType.DEEPSEEK: mcore_te_to_hf_deepseek,
 }
 # Allow indexing by string name
 for key in list(REGISTRY.keys()):
