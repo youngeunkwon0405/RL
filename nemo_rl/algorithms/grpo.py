@@ -385,7 +385,17 @@ def grpo_train(
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
-    for batch in dataloader:
+    # for batch in dataloader:
+
+    iter_dataloader = iter(dataloader)
+
+    while step < max_num_steps:
+        try:
+            batch = next(iter_dataloader)
+        except StopIteration:
+            iter_dataloader = iter(dataloader)
+            batch = next(iter_dataloader)
+
         print(f"\n{'=' * 25} Step {step + 1}/{max_num_steps} {'=' * 25}")
         val_metrics, validation_timings = None, None
 
