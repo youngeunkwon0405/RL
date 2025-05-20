@@ -117,6 +117,7 @@ class JsonlinesDataset:
             return_tensors="pt",
         )[0]
         user_message["content"] = message
+        user_message["content_in_oai_format"] = single_message
         message_log.append(user_message)
 
         length = sum(len(m["token_ids"]) for m in message_log)

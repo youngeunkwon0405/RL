@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple, TypedDict
 import ray
 import torch
 
+from nemo_rl.environments.utils import extract_answer_from_box
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES, RayVirtualCluster
 from nemo_rl.environments.interfaces import (
@@ -120,44 +121,6 @@ Answer yes or no, then give your reasoning.
         )
         self.engine = self.AsyncLLMEngine.from_engine_args(engine_args)
         logging.info(f"AsyncVLLMWorker initialized with model: {model_name}")
-
-
-    def extract_answer(self, string):
-        """Extract Answer String from \\boxed expression."""
-        idx = string.rfind("\\boxed")
-        if idx < 0:
-            idx = string.rfind("\\fbox")
-            if idx < 0:
-                return None
-
-        i = idx
-        right_brace_idx = None
-        num_left_braces_open = 0
-        while i < len(string):
-            if string[i] == "{":
-                num_left_braces_open += 1
-            if string[i] == "}":
-                num_left_braces_open -= 1
-                if num_left_braces_open == 0:
-                    right_brace_idx = i
-                    break
-            i += 1
-
-        if right_brace_idx is None:
-            retval = None
-        else:
-            retval = string[idx : right_brace_idx + 1]
-
-        if retval:
-            left = "\\boxed{"
-            try:
-                assert retval[: len(left)] == left
-                assert retval[-1] == "}"
-                return retval[len(left) : -1]
-            except AssertionError:
-                return None
-
-        return None
         
     async def judge(
         self,
@@ -185,8 +148,10 @@ Answer yes or no, then give your reasoning.
         extract_box = metadata.get("extract_box", False)
 
         response_to_judge = response_to_judge.split("</think>")[-1].strip()
-        response_to_judge = self.extract_answer(response_to_judge) if extract_box else response_to_judge
+        response_to_judge = extract_answer_from_box(response_to_judge) if extract_box else response_to_judge
+        response_to_judge = "None" if response_to_judge is None else response_to_judge
         # Prioritize metadata's judge_prompt_template, then default
+        # Note that if you want to use a custom judge_prompt_template, you may need to change the verdict extraction logic accordingly
         current_judge_prompt = metadata.get("judge_prompt_template") or self.default_judge_prompt_template
         
         prompt = current_judge_prompt.format(
@@ -195,7 +160,11 @@ Answer yes or no, then give your reasoning.
             reference=reference,
             criteria=criteria,
         )
-        
+        logging.info(f"Prompt: {prompt}")
+        logging.info(f"question: {question}")
+        logging.info(f"response_to_judge: {response_to_judge}")
+        logging.info(f"reference: {reference}")
+        logging.info(f"criteria: {criteria}")
         sampling_params = self.SamplingParams(**sampling_params_dict)
         
         results_generator = self.engine.generate(prompt, sampling_params, request_id)
@@ -226,7 +195,7 @@ Answer yes or no, then give your reasoning.
         return request_id, score
 
 
-@ray.remote(max_concurrency=4) # Allow concurrent processing of step calls
+@ray.remote(max_concurrency=16) # Allow concurrent processing of step calls
 class LLMJudgeAsyncEnvironment(EnvironmentInterface):
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM # The environment actor itself uses system python
 
@@ -259,7 +228,8 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
             "HF_HOME",
             "TRANSFORMERS_CACHE",
             "WANDB_API_KEY",
-            "HUGGINGFACE_HUB_DISABLE_XET"  # Often set to "1" to bypass xet errors.
+            "HUGGINGFACE_HUB_DISABLE_XET",  # Often set to "1" to bypass xet errors.
+            "HF_TOKEN",
         ]:
             if key in os.environ:
                 env_vars_to_pass[key] = os.environ[key]
@@ -336,7 +306,18 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         questions = []
         for conversation in message_log_batch:
             assert len(conversation) == 2, "LLMJudgeAsyncEnvironment only supports single turn conversations for now"
-            questions.append(conversation[0]["content"])
+            # conversation[0]["content_in_oai_format"] has the format of:
+            # [
+            #     {"role": "system", "content": "You are a helpful assistant."} (optional),
+            #     {"role": "user", "content": "What is the capital of the moon?"},
+            # ]
+            assert isinstance(conversation[0]["content_in_oai_format"], list)
+            question = None
+            for l in conversation[0]["content_in_oai_format"]:
+                if l["role"] == "user":
+                    question = l["content"]
+            assert question is not None, "Question not found in conversation"
+            questions.append(question)
             assistant_responses.append(conversation[-1]["content"])
 
         futures = []

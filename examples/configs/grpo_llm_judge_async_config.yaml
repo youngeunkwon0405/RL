@@ -122,7 +122,7 @@ env:
   llm_judge_async: # Configuration for the LlmJudgeAsyncEnvironment
     num_workers: 1 # Number of parallel judge workers
     model_name: "Qwen/Qwen2.5-32B-Instruct" # Judge model
-    tensor_parallel_size: 7 # TP size for the judge model
+    tensor_parallel_size: 8 # TP size for the judge model
     gpu_memory_utilization: 0.85 # For judge model
     max_model_len: 16384 # Max sequence length for the judge model
     temperature: 0.0 # Judge temperature (usually lower for more deterministic judging)
