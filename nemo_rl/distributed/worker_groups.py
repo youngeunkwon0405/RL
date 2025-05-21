@@ -16,7 +16,7 @@ import os
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import ray
 from ray.util.placement_group import PlacementGroup
@@ -34,11 +34,11 @@ from nemo_rl.utils.venvs import create_local_venv
 class MultiWorkerFuture:
     """Container for Ray futures with associated worker information."""
 
-    futures: List[ray.ObjectRef]
-    used_workers: List[int]
+    futures: list[ray.ObjectRef]
+    used_workers: list[int]
     respect_tied_workers: bool = True
 
-    def get_results(self, worker_group):
+    def get_results(self, worker_group: "RayWorkerGroup") -> list[Any]:
         """Get results from the futures, optionally respecting tied workers.
 
         When respect_tied_workers is True, this method deduplicates results by returning
@@ -64,7 +64,7 @@ class MultiWorkerFuture:
             return all_results
 
         # Create tied worker sets based on used workers
-        active_tied_workers = {}
+        active_tied_workers: dict[int, list[int]] = {}
         for i, worker_idx in enumerate(self.used_workers):
             tied_worker_idx = worker_group.worker_to_tied_group_index.get(worker_idx)
             if tied_worker_idx is None:
@@ -98,7 +98,7 @@ class RayWorkerBuilder:
             placement_group_bundle_index: int,
             num_gpus: int,
             bundle_indices: Optional[tuple] = None,
-            **extra_options: Optional[Dict[str, Any]],
+            **extra_options: Optional[dict[str, Any]],
         ):
             """Create a Ray worker with the specified configuration.
 
@@ -125,7 +125,7 @@ class RayWorkerBuilder:
             module = importlib.import_module(module_name)
             worker_class = getattr(module, class_name)
             worker_kwargs = dict(self.init_kwargs)
-            options = deepcopy(extra_options)
+            options: dict[str, Any] = deepcopy(extra_options)
 
             # Use the worker's configuration interface if available
             if hasattr(worker_class, "configure_worker"):
@@ -143,10 +143,10 @@ class RayWorkerBuilder:
                 if env_vars:
                     if "runtime_env" not in options:
                         options["runtime_env"] = {"env_vars": {}}
-                    if "env_vars" not in options["runtime_env"]:
-                        options["runtime_env"]["env_vars"] = {}
+                    if "env_vars" not in options["runtime_env"]:  # type: ignore
+                        options["runtime_env"]["env_vars"] = {}  # type: ignore
                     for k, v in env_vars.items():
-                        options["runtime_env"]["env_vars"][k] = v
+                        options["runtime_env"]["env_vars"][k] = v  # type: ignore
 
                 # Apply initialization parameters
                 if init_kwargs:
@@ -195,10 +195,10 @@ class RayWorkerBuilder:
         self,
         placement_group: PlacementGroup,
         placement_group_bundle_index: int,
-        num_gpus: int,
-        bundle_indices: Optional[tuple] = None,
-        **extra_options: Dict[str, Any],
-    ):
+        num_gpus: float | int,
+        bundle_indices: Optional[tuple[int, list[int]]] = None,
+        **extra_options: Any,
+    ) -> ray.actor.ActorHandle:
         """Create a Ray worker with the specified configuration.
 
         Order of precedence for worker options configuration (from lowest to highest):
@@ -212,7 +212,7 @@ class RayWorkerBuilder:
         Args:
             placement_group: Ray placement group for resource allocation
             placement_group_bundle_index: Index of the bundle in the placement group
-            num_gpus: Number of GPUs to allocate to this worker
+            num_gpus: Number of GPUs to allocate to this worker (can be fractional)
             bundle_indices: Tuple of (node_idx, local_bundle_indices) for tensor parallelism (if applicable)
             extra_options: Additional options to pass to the Ray actor (may be overridden by actor's configure_worker(...) method)
 
@@ -243,7 +243,7 @@ class RayWorkerBuilder:
             options["runtime_env"]["py_executable"] = venv_python
 
         initializer_options = {"runtime_env": options["runtime_env"]}
-        isolated_initializer = self.IsolatedWorkerInitializer.options(
+        isolated_initializer = self.IsolatedWorkerInitializer.options(  # type: ignore # @ray.remote call
             **initializer_options
         ).remote(self.ray_actor_class_fqn, *self.args, **self.kwargs)
         worker = ray.get(
@@ -276,9 +276,9 @@ class RayWorkerGroup:
         self,
         cluster: RayVirtualCluster,
         remote_worker_builder: RayWorkerBuilder,
-        workers_per_node: Optional[Union[int, List[int]]] = None,
+        workers_per_node: Optional[Union[int, list[int]]] = None,
         name_prefix: str = "",
-        bundle_indices_list: Optional[List[tuple]] = None,
+        bundle_indices_list: Optional[list[tuple[int, list[int]]]] = None,
     ):
         """Initialize a group of distributed Ray workers.
 
@@ -292,15 +292,15 @@ class RayWorkerGroup:
                                Each tuple defines a tied group of workers placed on the same node.
                                If provided, workers_per_node is ignored.
         """
-        self._workers = []
-        self._worker_metadata = []
+        self._workers: list[ray.actor.ActorHandle] = []
+        self._worker_metadata: list[dict[str, Any]] = []
         self.cluster = cluster
         self.name_prefix = name_prefix
-        self.tied_workers_groups = []
+        self.tied_workers_groups: list[list[int]] = []
         # Maps worker indices to their corresponding tied group index
         # For example, if worker with index 3 belongs to tied worker group 1,
         # then worker_to_tied_group_index[3] = 1
-        self.worker_to_tied_group_index = {}
+        self.worker_to_tied_group_index: dict[int, int] = {}
 
         # If explicit bundle indices are provided, use those
         if bundle_indices_list is None:
@@ -345,8 +345,10 @@ class RayWorkerGroup:
         )
 
     def _create_workers_from_bundle_indices(
-        self, remote_worker_builder, bundle_indices_list
-    ):
+        self,
+        remote_worker_builder: RayWorkerBuilder,
+        bundle_indices_list: list[tuple[int, list[int]]],
+    ) -> None:
         """Create workers based on explicit bundle indices for tied worker groups.
 
         Args:
@@ -441,25 +443,25 @@ class RayWorkerGroup:
             self.tied_workers_groups.append(current_group)
 
     @property
-    def workers(self):
+    def workers(self) -> list[ray.actor.ActorHandle]:
         return self._workers
 
     @property
-    def worker_metadata(self):
+    def worker_metadata(self) -> list[dict[str, Any]]:
         return self._worker_metadata
 
     @property
-    def group_count(self):
+    def group_count(self) -> int:
         """Number of tied worker groups."""
         return len(self.tied_workers_groups)
 
     def run_all_workers_multiple_data(
         self,
         method_name: str,
-        data: List[SlicedDataDict],
-        common_kwargs: Optional[Dict[str, Any]] = None,
+        data: list[SlicedDataDict],
+        common_kwargs: Optional[dict[str, Any]] = None,
         only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
-    ):
+    ) -> MultiWorkerFuture:
         """Run a method on all workers in parallel with different data.
 
         Args:
@@ -544,10 +546,10 @@ class RayWorkerGroup:
     def run_all_workers_single_data(
         self,
         method_name: str,
-        *args,
+        *args: Any,
         only_on: Literal["all", "tied_leader", "all_tied_workers"] = "all",
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> list[ray.ObjectRef]:
         """Run a method on all workers in parallel with the same data.
 
         Args:
@@ -559,7 +561,7 @@ class RayWorkerGroup:
             *args, **kwargs: Arguments to pass to the method
 
         Returns:
-            List[ray.ObjectRef]: A list of ray futures
+            list[ray.ObjectRef]: A list of ray futures
         """
         futures = []
 
@@ -590,7 +592,7 @@ class RayWorkerGroup:
 
         return futures
 
-    def get_all_worker_results(self, future_bundle):
+    def get_all_worker_results(self, future_bundle: MultiWorkerFuture) -> list[Any]:
         """Get results from all workers, optionally filtering to get just one result per tied worker group.
 
         Args:
@@ -608,7 +610,7 @@ class RayWorkerGroup:
         cleanup_method: Optional[str] = None,
         timeout: Optional[float] = 30.0,
         force: bool = False,
-    ):
+    ) -> bool:
         """Shutdown all workers in the worker group.
 
         Args:
@@ -681,7 +683,7 @@ class RayWorkerGroup:
 
         return success
 
-    def print_worker_layout(self):
+    def print_worker_layout(self) -> None:
         """Prints a visual representation of the worker layout across the virtual cluster.
 
         This shows which workers are assigned to which nodes and GPUs.

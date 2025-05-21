@@ -59,6 +59,9 @@ docs = [
 dev = [
     "pre-commit==3.6.0",
     "ruff==0.9.9",
+    "mypy",
+    "types-PyYAML",
+    "types-requests",
 ]
 test = [
     "pytest>=7.0.0",
