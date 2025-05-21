@@ -12,8 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import einops
 import torch
 from megatron.core import parallel_state
+from megatron.core.tensor_parallel.layers import (
+    VocabParallelEmbedding,
+    ColumnParallelLinear,
+    RowParallelLinear,
+)
+from transformers import AutoConfig, AutoModelForCausalLM
+from transformers.integrations.accelerate import init_empty_weights
+from nemo.lightning.io.state import TransformCTX, _ModelState, StateDictTransform
+
+import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 
 _GROUP_TO_RANKS_CACHE = {}
 
@@ -68,6 +79,100 @@ def get_global_layer_num(s, cfg):
     return global_layer_num
 
 
+def get_tp_dim(model, param_name, named_modules_dict):
+    # pass in named_modules_dict so we can get it ahead of time instead
+    # of once for each param
+    if not param_name.endswith(".weight") and not param_name.endswith(".bias"):
+        return None
+
+    prefix = ""
+    if hasattr(model, "module"):
+        prefix = "module."
+        if hasattr(model.module, "module"):
+            prefix = "module.module."
+    key = prefix + ".".join(param_name.split(".")[:-1])
+    module = named_modules_dict.get(key)
+    if module is None:
+        print(f"Module {key} not found in named_modules_dict")
+        return None
+    if hasattr(module, "parallel_mode"):
+        # TE layers have parallel_mode we can check directly
+        if module.parallel_mode == "column":
+            return 0
+        elif module.parallel_mode == "row":
+            return 1
+        else:
+            return None
+    elif isinstance(module, VocabParallelEmbedding) or isinstance(
+        module, ColumnParallelLinear
+    ):
+        return 0
+    elif isinstance(module, RowParallelLinear):
+        return 1
+    # TODO(yifu): moe layers
+    else:
+        return None
+
+
 class SafeDict(dict):
     def __missing__(self, key):
         return "{" + key + "}"
+
+
+def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
+    # gate proj and up proj are mixed right now, and we need to reshape them
+    # [ gate_tp0 ]     [ gate_tp0 ]
+    # [  up_tp0  ] --\ [ gate_tp1 ] --\ (split gate)
+    # [ gate_tp1 ] --/ [  up_tp0  ] --/ (split  up)
+    # [  up_tp1  ]     [  up_tp1  ]
+    megatron_config = ctx.source.config
+    tp = megatron_config.tensor_model_parallel_size
+    linear_fc1 = einops.rearrange(linear_fc1, "(t c d) a1 ->  c (t d) a1", c=2, t=tp)
+    mlp_gate_proj_weight = linear_fc1[0]
+    mlp_up_proj_weight = linear_fc1[1]
+    return mlp_gate_proj_weight, mlp_up_proj_weight
+
+
+def update_transforms_for_nemorl(export_transforms):
+    # In place update
+    for transform in export_transforms:
+        if transform.transform.__name__ == "split_fc1":
+            # Need to modify this transform to take into account the TP size
+            transform.transform = split_fc1_tp
+    return export_transforms
+
+
+class MegatronToHFConverter:
+    def __init__(self, hf_model_name):
+        # We only care about the state_dict keys and the config, so we
+        # don't need to load the model weights
+        config = AutoConfig.from_pretrained(hf_model_name)
+        with init_empty_weights():
+            self.target_model = AutoModelForCausalLM.from_config(config)
+        if "qwen" in hf_model_name.lower():
+            self.export_mapping = qwen2_converter.get_export_mapping()
+            self.export_transforms = qwen2_converter.get_export_transforms()
+
+    def _get_empty_state_dict(self):
+        state_dict = {}
+        for k in self.target_model.state_dict().keys():
+            state_dict[k] = None
+        return state_dict
+
+    def convert(self, state_dict, megatron_config):
+        export_transforms = update_transforms_for_nemorl(self.export_transforms)
+        source = _ModelState(state_dict)
+        source.config = megatron_config
+        ctx = TransformCTX(
+            source=source,
+            source_state=state_dict,
+            target=self.target_model,
+            target_state=self._get_empty_state_dict(),
+        )
+        for key, val in self.export_mapping.items():
+            ctx = StateDictTransform(key, val)(ctx)
+        for transform in export_transforms:
+            ctx = transform(ctx)
+
+        converted_state_dict = ctx.target_state
+        return converted_state_dict
