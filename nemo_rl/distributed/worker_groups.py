@@ -515,18 +515,7 @@ class RayWorkerGroup:
             run_rank_0_only_axes = []
 
         for worker_idx, worker in enumerate(self.workers):
-            worker_coords = {}
-            for axis in self.sharding_annotations.names:
-                # For this worker, find its position in each axis
-                for i in range(self.sharding_annotations.get_axis_size(axis)):
-                    ranks = self.sharding_annotations.get_ranks(**{axis: i})
-                    if isinstance(ranks, int):
-                        if ranks == worker_idx:
-                            worker_coords[axis] = i
-                            break
-                    elif worker_idx in ranks.layout.flatten():
-                        worker_coords[axis] = i
-                        break
+            worker_coords = self.sharding_annotations.get_worker_coords(worker_idx)
 
             # Determine if this worker should receive data
             should_run = True
@@ -604,18 +593,7 @@ class RayWorkerGroup:
         # For each worker, determine what data it should receive
         for worker_idx, worker in enumerate(self._workers):
             # Get the worker's coordinates in the sharding space
-            worker_coords = {}
-            for axis in self.sharding_annotations.names:
-                # For this worker, find its position in each axis
-                for i in range(self.sharding_annotations.get_axis_size(axis)):
-                    ranks = self.sharding_annotations.get_ranks(**{axis: i})
-                    if isinstance(ranks, int):
-                        if ranks == worker_idx:
-                            worker_coords[axis] = i
-                            break
-                    elif worker_idx in ranks.layout.flatten():
-                        worker_coords[axis] = i
-                        break
+            worker_coords = self.sharding_annotations.get_worker_coords(worker_idx)
 
             # Determine if this worker should receive data
             should_receive_data = True

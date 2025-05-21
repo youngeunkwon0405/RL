@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Dict, List, Sequence, Union
+from typing import Any, Sequence, Union
 
 import numpy as np
 
@@ -31,7 +31,7 @@ class NamedSharding:
         print(sharding.get_ranks(dp=0, pp=1)) # Output: [4, 5, 6, 7]
     """
 
-    def __init__(self, layout: Sequence[Any], names: List[str]):
+    def __init__(self, layout: Sequence[Any], names: list[str]):
         """Initializes the NamedSharding object.
 
         Args:
@@ -49,6 +49,7 @@ class NamedSharding:
             raise ValueError(f"Could not create NumPy array from layout: {e}")
 
         # Check if the inferred dtype is integer-like or float representing integers
+        self._layout: np.ndarray[Any, np.dtype[np.int_]]
         if not np.issubdtype(initial_array.dtype, np.integer):
             # Check if all elements are actually integers (handles floats like 1.0)
             if not np.equal(np.mod(initial_array, 1), 0).all():
@@ -75,12 +76,12 @@ class NamedSharding:
         self._name_to_axis = {name: i for i, name in enumerate(self._names)}
 
     @property
-    def shape(self) -> Dict[str, int]:
+    def shape(self) -> dict[str, int]:
         """Returns the shape of the rank layout."""
         return {name: size for name, size in zip(self._names, self._layout.shape)}
 
     @property
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         """Returns the names of the axes."""
         return list(self._names)  # Return a copy
 
@@ -95,9 +96,61 @@ class NamedSharding:
         return self._layout.size
 
     @property
-    def layout(self) -> np.ndarray:
+    def layout(self) -> np.ndarray[Any, np.dtype[np.int_]]:
         """Returns the underlying NumPy array representing the layout."""
         return self._layout.copy()  # Return a copy
+
+    def get_worker_coords(self, worker_id: int) -> dict[str, int]:
+        """Gets the coordinates of a specific worker ID in the sharding layout.
+
+        Args:
+            worker_id: The integer ID of the worker.
+
+        Returns:
+            A dictionary mapping axis names to their integer coordinates for the given worker_id.
+
+        Raises:
+            ValueError: If the worker_id is not found in the layout.
+        """
+        indices = np.where(self._layout == worker_id)
+        if not indices[0].size:  # Check if worker_id was found
+            raise ValueError(f"Worker ID {worker_id} not found in sharding layout.")
+
+        coords = {}
+        for i, axis_name in enumerate(self._names):
+            coords[axis_name] = indices[i].item()
+        return coords
+
+    def get_ranks_by_coord(self, **coords: int) -> list[int]:
+        """Gets all ranks that match the specified coordinates for named axes.
+
+        Args:
+            **coords: Keyword arguments where the key is the axis name (e.g., "dp", "tp")
+                      and the value is the integer coordinate along that axis.
+                      Axes not specified will match all coordinates along that axis.
+
+        Returns:
+            A sorted list of unique rank integers that match the given coordinate criteria.
+            Returns an empty list if no ranks match.
+
+        Raises:
+            ValueError: If an invalid axis name is provided.
+        """
+        slicing_indices: list[Any] = [slice(None)] * self.ndim
+
+        for name, index in coords.items():
+            if name not in self._name_to_axis:
+                raise ValueError(
+                    f"Invalid axis name: '{name}'. Valid names are: {self.names}"
+                )
+            axis_idx = self._name_to_axis[name]
+            if not (0 <= index < self.shape[name]):
+                # If index is out of bounds for this axis, no ranks will match.
+                return []
+            slicing_indices[axis_idx] = index
+
+        matching_ranks = self._layout[tuple(slicing_indices)]
+        return sorted(np.unique(matching_ranks.flatten()).tolist())
 
     def get_ranks(self, **kwargs: int) -> Union["NamedSharding", int]:
         """Gets the ranks corresponding to specific indices along named axes.
@@ -114,7 +167,7 @@ class NamedSharding:
         Raises:
             ValueError: If an invalid axis name is provided or if an index is out of bounds.
         """
-        indices: List[Any] = [slice(None)] * self.ndim
+        indices: list[Any] = [slice(None)] * self.ndim
         specified_axes = set()
 
         for name, index in kwargs.items():
@@ -141,7 +194,7 @@ class NamedSharding:
 
         # If all dimensions were specified, we need to handle the 0-dimensional case
         if not remaining_names:
-            return subset_layout.item()
+            return subset_layout.item()  # type: ignore
 
         return NamedSharding(subset_layout, remaining_names)
 

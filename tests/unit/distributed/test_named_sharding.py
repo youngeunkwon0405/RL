@@ -25,6 +25,14 @@ def sample_sharding():
     return NamedSharding(layout, names)
 
 
+@pytest.fixture
+def sample_2d_sharding():
+    """Provides a 2D NamedSharding instance for testing."""
+    layout = [[0, 1], [2, 3]]
+    names = ["dp", "tp"]
+    return NamedSharding(layout, names)
+
+
 def test_initialization_success(sample_sharding):
     assert sample_sharding.shape == {"dp": 1, "pp": 2, "tp": 4}
     assert sample_sharding.names == ["dp", "pp", "tp"]
@@ -149,3 +157,75 @@ def test_repr(sample_sharding):
     assert "layout=" in representation
     assert "[[[0 1 2 3]" in representation  # Check layout content part
     assert "[4 5 6 7]]]" in representation
+
+
+def test_get_worker_coords(sample_2d_sharding):
+    sharding = sample_2d_sharding
+    assert sharding.get_worker_coords(0) == {"dp": 0, "tp": 0}
+    assert sharding.get_worker_coords(1) == {"dp": 0, "tp": 1}
+    assert sharding.get_worker_coords(2) == {"dp": 1, "tp": 0}
+    assert sharding.get_worker_coords(3) == {"dp": 1, "tp": 1}
+
+    with pytest.raises(ValueError, match="Worker ID 4 not found in sharding layout."):
+        sharding.get_worker_coords(4)
+
+    layout_3d = [[[0, 1], [2, 3]], [[4, 5], [6, 7]]]
+    names_3d = ["d", "p", "t"]
+    sharding_3d = NamedSharding(layout_3d, names_3d)
+    assert sharding_3d.get_worker_coords(5) == {"d": 1, "p": 0, "t": 1}
+
+
+def test_get_ranks_by_coord(sample_2d_sharding):
+    sharding = sample_2d_sharding
+    assert sharding.get_ranks_by_coord(dp=0) == [0, 1]
+    assert sharding.get_ranks_by_coord(tp=1) == [1, 3]
+    assert sharding.get_ranks_by_coord(dp=0, tp=0) == [0]
+    assert sharding.get_ranks_by_coord(dp=1, tp=1) == [3]
+
+    # Test with an axis not present (should return all ranks for that axis)
+    assert sharding.get_ranks_by_coord() == [0, 1, 2, 3]  # All ranks
+
+    # Test with out-of-bounds coordinate
+    assert sharding.get_ranks_by_coord(dp=2) == []
+    assert sharding.get_ranks_by_coord(dp=0, tp=5) == []
+
+    # Test with invalid axis name
+    with pytest.raises(ValueError, match="Invalid axis name: 'invalid_axis'."):
+        sharding.get_ranks_by_coord(invalid_axis=0)
+
+    layout_3d = [[[0, 1], [2, 3]], [[4, 5], [6, 7]]]
+    names_3d = ["d", "p", "t"]
+    sharding_3d = NamedSharding(layout_3d, names_3d)
+    assert sharding_3d.get_ranks_by_coord(d=0) == [0, 1, 2, 3]
+    assert sharding_3d.get_ranks_by_coord(p=1) == [2, 3, 6, 7]
+    assert sharding_3d.get_ranks_by_coord(t=0) == [0, 2, 4, 6]
+    assert sharding_3d.get_ranks_by_coord(d=1, p=0) == [4, 5]
+    assert sharding_3d.get_ranks_by_coord(d=0, t=1) == [1, 3]
+    assert sharding_3d.get_ranks_by_coord(p=1, t=0) == [2, 6]
+    assert sharding_3d.get_ranks_by_coord(d=1, p=1, t=1) == [7]
+
+
+def test_complex_get_worker_coords(complex_sharding):
+    sharding = complex_sharding
+    assert sharding.get_worker_coords(10) == {"a": 1, "b": 0, "c": 1, "d": 0}
+    assert sharding.get_worker_coords(15) == {"a": 1, "b": 1, "c": 1, "d": 1}
+
+
+def test_complex_get_ranks_by_coord(complex_sharding):
+    sharding = complex_sharding
+    assert sharding.get_ranks_by_coord(a=0) == [0, 1, 2, 3, 4, 5, 6, 7]
+    assert sharding.get_ranks_by_coord(b=1) == [4, 5, 6, 7, 12, 13, 14, 15]
+    assert sharding.get_ranks_by_coord(c=0, d=1) == [1, 5, 9, 13]
+    assert sharding.get_ranks_by_coord(a=1, b=0, c=1) == [10, 11]
+    assert sharding.get_ranks_by_coord(a=1, b=1, c=1, d=0) == [14]
+
+
+# More complex sharding for testing
+@pytest.fixture
+def complex_sharding():
+    layout = [
+        [[[0, 1], [2, 3]], [[4, 5], [6, 7]]],
+        [[[8, 9], [10, 11]], [[12, 13], [14, 15]]],
+    ]
+    names = ["a", "b", "c", "d"]
+    return NamedSharding(layout, names)
