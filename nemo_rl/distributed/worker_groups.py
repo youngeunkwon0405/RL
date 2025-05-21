@@ -36,8 +36,8 @@ class MultiWorkerFuture:
     """Container for Ray futures with associated worker information."""
 
     futures: List[ray.ObjectRef]
-    return_from_workers: List[int]
-    called_workers: List[int] = None
+    return_from_workers: Optional[list[int]] = None
+    called_workers: Optional[list[int]] = None
 
     def get_results(self, worker_group):
         """Get results from the futures, optionally respecting tied workers.
@@ -456,7 +456,7 @@ class RayWorkerGroup:
         method_name: str,
         data: List[SlicedDataDict],
         common_kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> MultiWorkerFuture:
         """Run a method on all workers in parallel with different data.
 
         Args:
@@ -498,13 +498,13 @@ class RayWorkerGroup:
         *args,
         run_rank_0_only_axes: List[str] | None = None,
         **kwargs,
-    ):
+    ) -> list[ray.ObjectRef]:
         """Run a method on all workers in parallel with the same data.
 
         Args:
             method_name: Name of the method to call on each worker
             *args, **kwargs: Arguments to pass to the method
-            run_rank_0_only_axes: List of axes for which only rank 0 should run the method.
+            run_rank_0_only_axes: List of named axes for which only rank 0 should run the method.
 
         Returns:
             List[ray.ObjectRef]: A list of ray futures
@@ -541,11 +541,12 @@ class RayWorkerGroup:
         output_is_replicated: List[str] | None = None,
         make_dummy_calls_to_free_axes: bool = False,
         common_kwargs: Optional[Dict[str, Any]] = None,
-    ):
+    ) -> MultiWorkerFuture:
         """Run a method on all workers in parallel with sharded data.
 
-        All axes provided in in_sharded_axes will be replicated on replicate_on_axes. For axes not provided in either,
-        ('free axes') data will just be sent to index 0 of that axis.
+        Axes in in_sharded_axes: Data is already split across these axes, so we just send the appropriate slice to each worker (along this axis)
+        Axes in replicate_on_axes: Data is replicated to all workers along these dimensions
+        Free axes (axes not in either list): Data is only sent to workers at index 0 of these axes
 
         Args:
             method_name: Name of the method to call on each worker
