@@ -317,6 +317,7 @@ class DTensorPolicyWorker:
 
             losses = []
             train_step_metrics = []
+            train_step_metrics_no_accumulation = []
 
             for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
                 global_batch: BatchedDataDict = data.slice(
@@ -425,13 +426,6 @@ class DTensorPolicyWorker:
                 train_step_metric = {
                     k: np.sum(v) for k, v in mbs_sum_accumulator.items()
                 }
-                train_step_metric.update(
-                    {
-                        "lr": self.optimizer.param_groups[0]["lr"],
-                        "global_valid_seqs": global_valid_seqs.item(),
-                        "global_valid_toks": global_valid_toks.item(),
-                    }
-                )
 
                 grad_norm = None
                 if not eval_mode:
@@ -453,9 +447,16 @@ class DTensorPolicyWorker:
 
                     # Update parameters
                     self.optimizer.step()
-                    train_step_metric["grad_norm"] = grad_norm.item()
 
                 train_step_metrics.append(train_step_metric)
+                train_step_metrics_no_accumulation.append(
+                    {
+                        "lr": self.optimizer.param_groups[0]["lr"],
+                        "global_valid_seqs": global_valid_seqs.item(),
+                        "global_valid_toks": global_valid_toks.item(),
+                        "grad_norm": grad_norm.item(),
+                    }
+                )
 
             # increment scheduler after all batches in rollout are processed
             self.scheduler.step()
@@ -474,15 +475,12 @@ class DTensorPolicyWorker:
                     )
 
                     torch.distributed.all_reduce(values, group=self.dp_mesh.get_group())
-                    values = values / self.dp_mesh.size()
                     synced_train_step_metrics.append(
                         {k: v.cpu().item() for k, v in zip(keys, values)}
                     )
 
-                global_loss = torch.tensor(losses, device="cuda")
-                torch.distributed.all_reduce(
-                    global_loss, group=self.dp_mesh.get_group()
-                )
+                for i, metric in enumerate(train_step_metrics_no_accumulation):
+                    synced_train_step_metrics[i].update(metric)
 
             return synced_train_step_metrics
 
