@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from collections import defaultdict
 from typing import List, Optional, Union
 
 import ray
@@ -244,21 +243,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             only_on="all_tied_workers",
         )
         results = self.worker_group.get_all_worker_results(futures)
-
-        # Aggregate the results
-        aggregated_results = {
-            "loss": results[0]["global_loss"],
-            "grad_norm": results[0]["grad_norm"],
-        }
-
-        # Aggregate metrics across all workers
-        all_mb_metrics = defaultdict(list)
-        for r in results:
-            for k, v in r["all_mb_metrics"].items():
-                all_mb_metrics[k].extend(v)
-        aggregated_results["all_mb_metrics"] = dict(all_mb_metrics)
-
-        return aggregated_results
+        return results[0]
 
     def generate(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False

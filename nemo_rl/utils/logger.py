@@ -172,9 +172,10 @@ class WandbLogger(LoggerInterface):
         # If step_metric is provided, use the corresponding value from metrics as step
         if step_metric and step_metric in metrics:
             # commit=False so the step does not get incremented
-            self.run.log(metrics, commit=False)
+            self.run.log(metrics)
         else:
-            self.run.log(metrics, step=step)
+            metrics["rl_step"] = step
+            self.run.log(metrics)
 
     def log_hyperparams(self, params: Dict[str, Any]) -> None:
         """Log hyperparameters to wandb.

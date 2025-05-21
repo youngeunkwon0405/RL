@@ -18,6 +18,7 @@ from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
+import numpy as np
 import ray
 import torch
 from torch import nn
@@ -292,7 +293,6 @@ class DTensorPolicyWorker:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
         dataset_size = data.get("input_ids").shape[0]
-        num_global_batches = dataset_size // local_gbs
 
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
@@ -316,7 +316,8 @@ class DTensorPolicyWorker:
             data.to("cuda")
 
             losses = []
-            all_mb_metrics = []
+            train_step_metrics = []
+
             for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
                 global_batch: BatchedDataDict = data.slice(
                     gb_start, gb_start + local_gbs
@@ -351,7 +352,6 @@ class DTensorPolicyWorker:
                     )
 
                 self.optimizer.zero_grad()
-                mb_losses = []
                 batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
                 # Calculate number of microbatches to process
                 # make_microbatch_iterator assumes that the batch size is a multiple of the microbatch size
@@ -359,8 +359,9 @@ class DTensorPolicyWorker:
                 if self.cfg["dynamic_batching"]["enabled"]:
                     mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
                 else:
-                    mb_iterator = batch.make_microbatch_iterator(mbs)
+                    mb_iterator = batch.make_microbatch_iterator(microbatch_size=mbs)
 
+                mbs_sum_accumulator = defaultdict(list)
                 for mb in mb_iterator:
                     input_ids = mb.get("input_ids").cuda()
                     input_lengths = mb.get("input_lengths")
@@ -403,14 +404,11 @@ class DTensorPolicyWorker:
                     loss, loss_metrics = loss_fn(
                         logits, mb, global_valid_seqs, global_valid_toks
                     )
-                    ## scale by the number of global batches so we get the correct
-                    ## value when summing metrics across all microbatches
-                    for k in loss_metrics.keys():
-                        loss_metrics[k] /= num_global_batches
+
                     num_valid_samples = loss_metrics["num_valid_samples"]
-                    loss_metrics["lr"] = self.optimizer.param_groups[0]["lr"]
-                    loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
-                    loss_metrics["global_valid_toks"] = global_valid_toks.item()
+                    if num_valid_samples > 0:
+                        for k, v in loss_metrics.items():
+                            mbs_sum_accumulator[k].append(v)
 
                     # Backward pass
                     if not eval_mode:
@@ -422,9 +420,18 @@ class DTensorPolicyWorker:
                         # but we want to sum them so we cancel out the average here
                         loss *= self.dp_size
                         loss.backward()
-                    if num_valid_samples > 0:
-                        mb_losses.append(loss.item())
-                        all_mb_metrics.append(loss_metrics)
+
+                # accumulate here
+                train_step_metric = {
+                    k: np.sum(v) for k, v in mbs_sum_accumulator.items()
+                }
+                train_step_metric.update(
+                    {
+                        "lr": self.optimizer.param_groups[0]["lr"],
+                        "global_valid_seqs": global_valid_seqs.item(),
+                        "global_valid_toks": global_valid_toks.item(),
+                    }
+                )
 
                 grad_norm = None
                 if not eval_mode:
@@ -446,8 +453,9 @@ class DTensorPolicyWorker:
 
                     # Update parameters
                     self.optimizer.step()
+                    train_step_metric["grad_norm"] = grad_norm.item()
 
-                losses.append(torch.tensor(mb_losses).sum().item())
+                train_step_metrics.append(train_step_metric)
 
             # increment scheduler after all batches in rollout are processed
             self.scheduler.step()
@@ -455,26 +463,28 @@ class DTensorPolicyWorker:
             # the memory allocator before moving on
             torch.cuda.empty_cache()
 
+            synced_train_step_metrics = []
+
             # Compute global loss across all ranks
             with torch.no_grad():
+                for metric in train_step_metrics:
+                    keys = sorted(metric.keys())
+                    values = torch.as_tensor(
+                        [metric[k] for k in keys], dtype=torch.float32, device="cuda"
+                    )
+
+                    torch.distributed.all_reduce(values, group=self.dp_mesh.get_group())
+                    values = values / self.dp_mesh.size()
+                    synced_train_step_metrics.append(
+                        {k: v.cpu().item() for k, v in zip(keys, values)}
+                    )
+
                 global_loss = torch.tensor(losses, device="cuda")
                 torch.distributed.all_reduce(
                     global_loss, group=self.dp_mesh.get_group()
                 )
-            # Aggregate metrics across all microbatches
-            mb_metrics = defaultdict(list)
-            for m in all_mb_metrics:
-                for k, v in m.items():
-                    mb_metrics[k].append(v)
 
-            metrics = {
-                "global_loss": global_loss.cpu(),
-                "grad_norm": grad_norm,
-                "rank": torch.distributed.get_rank(),
-                "all_mb_metrics": dict(mb_metrics),
-            }
-
-            return metrics
+            return synced_train_step_metrics
 
     def get_logprobs(
         self,

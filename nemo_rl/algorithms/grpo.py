@@ -75,6 +75,7 @@ class GRPOConfig(TypedDict):
 
 class GRPOSaveState(TypedDict):
     step: int
+    optim_step: int
     val_reward: float
     consumed_samples: int
 
@@ -82,6 +83,7 @@ class GRPOSaveState(TypedDict):
 def _default_grpo_save_state() -> GRPOSaveState:
     return {
         "step": 0,
+        "optim_step": 0,
         "val_reward": -99999999.0,
         "consumed_samples": 0,
     }
@@ -354,6 +356,8 @@ def grpo_train(
 
     # common config/state itmes
     step = grpo_save_state["step"]
+    optim_step = grpo_save_state["optim_step"]
+
     consumed_samples = grpo_save_state["consumed_samples"]
     val_period = master_config["grpo"]["val_period"]
     val_at_start = master_config["grpo"]["val_at_start"]
@@ -480,7 +484,17 @@ def grpo_train(
                     baseline.mean(),
                     baseline.max(),
                 )
-                std_min, std_mean, std_max = std.min(), std.mean(), std.max()
+                std_min, std_mean, std_max = (
+                    std.min(),
+                    std.mean(),
+                    std.max(),
+                )
+
+                reward_min, reward_mean, reward_max = (
+                    rewards.min(),
+                    rewards.mean(),
+                    rewards.max(),
+                )
 
                 rollout_metrics.update(
                     {
@@ -495,6 +509,9 @@ def grpo_train(
                         "std_min": std_min,
                         "std_mean": std_mean,
                         "std_max": std_max,
+                        "reward_min": reward_min,
+                        "reward_mean": reward_mean,
+                        "reward_max": reward_max,
                     }
                 )
                 rollout_metrics.update(more_rollout_metrics)
@@ -561,7 +578,7 @@ def grpo_train(
 
             print("▶ Training policy...")
             with timer.time("policy_training"):
-                train_results = policy.train(train_data, loss_fn)
+                list_of_train_metrics = policy.train(train_data, loss_fn)
 
             is_last_step = step + 1 == min(max_num_steps, len(dataloader))
 
@@ -634,23 +651,10 @@ def grpo_train(
         table = logger.log_batched_dict_as_table(log_data, prefix="train", step=step)
 
         print("\n📊 Training Results:")
-        metrics = {
-            "loss": train_results["loss"].numpy(),
-            "reward": rewards.numpy(),
-            "grad_norm": train_results["grad_norm"].numpy(),
-        }
-        metrics.update(train_results["all_mb_metrics"])
-        for k, v in metrics.items():
-            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
-                metrics[k] = np.mean(v).item()
-            else:
-                metrics[k] = np.sum(v).item()
-        # metrics.update(rollout_metrics)
-        rollout_metrics["table"] = table
 
+        rollout_metrics["table"] = table
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
-        print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
         print(
             f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
@@ -669,12 +673,22 @@ def grpo_train(
                 percent = (v / total_time * 100) if total_time > 0 else 0
                 print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
-        logger.log_metrics(metrics, step + 1, prefix="train")
+        for i, train_step_metric in enumerate(list_of_train_metrics):
+            train_step_metric["optim_step"] = optim_step + i + 1
+            train_step_metric["outer_loop_step"] = step + 1
+            logger.log_metrics(
+                train_step_metric,
+                train_step_metric["optim_step"],
+                prefix="train",
+            )
+
         logger.log_metrics(rollout_metrics, step + 1, prefix="train_rollout")
         logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
         timer.reset()
         step += 1
+        optim_step += len(list_of_train_metrics)
+
         if step >= max_num_steps:
             break
 
