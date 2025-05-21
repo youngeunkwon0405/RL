@@ -72,7 +72,7 @@ class TaskDataSpec:
 
         # Load prompts from files if they exist
         self.system_prompt = load_prompt_file(self.system_prompt_file)
-        self.prompt = load_prompt_file(self.prompt_file) or "{}"
+        self.prompt = load_prompt_file(self.prompt_file)
 
     def copy_defaults(self, from_spec: "TaskDataSpec") -> None:
         """Apply default values from another Task instance for any None attributes."""
