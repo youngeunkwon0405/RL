@@ -446,13 +446,15 @@ def grpo_train(
                 rewards = repeated_batch["total_reward"]
 
                 print("▶ Computing advantages...")
-                baseline, std = calculate_baseline_and_std_per_prompt(
-                    input_ids,
-                    rewards,
-                    torch.ones_like(rewards),
-                    leave_one_out_baseline=master_config["grpo"][
-                        "use_leave_one_out_baseline"
-                    ],
+                baseline, std, more_rollout_metrics = (
+                    calculate_baseline_and_std_per_prompt(
+                        input_ids,
+                        rewards,
+                        torch.ones_like(rewards),
+                        leave_one_out_baseline=master_config["grpo"][
+                            "use_leave_one_out_baseline"
+                        ],
+                    )
                 )
                 advantages = (rewards - baseline).unsqueeze(-1)
 
@@ -462,6 +464,40 @@ def grpo_train(
                     advantages[zero_std_mask] = (
                         advantages[zero_std_mask] / std.unsqueeze(-1)[zero_std_mask]
                     )
+
+                percent_valid_advantages = (
+                    advantages.count_nonzero() / advantages.numel()
+                )
+                percent_zero_advantages = 1 - percent_valid_advantages
+
+                advantages_min, advantages_mean, advantages_max = (
+                    advantages.min(),
+                    advantages.mean(),
+                    advantages.max(),
+                )
+                baseline_min, baseline_mean, baseline_max = (
+                    baseline.min(),
+                    baseline.mean(),
+                    baseline.max(),
+                )
+                std_min, std_mean, std_max = std.min(), std.mean(), std.max()
+
+                rollout_metrics.update(
+                    {
+                        # "percent_valid_advantages": percent_valid_advantages,
+                        "percent_zero_advantages": percent_zero_advantages,
+                        "advantages_min": advantages_min,
+                        "advantages_mean": advantages_mean,
+                        "advantages_max": advantages_max,
+                        "baseline_min": baseline_min,
+                        "baseline_mean": baseline_mean,
+                        "baseline_max": baseline_max,
+                        "std_min": std_min,
+                        "std_mean": std_mean,
+                        "std_max": std_max,
+                    }
+                )
+                rollout_metrics.update(more_rollout_metrics)
 
             with timer.time("data_processing"):
                 # Add loss mask and advantages to each message in LLMMessageLogType
@@ -609,8 +645,8 @@ def grpo_train(
                 metrics[k] = np.mean(v).item()
             else:
                 metrics[k] = np.sum(v).item()
-        metrics.update(rollout_metrics)
-        metrics["table"] = table
+        # metrics.update(rollout_metrics)
+        rollout_metrics["table"] = table
 
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
@@ -634,6 +670,7 @@ def grpo_train(
                 print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
         logger.log_metrics(metrics, step + 1, prefix="train")
+        logger.log_metrics(rollout_metrics, step + 1, prefix="train_rollout")
         logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
         timer.reset()

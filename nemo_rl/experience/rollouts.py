@@ -374,6 +374,8 @@ def run_multi_turn_rollout(
         "max_turns_reached_rate": float(sample_max_turns_reached.float().mean().item()),
         # Token usage metrics
         "mean_gen_tokens_per_sample": float(sample_token_counts.float().mean().item()),
+        "min_gen_tokens_per_sample": float(sample_token_counts.float().min().item()),
+        "max_gen_tokens_per_sample": float(sample_token_counts.float().max().item()),
         "mean_env_tokens_per_sample": float(
             sample_env_token_counts.float().mean().item()
         ),
