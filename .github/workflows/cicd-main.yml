@@ -115,6 +115,18 @@ jobs:
           pip install pre-commit
           pre-commit install
           pre-commit run --all-files --show-diff-on-failure --color=always
+  
+  mypy-check:
+    name: Mypy check
+    needs: [pre-flight]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check mypy
+        run: |
+          pip install uv
+          uv run --group test mypy nemo_rl examples
 
   sphinx-build:
     if: ${{ needs.pre-flight.outputs.test_level != 'none' }}
@@ -245,7 +257,8 @@ jobs:
                 (
                   needs.pre-flight.outputs.test_level != 'none' &&
                   needs.sphinx-build.result == 'success' &&
-                  needs.tests.result == 'success'
+                  needs.tests.result == 'success' &&
+                  (needs.mypy-check.result == 'success' || true)
                 )
               )
             }}

@@ -13,14 +13,18 @@
 # limitations under the License.
 import os
 from collections import defaultdict
-from typing import List, Optional, Union
+from typing import Any, Optional, Union, cast
 
 import numpy as np
 import ray
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
-from nemo_rl.distributed.batched_data_dict import BatchedDataDict, DynamicBatchingCfg
+from nemo_rl.distributed.batched_data_dict import (
+    BatchedDataDict,
+    DynamicBatchingArgs,
+    SlicedDataDict,
+)
 from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
@@ -29,21 +33,27 @@ from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
     GenerationOutputSpec,
 )
-from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
+from nemo_rl.models.policy.interfaces import (
+    ColocatablePolicyInterface,
+    LogprobOutputSpec,
+    ReferenceLogprobOutputSpec,
+)
+
+PathLike = Union[str, "os.PathLike[Any]"]
 
 
-class HfPolicy(PolicyInterface, GenerationInterface):
+class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
     def __init__(
         self,
         cluster: RayVirtualCluster,
         config: PolicyConfig,
-        tokenizer: AutoTokenizer,
+        tokenizer: PreTrainedTokenizerBase,
         name_prefix: str = "hf_policy",
-        workers_per_node: Optional[Union[int, List[int]]] = None,
+        workers_per_node: Optional[Union[int, list[int]]] = None,
         init_optimizer: bool = True,
-        weights_path: Optional[str] = None,
-        optimizer_path: Optional[str] = None,
+        weights_path: Optional[PathLike] = None,
+        optimizer_path: Optional[PathLike] = None,
         init_reference_model: bool = True,
     ):
         if weights_path:
@@ -51,7 +61,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
 
+        node_bundle_indices = None
         tp_size = 1
+
+        worker_builder_cls: str
         if config["dtensor_cfg"]["enabled"]:
             worker_builder_cls = (
                 "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
@@ -93,12 +106,13 @@ class HfPolicy(PolicyInterface, GenerationInterface):
                 "Dynamic batch is only supported for DTensor policy."
             )
             self.use_dynamic_batches = True
-            self.dynamic_batching_cfg: DynamicBatchingCfg = {
+            self.dynamic_batching_args: DynamicBatchingArgs = {
                 "input_key": "input_ids",
                 "input_lengths_key": "input_lengths",
                 "sequence_length_round": config["dynamic_batching"][
                     "sequence_length_round"
                 ],
+                "max_tokens_per_microbatch": 0,  # Override this in each different call (presumably different sizes)
             }
         else:
             self.use_dynamic_batches = False
@@ -107,7 +121,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
-    ) -> BatchedDataDict:
+    ) -> BatchedDataDict[LogprobOutputSpec]:
         """Get the logprobs of the model for a data dict.
 
         Returns:
@@ -116,17 +130,19 @@ class HfPolicy(PolicyInterface, GenerationInterface):
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
         dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        sharded_data: list[SlicedDataDict]
+        unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
-            self.dynamic_batching_cfg["max_tokens_per_microbatch"] = self.cfg[
+            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(
+            sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
                 dp_size,
                 batch_size=None,
-                dynamic_batching_cfg=self.dynamic_batching_cfg,
+                dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
-            sharded_data = data.shard_by_batch_size(
+            sharded_data = data.shard_by_batch_size(  # type: ignore
                 dp_size,
                 batch_size=None,
             )
@@ -138,8 +154,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             replicate_on_axes=["tensor_parallel"],
             output_is_replicated=["tensor_parallel"],
         )
-
-        logprobs = BatchedDataDict.from_batches(
+        logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
         )
 
@@ -151,24 +166,28 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         return logprobs
 
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict[GenerationDatumSpec], micro_batch_size: int = None
-    ) -> BatchedDataDict:
+        self,
+        data: BatchedDataDict[GenerationDatumSpec],
+        micro_batch_size: Optional[int] = None,
+    ) -> BatchedDataDict[ReferenceLogprobOutputSpec]:
         """Get the logprobs of the reference policy for a data dict.
 
         Returns: Identical to get_logprobs.
         """
         dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        sharded_data: list[SlicedDataDict]
+        unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
-            self.dynamic_batching_cfg["max_tokens_per_microbatch"] = self.cfg[
+            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["logprob_mb_tokens"]
-            sharded_data, unsorted_data_indices = data.shard_by_batch_size(
+            sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
                 dp_size,
                 batch_size=None,
-                dynamic_batching_cfg=self.dynamic_batching_cfg,
+                dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
-            sharded_data = data.shard_by_batch_size(
+            sharded_data = data.shard_by_batch_size(  # type: ignore
                 dp_size,
                 batch_size=None,
             )
@@ -181,9 +200,10 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             output_is_replicated=["tensor_parallel"],
             common_kwargs={"micro_batch_size": micro_batch_size},
         )
-
-        logprobs = BatchedDataDict.from_batches(
-            self.worker_group.get_all_worker_results(futures)
+        logprobs: BatchedDataDict[ReferenceLogprobOutputSpec] = (
+            BatchedDataDict.from_batches(
+                self.worker_group.get_all_worker_results(futures)
+            )
         )
 
         # dynamic batching sorts the inputs by sequence length to improve load balancing,
@@ -195,25 +215,25 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
     def train(
         self,
-        data: BatchedDataDict,
+        data: BatchedDataDict[Any],
         loss_fn: LossFunction,
         eval_mode: bool = False,
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
-    ):
+    ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
         batch_size = gbs or self.cfg["train_global_batch_size"]
         micro_batch_size = mbs or self.cfg["train_micro_batch_size"]
         # Shard and replicate the batch
         dp_size = self.sharding_annotations.get_axis_size("data_parallel")
         if self.use_dynamic_batches:
-            self.dynamic_batching_cfg["max_tokens_per_microbatch"] = self.cfg[
+            self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["train_mb_tokens"]
             sharded_data, _ = data.shard_by_batch_size(
                 dp_size,
                 batch_size=batch_size,
-                dynamic_batching_cfg=self.dynamic_batching_cfg,
+                dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
             sharded_data = data.shard_by_batch_size(
@@ -274,7 +294,8 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             output_is_replicated=["tensor_parallel"],
             common_kwargs={"greedy": greedy},
         )
-        result = BatchedDataDict.from_batches(
+        assert self.cfg["generation"] is not None, "Generation config is not set"
+        result: BatchedDataDict[GenerationOutputSpec] = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures),
             pad_value_dict={"output_ids": self.cfg["generation"]["pad_token_id"]},
         )
@@ -294,30 +315,30 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
         return result
 
-    def prepare_for_generation(self, *args, **kwargs):
+    def prepare_for_generation(self, *args: Any, **kwargs: Any) -> bool:
         # We don't need to do anything here
-        pass
+        return True
 
-    def prepare_for_training(self, *args, **kwargs):
+    def prepare_for_training(self, *args: Any, **kwargs: Any) -> None:
         # onload everything to the GPU
         futures = self.worker_group.run_all_workers_single_data("prepare_for_training")
         ray.get(futures)
 
-    def prepare_for_lp_inference(self, *args, **kwargs):
+    def prepare_for_lp_inference(self, *args: Any, **kwargs: Any) -> None:
         futures = self.worker_group.run_all_workers_single_data(
             "prepare_for_lp_inference"
         )
         ray.get(futures)
 
-    def finish_generation(self, *args, **kwargs):
+    def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         # We don't need to do anything here
-        pass
+        return True
 
-    def finish_training(self, *args, **kwargs):
+    def finish_training(self, *args: Any, **kwargs: Any) -> None:
         # Placeholder implementation
         pass
 
-    def prepare_weights_for_ipc(self):
+    def prepare_weights_for_ipc(self) -> list[tuple[str, int]]:
         """Prepare the weights for IPC.
 
         Returns:
@@ -327,18 +348,18 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             "prepare_weights_for_ipc"
         )
         # only get the first worker's result is enough since all workers will have the same result
-        return ray.get(futures)[0]
+        return cast(list[tuple[str, int]], ray.get(futures)[0])
 
-    def get_weights_ipc_handles(self, key):
+    def get_weights_ipc_handles(self, keys: list[str]) -> dict[str, Any]:
         """Fetch weight IPC handles from all workers.
 
         Returns:
             dict: A dictionary mapping device UUIDs to parameter IPC handles.
         """
         # Collect IPC handles from all workers
-        worker_handles = ray.get(
+        worker_handles: list[dict[str, Any]] = ray.get(
             [
-                worker.get_weights_ipc_handles.remote(key)
+                worker.get_weights_ipc_handles.remote(keys)
                 for worker in self.worker_group.workers
             ]
         )
@@ -350,12 +371,12 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
         return all_handles
 
-    def offload_before_refit(self):
+    def offload_before_refit(self) -> None:
         """Offload the optimizer and buffers to the CPU."""
         futures = self.worker_group.run_all_workers_single_data("offload_before_refit")
         ray.get(futures)
 
-    def offload_after_refit(self):
+    def offload_after_refit(self) -> None:
         """Offload the optimizer and buffers to the CPU."""
         futures = self.worker_group.run_all_workers_single_data("offload_after_refit")
         ray.get(futures)
@@ -365,7 +386,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         weights_path: str,
         optimizer_path: Optional[str] = None,
         tokenizer_path: Optional[str] = None,
-    ):
+    ) -> None:
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
@@ -384,7 +405,7 @@ class HfPolicy(PolicyInterface, GenerationInterface):
             print(f"Error during policy shutdown: {e}")
             return False
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Shuts down the worker groups when the object is deleted or is garbage collected.
 
         This is an extra safety net in case the user forgets to call worker_group.shutdown() and the pointer to
