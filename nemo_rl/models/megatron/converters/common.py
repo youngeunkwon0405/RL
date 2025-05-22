@@ -27,6 +27,7 @@ from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.integrations.accelerate import init_empty_weights
 
 import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
+import nemo_rl.models.megatron.converters.llama as llama_converter
 from nemo_rl.models.megatron.refit_utils import get_global_param_key_to_local_key_map
 
 _GROUP_TO_RANKS_CACHE = {}
@@ -173,8 +174,10 @@ def update_transforms_for_nemorl(export_transforms):
             # Need to modify this transform to take into account the TP size
             transform.transform = split_fc1_tp
         elif transform.transform.__name__ == "split_qkv":
+            # This transform previously moved qkv weights to cpu
             transform.transform = split_qkv_gpu
         elif transform.transform.__name__ == "split_qkv_bias":
+            # This transform previously moved qkv weights to cpu
             transform.transform = split_qkv_bias_gpu
     return export_transforms
 
@@ -186,9 +189,17 @@ class MegatronToHFConverter:
         config = AutoConfig.from_pretrained(hf_model_name)
         with init_empty_weights():
             self.target_model = AutoModelForCausalLM.from_config(config)
+        # TODO(yifu): inheritence for this?
         if "qwen" in hf_model_name.lower():
             self.export_mapping = qwen2_converter.get_export_mapping()
             self.export_transforms = qwen2_converter.get_export_transforms()
+        elif "llama" in hf_model_name.lower():
+            self.export_mapping = llama_converter.get_export_mapping()
+            self.export_transforms = llama_converter.get_export_transforms(config)
+        else:
+            raise ValueError(
+                f"No converter mapping and transforms found for {hf_model_name}"
+            )
 
         self.export_transforms = update_transforms_for_nemorl(self.export_transforms)
 
@@ -248,6 +259,7 @@ class MegatronToHFConverter:
             # If source_keys is None, then we use all the target model keys
             target_keys = self.target_model.state_dict().keys()
         else:
+            # Otherwise, we only use the target keys corresponding to the source_keys
             target_keys = set()
             for k in source_keys:
                 target_keys = target_keys.union(self.megatron_keys_to_hf_keys[k])
@@ -270,7 +282,11 @@ class MegatronToHFConverter:
                 continue
             ctx = StateDictTransform(key, val)(ctx)
         for transform in self.export_transforms:
-            source_matches = _match_keys(list(state_dict.keys()), transform.source_key)
+            if type(transform.source_key) == tuple:
+                source_keys = transform.source_key
+            else:
+                source_keys = (transform.source_key,)
+            source_matches = _match_keys(list(state_dict.keys()), source_keys)
             if source_matches.size == 1 and source_matches == np.array(None):
                 continue
             ctx = transform(ctx)
