@@ -76,6 +76,7 @@ def gpqa_data_processor(
             add_generation_prompt=False,
             add_special_tokens=False,
         )
+        # bug: not replacing content with the templated message
         sys_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][
             0
         ]
@@ -83,8 +84,11 @@ def gpqa_data_processor(
 
     # user prompt
     if task_data_spec.prompt:
-        problem = task_data_spec.prompt.format("", problem=problem, options=options)
+        # hard coded for GPQA prompt
+        problem = task_data_spec.prompt.format(problem=problem, options=options)
     user_message = {"role": "user", "content": problem}
+    # bug: the default system prompt may be generated again here
+    # see get_formatted_message_log()
     message = tokenizer.apply_chat_template(
         [user_message],
         tokenize=False,

@@ -403,7 +403,7 @@ class VllmGenerationWorker:
         # Generate outputs
         outputs = self.llm.generate(data["prompts"], sampling_params)
         texts = [output.outputs[0].text for output in outputs]
-
+        
         # Convert to BatchedDataDict
         return_data = BatchedDataDict({"texts": texts})
         return return_data

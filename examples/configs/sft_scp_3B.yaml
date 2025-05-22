@@ -3,10 +3,10 @@ sft:
   ## total number of steps to train will equal
   ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
   max_num_epochs: 1
-  max_num_steps: 400
+  max_num_steps: 1000
 
-  val_period: 50
-  val_batches: 20
+  val_period: 100
+  val_batches: 50
   val_global_batch_size: 32
   val_micro_batch_size: 1
   val_at_start: true
@@ -14,14 +14,14 @@ sft:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/Qwen2.5-1.5B-Instruct-debug"
+  checkpoint_dir: "results/Qwen2.5-3B-Instruct-sft-scp-8k"
   metric_name: "val_loss"
   higher_is_better: false
   keep_top_k: 3
-  save_period: 50
+  save_period: 100
 
 policy:
-  model_name: "Qwen/Qwen2.5-1.5B-Instruct"
+  model_name: "Qwen/Qwen2.5-3B-Instruct"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 32
@@ -34,8 +34,8 @@ policy:
   dtensor_cfg:
     enabled: true
     cpu_offload: false
-    sequence_parallel: false
-    activation_checkpointing: false
+    sequence_parallel: true
+    activation_checkpointing: true
     tensor_parallel_size: 1
 
   # makes the training sequence length divisible by the tensor parallel size
@@ -69,7 +69,7 @@ logger:
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "sft-scp"
-    name: "sft-scp-Qwen2.5-1.5B-Instruct"
+    name: "Qwen2.5-3B-Instruct"
   tensorboard:
     log_dir: "tb_logs-sft-dev-${data.dataset_name}"
   gpu_monitoring:
@@ -77,5 +77,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 1
+  gpus_per_node: 8
   num_nodes: 1

@@ -144,8 +144,10 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
         prompts = []
         for message_log in batch["message_log"]:
             content = [message["content"] for message in message_log]
+            # bug: I feel this "\n" is redundant. Should be "".join(content)
             content = "\n".join(content)
             prompts.append(content)
+            print(f"prompt =\n{content}")
 
         # generate by vllm
         inputs = BatchedDataDict({"prompts": prompts})

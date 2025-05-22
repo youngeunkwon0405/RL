@@ -15,7 +15,7 @@
 import argparse
 import os
 import math
-import pprint
+from pprint import pprint
 from functools import partial
 from typing import Any, Dict
 
@@ -182,7 +182,7 @@ def main():
 
     # Print config
     print("Final config:")
-    pprint.pprint(config)
+    pprint(config)
 
     config["logger"]["log_dir"] = get_next_experiment_dir(config["logger"]["log_dir"])
     print(f"📊 Using log directory: {config['logger']['log_dir']}")
