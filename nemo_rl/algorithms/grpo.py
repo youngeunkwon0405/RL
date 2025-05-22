@@ -619,6 +619,7 @@ def grpo_train(
                 grpo_save_state["step"] = step + 1
                 grpo_save_state["val_reward"] = val_metrics["accuracy"]
                 grpo_save_state["consumed_samples"] = consumed_samples
+                grpo_save_state["optim_step"] = optim_step + len(list_of_train_metrics)
                 with timer.time("checkpointing"):
                     print(f"Saving checkpoint for step {step + 1}...")
                     checkpoint_path = checkpointer.init_tmp_checkpoint(
