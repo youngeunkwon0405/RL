@@ -47,7 +47,7 @@ from nemo_rl.models.generation.interfaces import (
 )
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.hf_policy import Policy
 from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import (
@@ -245,7 +245,7 @@ def setup(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
 
-    policy = HfPolicy(
+    policy = Policy(
         cluster=cluster,
         config=policy_config,
         tokenizer=tokenizer,

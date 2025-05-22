@@ -13,6 +13,7 @@
 # limitations under the License.
 import os
 from collections import defaultdict
+from multiprocessing import Queue
 from typing import Any, Optional, Union, cast
 
 import numpy as np
@@ -43,7 +44,7 @@ from nemo_rl.models.policy.interfaces import (
 PathLike = Union[str, "os.PathLike[Any]"]
 
 
-class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
+class Policy(ColocatablePolicyInterface, GenerationInterface):
     def __init__(
         self,
         cluster: RayVirtualCluster,
@@ -63,26 +64,39 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
 
         node_bundle_indices = None
         tp_size = 1
+        pp_size = 1
 
         worker_builder_cls: str
-        if config["dtensor_cfg"]["enabled"]:
+        if config["training_backend"] == "hf":
+            if config["dtensor_cfg"]["enabled"]:
+                worker_builder_cls = (
+                    "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
+                )
+                tp_size = config["dtensor_cfg"]["tensor_parallel_size"]
+            else:
+                worker_builder_cls = (
+                    "nemo_rl.models.policy.fsdp1_policy_worker.FSDP1PolicyWorker"
+                )
+        elif config["training_backend"] == "megatron":
             worker_builder_cls = (
-                "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
+                "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker"
             )
-            tp_size = config["dtensor_cfg"]["tensor_parallel_size"]
+            tp_size = config["megatron_cfg"]["tensor_parallel_size"]
+            pp_size = config["megatron_cfg"]["pipeline_parallel_size"]
         else:
-            worker_builder_cls = (
-                "nemo_rl.models.policy.fsdp1_policy_worker.FSDP1PolicyWorker"
-            )
+            raise ValueError(f"Invalid training backend: {config['training_backend']}")
 
         self.sharding_annotations = NamedSharding(
             layout=np.arange(cluster.world_size()).reshape(
+                pp_size,  # PP
                 -1,  # DP
                 tp_size,  # TP
             ),
-            names=["data_parallel", "tensor_parallel"],
+            names=["pipeline_parallel", "data_parallel", "tensor_parallel"],
         )
 
+        # A queue for worker communication before torch dist init
+        pre_init_queue: Queue = Queue()
         worker_builder = RayWorkerBuilder(
             worker_builder_cls,
             config,
@@ -91,6 +105,8 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             weights_path=weights_path,
             optimizer_path=optimizer_path,
             init_reference_model=init_reference_model,
+            worker_sharding_annotations=self.sharding_annotations,
+            pre_init_communnication_queue=pre_init_queue,
         )
 
         self.worker_group = RayWorkerGroup(
@@ -102,8 +118,10 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
         )
 
         if config["dynamic_batching"]["enabled"]:
-            assert config["dtensor_cfg"]["enabled"], (
-                "Dynamic batch is only supported for DTensor policy."
+            assert (
+                config["dtensor_cfg"]["enabled"] or config["training_backend"] == "megatron"
+            ), (
+                "Dynamic batch is only supported for DTensor policy or Megatron policy."
             )
             self.use_dynamic_batches = True
             self.dynamic_batching_args: DynamicBatchingArgs = {
@@ -151,8 +169,8 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             "get_logprobs",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel"],
-            output_is_replicated=["tensor_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
         )
         logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -196,8 +214,8 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             "get_reference_policy_logprobs",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel"],
-            output_is_replicated=["tensor_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={"micro_batch_size": micro_batch_size},
         )
         logprobs: BatchedDataDict[ReferenceLogprobOutputSpec] = (
@@ -246,8 +264,8 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             "train",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel"],
-            output_is_replicated=["tensor_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
@@ -290,8 +308,8 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             "generate",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel"],
-            output_is_replicated=["tensor_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={"greedy": greedy},
         )
         assert self.cfg["generation"] is not None, "Generation config is not set"

@@ -27,7 +27,7 @@ from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.hf_policy import Policy
 
 # Define basic vLLM test config
 basic_vllm_test_config: VllmConfig = {
@@ -327,10 +327,10 @@ def test_vllm_worker_seed_behavior(cluster, tokenizer):
     policy = VllmGeneration(cluster, vllm_config)
     policy.finish_generation()
 
-    from nemo_rl.models.policy.hf_policy import HfPolicy
+    from nemo_rl.models.policy.hf_policy import Policy
 
     hf_config = get_basic_hf_test_config(enable_dtensor=False)
-    hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+    hf_policy = Policy(cluster, hf_config, tokenizer)
 
     print("refitting vllm policy...")
     refit_policy_generation(hf_policy, policy, hf_config["refit_buffer_size_gb"])
@@ -432,7 +432,7 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
 
     This test validates that the two policies can work together.
     """
-    from nemo_rl.models.policy.hf_policy import HfPolicy
+    from nemo_rl.models.policy.hf_policy import Policy
     from tests.unit.test_utils import SimpleNLLLoss
 
     # Create separate configs for each policy
@@ -482,7 +482,7 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
         vllm_policy.finish_generation()
 
         print("Creating HF policy...")
-        hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+        hf_policy = Policy(cluster, hf_config, tokenizer)
 
         print("refitting vllm policy...")
         refit_policy_generation(
@@ -702,7 +702,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
     cluster, tokenizer, tensor_parallel_size, enable_dtensor
 ):
     """Test that the vLLM prefix cache is correctly reset when weights change."""
-    from nemo_rl.models.policy.hf_policy import HfPolicy
+    from nemo_rl.models.policy.hf_policy import Policy
 
     # Create configs
     vllm_config = deepcopy(basic_vllm_test_config)
@@ -718,7 +718,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
     hf_policy = None
     try:
         print(f"Creating HF policy for TP={tensor_parallel_size}...")
-        hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+        hf_policy = Policy(cluster, hf_config, tokenizer)
         print(f"Creating vLLM policy for TP={tensor_parallel_size}...")
         vllm_policy = VllmGeneration(cluster, vllm_config)
 
@@ -801,7 +801,7 @@ def test_vllm_weight_update_and_prefix_cache_reset(
 @pytest.mark.parametrize("enable_dtensor", [True, False])
 def test_vllm_weight_update_memory(cluster, tokenizer, enable_dtensor):
     """Test that vLLM streaming weight update and can save memory."""
-    from nemo_rl.models.policy.hf_policy import HfPolicy
+    from nemo_rl.models.policy.hf_policy import Policy
 
     if cluster.num_gpus_per_node < 2:
         pytest.skip("Need at least 2 GPUs per node for this test")
@@ -822,7 +822,7 @@ def test_vllm_weight_update_memory(cluster, tokenizer, enable_dtensor):
 
     print("Creating HF policy...")
     hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
-    hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+    hf_policy = Policy(cluster, hf_config, tokenizer)
 
     print("refitting vllm policy...")
     # take it outside statistics to get clean peak memory during refit
@@ -867,7 +867,7 @@ def test_vllm_generation_with_stop(
     cluster, test_input_data, tokenizer, is_eval, enable_dtensor
 ):
     """Test vLLM generation with stop."""
-    from nemo_rl.models.policy.hf_policy import HfPolicy
+    from nemo_rl.models.policy.hf_policy import Policy
 
     # Create separate configs for each policy
     vllm_config = basic_vllm_test_config.copy()
@@ -894,7 +894,7 @@ def test_vllm_generation_with_stop(
 
         print("Creating HF policy...")
         hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
-        hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+        hf_policy = Policy(cluster, hf_config, tokenizer)
 
         print("refitting vllm policy...")
         refit_policy_generation(
@@ -977,7 +977,7 @@ def test_vllm_refit_non_collocated_handles_update_failure(
     # Create HfPolicy on its own cluster
     hf_config = get_basic_hf_test_config(enable_dtensor=True)
     hf_config["dtensor_cfg"]["tensor_parallel_size"] = 1
-    hf_policy = HfPolicy(policy_cluster_separate, hf_config, tokenizer)
+    hf_policy = Policy(policy_cluster_separate, hf_config, tokenizer)
 
     # Create VllmGeneration policy on its own cluster
     vllm_config = deepcopy(basic_vllm_test_config)
