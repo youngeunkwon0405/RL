@@ -17,10 +17,12 @@ import gc
 import os
 from typing import Any, NotRequired, Optional, TypedDict, Union, cast
 
+import numpy as np
 import ray
 import torch
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict, SlicedDataDict
+from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.distributed.virtual_cluster import (
     RayVirtualCluster,
 )
@@ -511,34 +513,27 @@ class VllmGeneration(GenerationInterface):
             f"Please update your configuration to include all required VLLM parameters."
         )
 
-        self.tensor_parallel_size = self.cfg["vllm_cfg"]["tensor_parallel_size"]
+        self.sharding_annotations = NamedSharding(
+            layout=np.arange(cluster.world_size()).reshape(
+                -1,  # DP
+                config["vllm_cfg"]["tensor_parallel_size"],  # TP
+            ),
+            names=["data_parallel", "tensor_parallel"],
+        )
 
         # Create worker builder for VllmGenerationWorker
         worker_builder = RayWorkerBuilder(
             "nemo_rl.models.generation.vllm.VllmGenerationWorker", config
         )
 
-        if self.tensor_parallel_size > 1:
-            # For tensor parallelism, create node-aware worker groups
-            node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
-
-            self.worker_group = RayWorkerGroup(
-                cluster,
-                worker_builder,
-                name_prefix=name_prefix,
-                bundle_indices_list=node_bundle_indices,
-            )
-        else:
-            # Use standard worker group creation for non-TP case
-            self.worker_group = RayWorkerGroup(
-                cluster,
-                worker_builder,
-                name_prefix=name_prefix,
-                workers_per_node=workers_per_node,
-            )
-
-        # Number of data parallel groups is the number of tied worker groups
-        self.dp_size = self.worker_group.group_count
+        self.worker_group = RayWorkerGroup(
+            cluster,
+            worker_builder,
+            name_prefix=name_prefix,
+            workers_per_node=workers_per_node,
+            bundle_indices_list=self._get_tied_worker_bundle_indices(cluster),
+            sharding_annotations=self.sharding_annotations,
+        )
 
     def _get_tied_worker_bundle_indices(
         self, cluster: RayVirtualCluster
@@ -549,24 +544,25 @@ class VllmGeneration(GenerationInterface):
 
         tied_worker_groups = []
 
+        tp_size = self.sharding_annotations.get_axis_size("tensor_parallel")
         # For each node (placement group), create tied worker groups of size tensor_parallel_size
         for node_idx, pg in enumerate(placement_groups):
             # How many bundles (GPUs) are on this node
             bundles_on_node = pg.bundle_count
-            tied_worker_groups_on_node = bundles_on_node // self.tensor_parallel_size
+            tied_worker_groups_on_node = bundles_on_node // tp_size
 
             if tied_worker_groups_on_node > 0:
                 for group_idx in range(tied_worker_groups_on_node):
                     # Local bundle indices for this tied worker group (consecutive GPUs on this node)
-                    start_idx = group_idx * self.tensor_parallel_size
-                    end_idx = start_idx + self.tensor_parallel_size
+                    start_idx = group_idx * tp_size
+                    end_idx = start_idx + tp_size
                     local_bundle_indices = list(range(start_idx, end_idx))
                     tied_worker_groups.append((node_idx, local_bundle_indices))
 
         if not tied_worker_groups:
             raise ValueError(
-                f"Cannot create any tensor parallel tied worker groups with size {self.tensor_parallel_size}. "
-                f"Make sure each node has at least {self.tensor_parallel_size} GPUs."
+                f"Cannot create any tensor parallel tied worker groups with size {tp_size}. "
+                f"Make sure each node has at least {tp_size} GPUs."
             )
 
         return tied_worker_groups
@@ -583,14 +579,17 @@ class VllmGeneration(GenerationInterface):
         )
 
         # Shard the data across the tied worker groups
+        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
         sharded_data: list[SlicedDataDict] = data.shard_by_batch_size(
-            self.dp_size, allow_uneven_shards=True
-        )  # type: ignore
-        future_bundle = self.worker_group.run_all_workers_multiple_data(
+            dp_size, allow_uneven_shards=True
+        )
+        future_bundle = self.worker_group.run_all_workers_sharded_data(
             "generate",
             sharded_data,
+            in_sharded_axes=["data_parallel"],
+            replicate_on_axes=None,  # just run on tp rank 0
+            output_is_replicated=None,
             common_kwargs={"greedy": greedy},
-            only_on="tied_leader",
         )
 
         # Get results from the workers, respecting tied worker groups (only one result per tied worker group)
@@ -628,12 +627,15 @@ class VllmGeneration(GenerationInterface):
         batch_size = len(data["prompts"])
 
         # Shard the data across the tied worker groups
-        sharded_data = data.shard_by_batch_size(self.dp_size, batch_size=batch_size)
-        future_bundle = self.worker_group.run_all_workers_multiple_data(
+        dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        sharded_data = data.shard_by_batch_size(dp_size, batch_size=batch_size)
+        future_bundle = self.worker_group.run_all_workers_sharded_data(
             "generate_text",
             sharded_data,
+            in_sharded_axes=["data_parallel"],
+            replicate_on_axes=None,  # just run on tp rank 0
+            output_is_replicated=None,
             common_kwargs={"greedy": greedy},
-            only_on="tied_leader",
         )
 
         # Get results from the workers, respecting tied worker groups (only one result per tied worker group)
@@ -659,7 +661,7 @@ class VllmGeneration(GenerationInterface):
         try:
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(
-                "wake_up", only_on="tied_leader", **kwargs
+                "wake_up", run_rank_0_only_axes=["tensor_parallel"], **kwargs
             )
             # Wait for all futures to complete
             results = ray.get(futures)
@@ -673,7 +675,8 @@ class VllmGeneration(GenerationInterface):
         try:
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(
-                "sleep", only_on="tied_leader"
+                "sleep",
+                run_rank_0_only_axes=["tensor_parallel"],
             )
             # Wait for all futures to complete
             results = ray.get(futures)
@@ -709,8 +712,8 @@ class VllmGeneration(GenerationInterface):
             # Directly pass ipc_handles to the method
             futures = self.worker_group.run_all_workers_single_data(
                 "update_weights_from_ipc_handles",
-                only_on="tied_leader",
                 ipc_handles=ipc_handles,
+                run_rank_0_only_axes=["tensor_parallel"],
             )
             # Wait for all futures to complete
             results = ray.get(futures)
