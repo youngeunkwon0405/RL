@@ -16,10 +16,49 @@ from typing import Dict, List, Tuple
 
 import torch
 from megatron.core import parallel_state
+from megatron.core.tensor_parallel.layers import (
+    VocabParallelEmbedding,
+    ColumnParallelLinear,
+    RowParallelLinear,
+)
 from nemo.collections.llm.gpt.model.base import GPTConfig
 
 import nemo_rl.models.megatron.converters as model_converters
-from nemo_rl.models.megatron.converters.common import get_tp_dim
+
+
+def get_tp_dim(model, param_name, named_modules_dict):
+    # pass in named_modules_dict so we can get it ahead of time instead
+    # of once for each param
+    if not param_name.endswith(".weight") and not param_name.endswith(".bias"):
+        return None
+
+    prefix = ""
+    if hasattr(model, "module"):
+        prefix = "module."
+        if hasattr(model.module, "module"):
+            prefix = "module.module."
+    key = prefix + ".".join(param_name.split(".")[:-1])
+    module = named_modules_dict.get(key)
+    if module is None:
+        print(f"Module {key} not found in named_modules_dict")
+        return None
+    if hasattr(module, "parallel_mode"):
+        # TE layers have parallel_mode we can check directly
+        if module.parallel_mode == "column":
+            return 0
+        elif module.parallel_mode == "row":
+            return 1
+        else:
+            return None
+    elif isinstance(module, VocabParallelEmbedding) or isinstance(
+        module, ColumnParallelLinear
+    ):
+        return 0
+    elif isinstance(module, RowParallelLinear):
+        return 1
+    # TODO(yifu): moe layers
+    else:
+        return None
 
 
 @torch.no_grad()

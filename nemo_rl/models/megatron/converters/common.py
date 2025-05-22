@@ -12,19 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections import defaultdict
 import einops
-import torch
+import numpy as np
 from megatron.core import parallel_state
-from megatron.core.tensor_parallel.layers import (
-    VocabParallelEmbedding,
-    ColumnParallelLinear,
-    RowParallelLinear,
+from nemo.lightning.io.state import (
+    TransformCTX,
+    _ModelState,
+    StateDictTransform,
+    _match_keys,
 )
+import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.integrations.accelerate import init_empty_weights
-from nemo.lightning.io.state import TransformCTX, _ModelState, StateDictTransform
 
 import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
+from nemo_rl.models.megatron.refit_utils import get_global_param_key_to_local_key_map
 
 _GROUP_TO_RANKS_CACHE = {}
 
@@ -79,46 +82,6 @@ def get_global_layer_num(s, cfg):
     return global_layer_num
 
 
-def get_tp_dim(model, param_name, named_modules_dict):
-    # pass in named_modules_dict so we can get it ahead of time instead
-    # of once for each param
-    if not param_name.endswith(".weight") and not param_name.endswith(".bias"):
-        return None
-
-    prefix = ""
-    if hasattr(model, "module"):
-        prefix = "module."
-        if hasattr(model.module, "module"):
-            prefix = "module.module."
-    key = prefix + ".".join(param_name.split(".")[:-1])
-    module = named_modules_dict.get(key)
-    if module is None:
-        print(f"Module {key} not found in named_modules_dict")
-        return None
-    if hasattr(module, "parallel_mode"):
-        # TE layers have parallel_mode we can check directly
-        if module.parallel_mode == "column":
-            return 0
-        elif module.parallel_mode == "row":
-            return 1
-        else:
-            return None
-    elif isinstance(module, VocabParallelEmbedding) or isinstance(
-        module, ColumnParallelLinear
-    ):
-        return 0
-    elif isinstance(module, RowParallelLinear):
-        return 1
-    # TODO(yifu): moe layers
-    else:
-        return None
-
-
-class SafeDict(dict):
-    def __missing__(self, key):
-        return "{" + key + "}"
-
-
 def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
     # gate proj and up proj are mixed right now, and we need to reshape them
     # [ gate_tp0 ]     [ gate_tp0 ]
@@ -131,6 +94,7 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
     mlp_gate_proj_weight = linear_fc1[0]
     mlp_up_proj_weight = linear_fc1[1]
     return mlp_gate_proj_weight, mlp_up_proj_weight
+
 
 def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
     """
@@ -153,7 +117,9 @@ def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
     hidden_size = linear_qkv.size(-1)
     q_slice = torch.cat(
         [
-            torch.arange((heads_per_group + 2) * i, (heads_per_group + 2) * i + heads_per_group)
+            torch.arange(
+                (heads_per_group + 2) * i, (heads_per_group + 2) * i + heads_per_group
+            )
             for i in range(num_query_groups)
         ]
     )
@@ -165,6 +131,7 @@ def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
     v_proj = linear_qkv[v_slice].reshape(-1, hidden_size)
 
     return q_proj, k_proj, v_proj
+
 
 def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
     """
@@ -183,7 +150,9 @@ def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
     qkv_bias = qkv_bias.reshape([qkv_total_dim, head_size])
     q_slice = torch.cat(
         [
-            torch.arange((heads_per_group + 2) * i, (heads_per_group + 2) * i + heads_per_group)
+            torch.arange(
+                (heads_per_group + 2) * i, (heads_per_group + 2) * i + heads_per_group
+            )
             for i in range(num_query_groups)
         ]
     )
@@ -195,6 +164,7 @@ def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
     v_bias = qkv_bias[v_slice].reshape(-1)
 
     return q_bias, k_bias, v_bias
+
 
 def update_transforms_for_nemorl(export_transforms):
     # In place update
@@ -210,7 +180,7 @@ def update_transforms_for_nemorl(export_transforms):
 
 
 class MegatronToHFConverter:
-    def __init__(self, hf_model_name):
+    def __init__(self, hf_model_name, megatron_model):
         # We only care about the state_dict keys and the config, so we
         # don't need to load the model weights
         config = AutoConfig.from_pretrained(hf_model_name)
@@ -220,25 +190,89 @@ class MegatronToHFConverter:
             self.export_mapping = qwen2_converter.get_export_mapping()
             self.export_transforms = qwen2_converter.get_export_transforms()
 
-    def _get_empty_state_dict(self):
-        state_dict = {}
-        for k in self.target_model.state_dict().keys():
-            state_dict[k] = None
+        self.export_transforms = update_transforms_for_nemorl(self.export_transforms)
+
+        # Get all local keys across PP ranks
+        local_keys = list(megatron_model.state_dict().keys())
+        pp_group = parallel_state.get_pipeline_model_parallel_group()
+        pp_world_size = torch.distributed.get_world_size(pp_group)
+
+        all_local_keys_list = [None] * pp_world_size
+        torch.distributed.all_gather_object(
+            all_local_keys_list, local_keys, group=pp_group
+        )
+        all_local_keys = list({k for l in all_local_keys_list for k in l})
+
+        global_key_map = get_global_param_key_to_local_key_map(
+            megatron_model, megatron_model.config, all_local_keys
+        )
+        global_keys = list(global_key_map.keys())
+
+        # Set the value of the state_dict to the megatron key name so that
+        # StateDictTransform will set the value of the target state dict to
+        # the megatron key name
+        dummy_source_state_dict = {k: k for k in global_keys}
+        ctx = TransformCTX(
+            source=_ModelState(dummy_source_state_dict),
+            source_state=dummy_source_state_dict,
+            target=self.target_model,
+            target_state=self._get_empty_state_dict(),
+        )
+        for key, val in self.export_mapping.items():
+            ctx = StateDictTransform(key, val)(ctx)
+
+        for transform in self.export_transforms:
+            if type(transform.target_key) == tuple:
+                for t in transform.target_key:
+                    ctx = StateDictTransform(transform.source_key, t)(ctx)
+            elif type(transform.source_key) == tuple:
+                # TODO(yifu): handle many to one case with transform that just sets value as a list?
+                ...
+            else:
+                ctx = StateDictTransform(transform.source_key, transform.target_key)(
+                    ctx
+                )
+
+        hf_keys_to_megatron_keys = ctx.target_state
+        megatron_keys_to_hf_keys = defaultdict(set)
+        for hf_key, megatron_key in hf_keys_to_megatron_keys.items():
+            if isinstance(megatron_key, list):
+                for k in megatron_key:
+                    megatron_keys_to_hf_keys[k].add(hf_key)
+            else:
+                megatron_keys_to_hf_keys[megatron_key].add(hf_key)
+        self.megatron_keys_to_hf_keys = dict(megatron_keys_to_hf_keys)
+
+    def _get_empty_state_dict(self, source_keys=None):
+        if source_keys is None:
+            # If source_keys is None, then we use all the target model keys
+            target_keys = self.target_model.state_dict().keys()
+        else:
+            target_keys = set()
+            for k in source_keys:
+                target_keys = target_keys.union(self.megatron_keys_to_hf_keys[k])
+
+        state_dict = {k: None for k in target_keys}
         return state_dict
 
     def convert(self, state_dict, megatron_config):
-        export_transforms = update_transforms_for_nemorl(self.export_transforms)
         source = _ModelState(state_dict)
         source.config = megatron_config
         ctx = TransformCTX(
             source=source,
             source_state=state_dict,
             target=self.target_model,
-            target_state=self._get_empty_state_dict(),
+            target_state=self._get_empty_state_dict(list(state_dict.keys())),
         )
         for key, val in self.export_mapping.items():
+            source_matches = _match_keys(list(state_dict.keys()), key)
+            if source_matches.size == 1 and source_matches == np.array(None):
+                continue
             ctx = StateDictTransform(key, val)(ctx)
-        for transform in export_transforms:
+        for transform in self.export_transforms:
+            source_matches = _match_keys(list(state_dict.keys()), transform.source_key)
+            if source_matches.size == 1 and source_matches == np.array(None):
+                continue
             ctx = transform(ctx)
 
         converted_state_dict = ctx.target_state

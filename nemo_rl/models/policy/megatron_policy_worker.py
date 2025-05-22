@@ -95,10 +95,10 @@ from nemo_rl.models.megatron.common import (
     broadcast_tensor,
     forward_step_arbitrary_loss,
 )
-from nemo_rl.models.megatron.converters.common import get_tp_dim
 from nemo_rl.models.megatron.refit_utils import (
     gather_params,
     get_global_param_key_to_local_key_map,
+    get_tp_dim,
 )
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.utils import get_gpu_info
@@ -251,8 +251,6 @@ class MegatronPolicyWorker:
             os.path.join(output_path, "iter_0000000")
         )
 
-        self.converter = MegatronToHFConverter(hf_model_name)
-
         if get_rank_safe() == 0:
             if pt_checkpoint_exists:
                 print(f"Checkpoint already exists at {output_path}. Skipping import.")
@@ -366,6 +364,7 @@ class MegatronPolicyWorker:
             self.checkpointing_context,
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
+
         for name, item in self.model.state_dict().items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device="cpu", non_blocking=True, copy=True)
@@ -427,6 +426,8 @@ class MegatronPolicyWorker:
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
         self._held_gather_buffer = None
+
+        self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
 
     def is_alive(self):
         return True
@@ -976,7 +977,7 @@ class MegatronPolicyWorker:
             self.model,
             param_name_to_rank_and_key,
         )
-        gathered_hf_params = self.converter.convert(
+        gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )
 
