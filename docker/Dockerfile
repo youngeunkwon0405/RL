@@ -21,6 +21,8 @@ RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh && \
 # Disable usage stats by default for users who are sensitive to sharing usage.
 # Users are encouraged to enable if the wish.
 ENV RAY_USAGE_STATS_ENABLED=0
+ENV MAX_JOBS=1
+ENV NVTE_BUILD_THREADS_PER_JOB=1
 
 FROM base AS hermetic
 
@@ -28,12 +30,13 @@ WORKDIR /opt/nemo-rl
 
 # First copy only the dependency files
 COPY pyproject.toml uv.lock ./
+COPY --link 3rdparty/ ./3rdparty/
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/nemo_rl_venv
-ENV VIRTUAL_ENV=/opt/nemo_rl_venv
+ENV UV_LINK_MODE=copy
 
 # Create and activate virtual environment
-RUN <<"EOF"
+RUN <<"EOF" bash -exu
 uv venv /opt/nemo_rl_venv
 # uv sync has a more reliable resolver than simple uv pip install which can fail
 
@@ -42,6 +45,7 @@ uv venv /opt/nemo_rl_venv
 # Do everything in one layer to prevent large layers.
 
 uv sync --locked --extra vllm --no-install-project
+uv sync --locked --extra mcore --no-install-project --no-build-isolation 
 uv sync --locked --all-groups --no-install-project
 EOF
 
@@ -59,3 +63,6 @@ LABEL com.nvidia.build.id="${NVIDIA_BUILD_ID}"
 LABEL com.nvidia.build.ref="${NVIDIA_BUILD_REF}"
 
 COPY . /opt/nemo-rl
+
+# Make hermetic the default target instead of release since that's the recommended container
+FROM hermetic
