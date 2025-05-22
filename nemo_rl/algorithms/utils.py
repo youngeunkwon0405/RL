@@ -13,6 +13,7 @@
 # limitations under the License.
 import random
 import warnings
+from collections import defaultdict
 from functools import wraps
 from typing import Optional
 
@@ -66,6 +67,8 @@ def calculate_baseline_and_std_per_prompt(
     if reward_device == -1:
         reward_device = torch.device("cpu")
 
+    metrics = defaultdict(list)
+
     for i in range(len(unique_prompts)):
         is_matching_prompt = (prompts == unique_prompts[i]).all(1)
         prompt_idx = torch.arange(len(prompts), device=reward_device)[
@@ -84,6 +87,11 @@ def calculate_baseline_and_std_per_prompt(
             # to ignore it in the loss computation
             baseline[prompt_idx] = rewards[prompt_idx]
         else:
+            rewards_reshaped = rewards[prompt_idx] * valid_mask[prompt_idx]
+
+            metrics["average_reward_per_prompt"].append(rewards_reshaped.mean())
+            metrics["average_pass_at_k_per_prompt"].append((rewards_reshaped > 0).any())
+
             num_valid = valid_mask[prompt_idx].float().sum() - int(
                 leave_one_out_baseline
             )
@@ -105,7 +113,14 @@ def calculate_baseline_and_std_per_prompt(
             sq_baseline[prompt_idx] = prompt_baseline_square
 
     std = (sq_baseline - baseline.square()).sqrt().nan_to_num(0)
-    return baseline, std
+    return (
+        baseline,
+        std,
+        {
+            k: torch.as_tensor(v, dtype=torch.float32).mean().item()
+            for k, v in metrics.items()
+        },
+    )
 
 
 def surpress_user_warnings(f):

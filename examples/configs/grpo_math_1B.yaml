@@ -3,7 +3,8 @@ grpo:
   num_prompts_per_step: 32
   num_generations_per_prompt: 16
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
-  max_num_steps: 1000000
+
+  num_epochs: 1
   normalize_rewards: true
   use_leave_one_out_baseline: true
   val_period: 10
@@ -20,6 +21,7 @@ loss_fn:
   use_on_policy_kl_approximation: false
   use_importance_sampling_correction: false
   token_level_loss: true
+  use_generation_logprobs_in_ppo_baseline: false
 
 checkpointing:
   enabled: true
@@ -113,10 +115,13 @@ data:
 
     # checks if it's too long on init
     filter_long_samples: false
+    drop_last: True
+
   val:
     shuffle: False
     seed: 420 # unused if shuffle is False
     jsonl_path: ...
+    drop_last: False
 
     # checks if it's too long on init
     filter_long_samples: false

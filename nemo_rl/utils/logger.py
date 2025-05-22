@@ -21,8 +21,10 @@ import re
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, TypedDict
 
+import pandas as pd
 import ray
 import requests
 import torch
@@ -170,9 +172,10 @@ class WandbLogger(LoggerInterface):
         # If step_metric is provided, use the corresponding value from metrics as step
         if step_metric and step_metric in metrics:
             # commit=False so the step does not get incremented
-            self.run.log(metrics, commit=False)
+            self.run.log(metrics)
         else:
-            self.run.log(metrics, step=step)
+            metrics["rl_step"] = step
+            self.run.log(metrics)
 
     def log_hyperparams(self, params: Dict[str, Any]) -> None:
         """Log hyperparameters to wandb.
@@ -503,6 +506,12 @@ class Logger(LoggerInterface):
         """
         self.loggers = []
         self.wandb_logger = None
+        self.wandb_tables = {}
+        self.wandb_tables_df = defaultdict(
+            lambda: pd.DataFrame(
+                columns=["step", "prompt", "response", "environment", "reward"]
+            )
+        )
 
         self.base_log_dir = cfg["log_dir"]
         os.makedirs(self.base_log_dir, exist_ok=True)
@@ -512,6 +521,11 @@ class Logger(LoggerInterface):
             os.makedirs(wandb_log_dir, exist_ok=True)
             self.wandb_logger = WandbLogger(cfg["wandb"], log_dir=wandb_log_dir)
             self.loggers.append(self.wandb_logger)
+            self.wandb_tables = defaultdict(
+                lambda: wandb.Table(
+                    columns=["step", "prompt", "response", "environment", "reward"]
+                )
+            )
 
         if cfg["tensorboard_enabled"]:
             tensorboard_log_dir = os.path.join(self.base_log_dir, "tensorboard")
@@ -596,6 +610,49 @@ class Logger(LoggerInterface):
                 f.write(json.dumps({**sample, "idx": i}) + "\n")
 
         print(f"Logged data to {filepath}")
+
+    def log_table_contents(self, step, prompt, response, environment, reward, prefix):
+        if self.wandb_logger is None:
+            return
+
+        new_row = {
+            "step": step,
+            "prompt": prompt,
+            "response": response,
+            "environment": environment,
+            "reward": reward,
+        }
+
+        self.wandb_tables_df[prefix] = pd.concat(
+            [self.wandb_tables_df[prefix], pd.DataFrame([new_row])], ignore_index=True
+        )
+
+        return wandb.Table(dataframe=self.wandb_tables_df[prefix])
+
+    def log_batched_dict_as_table(
+        self, to_log: BatchedDataDict | Dict[str, Any], prefix: str, step: int
+    ) -> None:
+        if not isinstance(to_log, BatchedDataDict):
+            to_log = BatchedDataDict(to_log)
+
+        if self.wandb_logger is None:
+            return
+
+        # Write to JSONL file
+        for _, sample in enumerate(to_log.make_microbatch_iterator(1)):
+            for key, value in sample.items():
+                if isinstance(value, torch.Tensor):
+                    sample[key] = value.tolist()
+
+                content = sample["content"][0]
+                return self.log_table_contents(
+                    step,
+                    content[0],
+                    content[1],
+                    content[2],
+                    sample["rewards"][0],
+                    prefix,
+                )
 
     def __del__(self):
         """Clean up resources when the logger is destroyed."""

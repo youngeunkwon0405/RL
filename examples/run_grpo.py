@@ -15,7 +15,6 @@
 import argparse
 import os
 import pprint
-import random
 from copy import deepcopy
 from dataclasses import dataclass
 
@@ -33,6 +32,8 @@ from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 
+OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
+
 
 def parse_args():
     """Parse command line arguments."""
@@ -47,15 +48,9 @@ def parse_args():
     return args, overrides
 
 
-# ===============================================================================
-#                             Math Data Processor
-# ===============================================================================
-
-
 @dataclass
 class JsonlinesDataset:
     jsonl_path: str
-    shuffle: bool
     seed: int
     tokenizer: AutoTokenizer
     max_seq_length: int
@@ -72,10 +67,6 @@ class JsonlinesDataset:
             print(f"found {len(idx_to_ignore)} long samples to ignore on dataset init")
 
         self.data = [item for i, item in enumerate(self.data) if i not in idx_to_ignore]
-
-        if self.shuffle:
-            rng = random.Random(self.seed)
-            rng.shuffle(self.data)
 
     def _load_data(self):
         with jsonlines.open(self.jsonl_path, "r") as reader:
@@ -137,7 +128,6 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
 
     train_ds = JsonlinesDataset(
         data_config["train"]["jsonl_path"],
-        data_config["train"]["shuffle"],
         data_config["train"]["seed"],
         tokenizer,
         max_seq_length=data_config["max_input_seq_length"],
@@ -145,7 +135,6 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     )
     val_ds = JsonlinesDataset(
         data_config["val"]["jsonl_path"],
-        data_config["val"]["shuffle"],
         data_config["val"]["seed"],
         tokenizer,
         max_seq_length=data_config["max_input_seq_length"],

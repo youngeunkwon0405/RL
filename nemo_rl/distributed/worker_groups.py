@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import secrets
 import warnings
 from copy import deepcopy
 from dataclasses import dataclass
@@ -121,10 +122,13 @@ class RayWorkerBuilder:
 
         # Use the worker's configuration interface if available
         if hasattr(worker_class, "configure_worker"):
+            seed_offset = secrets.randbits(20)
+            print(f"Seed offset for this run is: {seed_offset}")
             # Get complete worker configuration from the worker class
             resources, env_vars, init_kwargs = worker_class.configure_worker(
                 num_gpus=num_gpus,
                 bundle_indices=bundle_indices,
+                seed_offset=seed_offset,
             )
 
             # Apply resource configuration

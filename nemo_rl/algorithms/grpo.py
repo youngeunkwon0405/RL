@@ -65,7 +65,6 @@ from nemo_rl.utils.timer import Timer
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
-    max_num_steps: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
@@ -76,6 +75,7 @@ class GRPOConfig(TypedDict):
 
 class GRPOSaveState(TypedDict):
     step: int
+    optim_step: int
     val_reward: float
     consumed_samples: int
 
@@ -83,6 +83,7 @@ class GRPOSaveState(TypedDict):
 def _default_grpo_save_state() -> GRPOSaveState:
     return {
         "step": 0,
+        "optim_step": 0,
         "val_reward": -99999999.0,
         "consumed_samples": 0,
     }
@@ -168,11 +169,27 @@ def setup(
     # ==========================
     #           Data
     # ==========================
+    shuffle_train = master_config["data"]["train"]["shuffle"]
+    shuffle_val = master_config["data"]["val"]["shuffle"]
+
+    train_data_generator = None
+    val_data_generator = None
+
+    if shuffle_train:
+        train_data_generator = torch.Generator()
+        train_data_generator.manual_seed(master_config["data"]["train"]["seed"])
+
+    if shuffle_val:
+        val_data_generator = torch.Generator()
+        val_data_generator.manual_seed(master_config["data"]["val"]["seed"])
+
     dataloader = StatefulDataLoader(
         dataset,
         batch_size=grpo_config["num_prompts_per_step"],
-        shuffle=False,
+        shuffle=shuffle_train,
+        generator=train_data_generator,
         collate_fn=rl_collate_fn,
+        drop_last=master_config["data"]["train"]["drop_last"],
     )
     if last_checkpoint_path is not None:
         dataloader_state_dict = torch.load(
@@ -189,8 +206,10 @@ def setup(
         val_dataloader = StatefulDataLoader(
             val_dataset,
             batch_size=grpo_config["val_batch_size"],
-            shuffle=False,
+            shuffle=shuffle_val,
             collate_fn=rl_collate_fn,
+            generator=val_data_generator,
+            drop_last=master_config["data"]["val"]["drop_last"],
         )
         print(f"  ✓ Validation dataloader loaded with {len(val_dataset)} samples")
 
@@ -337,10 +356,15 @@ def grpo_train(
 
     # common config/state itmes
     step = grpo_save_state["step"]
+    optim_step = grpo_save_state["optim_step"]
+
     consumed_samples = grpo_save_state["consumed_samples"]
     val_period = master_config["grpo"]["val_period"]
     val_at_start = master_config["grpo"]["val_at_start"]
     refit_buffer_size_gb = master_config["policy"]["refit_buffer_size_gb"]
+
+    num_epochs = master_config["grpo"]["num_epochs"]
+    max_num_steps = num_epochs * len(dataloader)
 
     # Run validation at the start if configured
     if val_at_start and step == 0:
@@ -357,6 +381,7 @@ def grpo_train(
             val_task_to_env,
             step=0,
             master_config=master_config,
+            logger=logger,
         )
         policy_generation.finish_generation()
         logger.log_metrics(val_metrics, step, prefix="validation")
@@ -364,10 +389,18 @@ def grpo_train(
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
-    for batch in dataloader:
-        print(
-            f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
-        )
+    # for batch in dataloader:
+
+    iter_dataloader = iter(dataloader)
+
+    while step < max_num_steps:
+        try:
+            batch = next(iter_dataloader)
+        except StopIteration:
+            iter_dataloader = iter(dataloader)
+            batch = next(iter_dataloader)
+
+        print(f"\n{'=' * 25} Step {step + 1}/{max_num_steps} {'=' * 25}")
         val_metrics, validation_timings = None, None
 
         with timer.time("total_step_time"):
@@ -417,13 +450,15 @@ def grpo_train(
                 rewards = repeated_batch["total_reward"]
 
                 print("▶ Computing advantages...")
-                baseline, std = calculate_baseline_and_std_per_prompt(
-                    input_ids,
-                    rewards,
-                    torch.ones_like(rewards),
-                    leave_one_out_baseline=master_config["grpo"][
-                        "use_leave_one_out_baseline"
-                    ],
+                baseline, std, more_rollout_metrics = (
+                    calculate_baseline_and_std_per_prompt(
+                        input_ids,
+                        rewards,
+                        torch.ones_like(rewards),
+                        leave_one_out_baseline=master_config["grpo"][
+                            "use_leave_one_out_baseline"
+                        ],
+                    )
                 )
                 advantages = (rewards - baseline).unsqueeze(-1)
 
@@ -433,6 +468,53 @@ def grpo_train(
                     advantages[zero_std_mask] = (
                         advantages[zero_std_mask] / std.unsqueeze(-1)[zero_std_mask]
                     )
+
+                percent_valid_advantages = (
+                    advantages.count_nonzero() / advantages.numel()
+                )
+                percent_zero_advantages = 1 - percent_valid_advantages
+
+                advantages_min, advantages_mean, advantages_max = (
+                    advantages.min(),
+                    advantages.mean(),
+                    advantages.max(),
+                )
+                baseline_min, baseline_mean, baseline_max = (
+                    baseline.min(),
+                    baseline.mean(),
+                    baseline.max(),
+                )
+                std_min, std_mean, std_max = (
+                    std.min(),
+                    std.mean(),
+                    std.max(),
+                )
+
+                reward_min, reward_mean, reward_max = (
+                    rewards.min(),
+                    rewards.mean(),
+                    rewards.max(),
+                )
+
+                rollout_metrics.update(
+                    {
+                        # "percent_valid_advantages": percent_valid_advantages,
+                        "percent_zero_advantages": percent_zero_advantages,
+                        "advantages_min": advantages_min,
+                        "advantages_mean": advantages_mean,
+                        "advantages_max": advantages_max,
+                        "baseline_min": baseline_min,
+                        "baseline_mean": baseline_mean,
+                        "baseline_max": baseline_max,
+                        "std_min": std_min,
+                        "std_mean": std_mean,
+                        "std_max": std_max,
+                        "reward_min": reward_min,
+                        "reward_mean": reward_mean,
+                        "reward_max": reward_max,
+                    }
+                )
+                rollout_metrics.update(more_rollout_metrics)
 
             with timer.time("data_processing"):
                 # Add loss mask and advantages to each message in LLMMessageLogType
@@ -496,11 +578,9 @@ def grpo_train(
 
             print("▶ Training policy...")
             with timer.time("policy_training"):
-                train_results = policy.train(train_data, loss_fn)
+                list_of_train_metrics = policy.train(train_data, loss_fn)
 
-            is_last_step = step + 1 == min(
-                master_config["grpo"]["max_num_steps"], len(dataloader)
-            )
+            is_last_step = step + 1 == min(max_num_steps, len(dataloader))
 
             # Run validation if it's a validation step
             if is_last_step or (val_period > 0 and (step + 1) % val_period == 0):
@@ -520,6 +600,7 @@ def grpo_train(
                     val_task_to_env,
                     step=step + 1,
                     master_config=master_config,
+                    logger=logger,
                 )
                 policy_generation.finish_generation()
                 logger.log_metrics(
@@ -538,6 +619,7 @@ def grpo_train(
                 grpo_save_state["step"] = step + 1
                 grpo_save_state["val_reward"] = val_metrics["accuracy"]
                 grpo_save_state["consumed_samples"] = consumed_samples
+                grpo_save_state["optim_step"] = optim_step + len(list_of_train_metrics)
                 with timer.time("checkpointing"):
                     print(f"Saving checkpoint for step {step + 1}...")
                     checkpoint_path = checkpointer.init_tmp_checkpoint(
@@ -567,24 +649,13 @@ def grpo_train(
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
+        table = logger.log_batched_dict_as_table(log_data, prefix="train", step=step)
 
         print("\n📊 Training Results:")
-        metrics = {
-            "loss": train_results["loss"].numpy(),
-            "reward": rewards.numpy(),
-            "grad_norm": train_results["grad_norm"].numpy(),
-        }
-        metrics.update(train_results["all_mb_metrics"])
-        for k, v in metrics.items():
-            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
-                metrics[k] = np.mean(v).item()
-            else:
-                metrics[k] = np.sum(v).item()
-        metrics.update(rollout_metrics)
 
+        rollout_metrics["table"] = table
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
-        print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
         print(
             f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
@@ -603,12 +674,23 @@ def grpo_train(
                 percent = (v / total_time * 100) if total_time > 0 else 0
                 print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
-        logger.log_metrics(metrics, step + 1, prefix="train")
+        for i, train_step_metric in enumerate(list_of_train_metrics):
+            train_step_metric["optim_step"] = optim_step + i + 1
+            train_step_metric["outer_loop_step"] = step + 1
+            logger.log_metrics(
+                train_step_metric,
+                train_step_metric["optim_step"],
+                prefix="train",
+            )
+
+        logger.log_metrics(rollout_metrics, step + 1, prefix="train_rollout")
         logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
         timer.reset()
         step += 1
-        if step >= master_config["grpo"]["max_num_steps"]:
+        optim_step += len(list_of_train_metrics)
+
+        if step >= max_num_steps:
             break
 
 
@@ -619,6 +701,7 @@ def validate(
     val_task_to_env: Dict[str, EnvironmentInterface],
     step: int,
     master_config: MasterConfig,
+    logger: Logger,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -662,6 +745,20 @@ def validate(
             )
             all_message_logs.extend(to_env)
 
+            if batch_idx == 0:
+                for interaction in val_batch["message_log"][0]:
+                    if interaction["role"] == "user":
+                        prompt = interaction["content"]
+                    elif interaction["role"] == "assistant":
+                        response = interaction["content"]
+                    else:
+                        environment = interaction["content"]
+
+                reward = val_batch["total_reward"][0].item()
+                table = logger.log_table_contents(
+                    step, prompt, response, environment, reward, "validation"
+                )
+
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
         avg_length = sum(total_lengths) / len(total_lengths)
@@ -669,6 +766,7 @@ def validate(
         val_metrics = {
             "accuracy": accuracy,
             "avg_length": avg_length,
+            "table": table,
         }
 
         # Print sample conversations only once at the end of validation
