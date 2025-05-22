@@ -194,6 +194,7 @@ class ClippedPGLossFn(LossFunction):
             ratios_clamped = ratios.clamp(
                 1.0 - self.ratio_clip_min, 1.0 + self.ratio_clip_max
             )
+
         else:
             ratios = curr_logprobs
             ratios_clamped = curr_logprobs
@@ -277,6 +278,24 @@ class ClippedPGLossFn(LossFunction):
                 global_normalization_factor=global_valid_toks,
             ).item()
 
+            if self.disable_ppo_ratio:
+                clipped_min = 0
+                clipped_max = 0
+            else:
+                advantages_neg = advantages < 0
+                advantages_pos = advantages > 0
+
+                clipped_min = (
+                    ((ratios < 1 - self.ratio_clip_min) * advantages_neg * mask)
+                    .sum()
+                    .item()
+                )
+                clipped_max = (
+                    ((ratios > 1 + self.ratio_clip_max) * advantages_pos * mask)
+                    .sum()
+                    .item()
+                )
+
         # If you provided a global_valid_{seqs/toks}, all metrics here are globally normalized
         # by either sequence or token count, depending on particular metric.
         # To get the true metric, you'll need to sum over the microbatch.
@@ -285,6 +304,8 @@ class ClippedPGLossFn(LossFunction):
             {
                 "loss": loss.item(),
                 "log_probs_mean": log_probs_mean.item(),
+                "tokens_min_clipped": clipped_min,
+                "tokens_max_clipped": clipped_max,
                 "probs_ratio": probs_ratio,
                 "probs_ratio_clamped": probs_ratio_clamped,
                 "kl_penalty": kl.item(),
