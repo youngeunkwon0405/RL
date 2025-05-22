@@ -132,6 +132,69 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
     mlp_up_proj_weight = linear_fc1[1]
     return mlp_gate_proj_weight, mlp_up_proj_weight
 
+def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
+    """
+    Split interleave-concatenated qkv to q, k, v
+
+    Example: export layer linear_qkv to HF {q|k|v}_proj
+    """
+    megatron_config = ctx.source.config
+
+    head_num = megatron_config.num_attention_heads
+    num_query_groups = megatron_config.num_query_groups
+    heads_per_group = head_num // num_query_groups
+    # hidden_size = megatron_config.hidden_size
+    head_size = megatron_config.kv_channels
+    qkv_total_dim = head_num + 2 * num_query_groups
+
+    linear_qkv = linear_qkv.reshape([qkv_total_dim, head_size, -1])
+    # when converting base model (linear_qkv), hidden size = megatron_config.hidden_size
+    # when converting lora (linear_qkv.adapter.linear_out), hidden size = lora_r
+    hidden_size = linear_qkv.size(-1)
+    q_slice = torch.cat(
+        [
+            torch.arange((heads_per_group + 2) * i, (heads_per_group + 2) * i + heads_per_group)
+            for i in range(num_query_groups)
+        ]
+    )
+    k_slice = torch.arange(heads_per_group, qkv_total_dim, (heads_per_group + 2))
+    v_slice = torch.arange(heads_per_group + 1, qkv_total_dim, (heads_per_group + 2))
+
+    q_proj = linear_qkv[q_slice].reshape(-1, hidden_size)
+    k_proj = linear_qkv[k_slice].reshape(-1, hidden_size)
+    v_proj = linear_qkv[v_slice].reshape(-1, hidden_size)
+
+    return q_proj, k_proj, v_proj
+
+def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
+    """
+    Split interleave-concatenated qkv bias to separate q, k, v bias
+
+    Example: export layer linear_qkv bias to HF {q|k|v}_proj bias
+    """
+    megatron_config = ctx.source.config
+
+    head_num = megatron_config.num_attention_heads
+    num_query_groups = megatron_config.num_query_groups
+    heads_per_group = head_num // num_query_groups
+    head_size = megatron_config.kv_channels
+    qkv_total_dim = head_num + 2 * num_query_groups
+
+    qkv_bias = qkv_bias.reshape([qkv_total_dim, head_size])
+    q_slice = torch.cat(
+        [
+            torch.arange((heads_per_group + 2) * i, (heads_per_group + 2) * i + heads_per_group)
+            for i in range(num_query_groups)
+        ]
+    )
+    k_slice = torch.arange(heads_per_group, qkv_total_dim, (heads_per_group + 2))
+    v_slice = torch.arange(heads_per_group + 1, qkv_total_dim, (heads_per_group + 2))
+
+    q_bias = qkv_bias[q_slice].reshape(-1)
+    k_bias = qkv_bias[k_slice].reshape(-1)
+    v_bias = qkv_bias[v_slice].reshape(-1)
+
+    return q_bias, k_bias, v_bias
 
 def update_transforms_for_nemorl(export_transforms):
     # In place update
@@ -139,6 +202,10 @@ def update_transforms_for_nemorl(export_transforms):
         if transform.transform.__name__ == "split_fc1":
             # Need to modify this transform to take into account the TP size
             transform.transform = split_fc1_tp
+        elif transform.transform.__name__ == "split_qkv":
+            transform.transform = split_qkv_gpu
+        elif transform.transform.__name__ == "split_qkv_bias":
+            transform.transform = split_qkv_bias_gpu
     return export_transforms
 
 
