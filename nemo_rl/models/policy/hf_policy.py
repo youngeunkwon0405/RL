@@ -13,11 +13,11 @@
 # limitations under the License.
 import os
 from collections import defaultdict
-from multiprocessing import Queue
 from typing import Any, Optional, Union, cast
 
 import numpy as np
 import ray
+from ray.util.queue import Queue as RayQueue
 from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
@@ -81,8 +81,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             worker_builder_cls = (
                 "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker"
             )
-            tp_size = config["megatron_cfg"]["tensor_parallel_size"]
-            pp_size = config["megatron_cfg"]["pipeline_parallel_size"]
+            tp_size = config["megatron_cfg"]["tensor_model_parallel_size"]
+            pp_size = config["megatron_cfg"]["pipeline_model_parallel_size"]
         else:
             raise ValueError(f"Invalid training backend: {config['training_backend']}")
 
@@ -96,7 +96,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         )
 
         # A queue for worker communication before torch dist init
-        pre_init_queue: Queue = Queue()
+        pre_init_queue: RayQueue = RayQueue()
         worker_builder = RayWorkerBuilder(
             worker_builder_cls,
             config,
@@ -106,7 +106,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             optimizer_path=optimizer_path,
             init_reference_model=init_reference_model,
             worker_sharding_annotations=self.sharding_annotations,
-            pre_init_communnication_queue=pre_init_queue,
+            pre_init_communication_queue=pre_init_queue,
         )
 
         self.worker_group = RayWorkerGroup(
@@ -377,7 +377,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         # Collect IPC handles from all workers
         worker_handles: list[dict[str, Any]] = ray.get(
             [
-                worker.get_weights_ipc_handles.remote(keys)
+                worker.get_weights_ipc_handles.remote(keys=keys)
                 for worker in self.worker_group.workers
             ]
         )

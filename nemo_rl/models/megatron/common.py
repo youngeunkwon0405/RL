@@ -28,7 +28,7 @@ from nemo_rl.algorithms.loss_functions import LossFunction
 
 
 def forward_step_arbitrary_loss(
-    state: GlobalState, data_iterator: Iterable, model: GPTModel, loss_fn: LossFunction
+    state: GlobalState, global_valid_seqs: torch.Tensor, global_valid_toks: torch.Tensor, data_iterator: Iterable, model: GPTModel, loss_fn: LossFunction
 ):
     """Forward training step.
     Args:
@@ -56,6 +56,8 @@ def forward_step_arbitrary_loss(
     return output_tensor, partial(
         loss_fn,
         data=loss_data,
+        global_valid_seqs=global_valid_seqs,
+        global_valid_toks=global_valid_toks,
         vocab_parallel_rank=get_tensor_model_parallel_rank(),
         vocab_parallel_group=get_tensor_model_parallel_group(),
     )  # lambda x: (torch.sum(x), {'a': x}) #
