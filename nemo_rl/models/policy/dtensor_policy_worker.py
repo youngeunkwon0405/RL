@@ -192,6 +192,7 @@ class DTensorPolicyWorker:
             activation_checkpointing=self.cfg["dtensor_cfg"][
                 "activation_checkpointing"
             ],
+            custom_parallel_plan=self.cfg["dtensor_cfg"]["custom_parallel_plan"],
         )
 
         if self.cpu_offload:
@@ -659,6 +660,9 @@ class DTensorPolicyWorker:
                 noise = torch.randn_like(p.data) * noise_std
                 p.data.add_(noise)  # Add noise in-place
         torch.cuda.synchronize()
+
+    def return_state_dict(self):
+        return self.model.state_dict()
 
     def report_device_id(self) -> str:
         """Report the UUID of the current CUDA device using NVML.
