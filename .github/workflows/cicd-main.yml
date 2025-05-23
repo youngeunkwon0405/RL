@@ -112,7 +112,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Check lint
         run: |
-          pip install pre-commit
+          pip install pre-commit==4.2.0
           pre-commit install
           pre-commit run --all-files --show-diff-on-failure --color=always
   
