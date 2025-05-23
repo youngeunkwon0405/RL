@@ -145,4 +145,8 @@ logger:
 
 cluster:
   gpus_per_node: 8
-  num_nodes: 1
+  num_nodes: 2
+  policy_and_generation:
+    bundle_ct_per_node_list: [4,4]
+  llm_judge:
+    bundle_ct_per_node_list: [4,4]

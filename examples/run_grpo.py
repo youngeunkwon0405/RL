@@ -27,7 +27,7 @@ from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import DataConfig
 from nemo_rl.data.interfaces import DatumSpec
-from nemo_rl.distributed.virtual_cluster import init_ray
+from nemo_rl.distributed.virtual_cluster import init_ray, RayVirtualCluster
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.environments.llm_judge_async_environment import LLMJudgeAsyncEnvironment
 from nemo_rl.models.generation.interfaces import configure_generation_config
@@ -135,7 +135,7 @@ class JsonlinesDataset:
         return output
 
 
-def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
+def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs, cluster_config):
     print("\n▶ Setting up data...")
 
     train_ds = JsonlinesDataset(
@@ -166,12 +166,22 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     task_to_env["math"] = math_env
 
     if "llm_judge_async" in env_configs:
+        judge_cfg = env_configs["llm_judge_async"]
+        assert "llm_judge" in cluster_config, "llm_judge_async environment requires cluster.llm_judge"
+        bundle_ct_per_node_list = cluster_config["llm_judge"]["bundle_ct_per_node_list"]
+        num_gpus_per_node = cluster_config["gpus_per_node"] # this does not seem to be used at all in RayVirtualCluster?
+        judge_cluster = RayVirtualCluster(
+            name="llm_judge_cluster",
+            bundle_ct_per_node_list=bundle_ct_per_node_list,
+            use_gpus=True,
+            num_gpus_per_node=num_gpus_per_node,
+        )
         llm_judge_async_env = LLMJudgeAsyncEnvironment.options(
             runtime_env={
                 "py_executable": LLMJudgeAsyncEnvironment.DEFAULT_PY_EXECUTABLE,
                 "env_vars": dict(os.environ),
             }
-        ).remote(env_configs["llm_judge_async"])
+        ).remote(judge_cluster, judge_cfg)
         task_to_env["llm_judge"] = llm_judge_async_env
 
     return train_ds, val_ds, task_to_env, task_to_env
@@ -223,7 +233,7 @@ def main():
         val_dataset,
         task_to_env,
         val_task_to_env,
-    ) = setup_data(tokenizer, config["data"], config["env"])
+    ) = setup_data(tokenizer, config["data"], config["env"], config["cluster"])
 
     (
         policy,

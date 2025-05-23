@@ -199,12 +199,17 @@ def setup(
     # ==========================
     print("\n▶ Setting up compute cluster...")
     colocated_inference = generation_config["backend"] != "hf"
+    if hasattr(cluster_config, "policy_and_generation"):
+        bundle_ct_per_node_list = cluster_config["policy_and_generation"]["bundle_ct_per_node_list"]
+        num_gpus_per_node =cluster_config["gpus_per_node"]
+    else:
+        bundle_ct_per_node_list = [cluster_config["gpus_per_node"]] * cluster_config["num_nodes"]
+        num_gpus_per_node = cluster_config["gpus_per_node"]
     cluster = RayVirtualCluster(
         name="grpo_policy_cluster",
-        bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
-        * cluster_config["num_nodes"],
+        bundle_ct_per_node_list=bundle_ct_per_node_list,
         use_gpus=True,
-        num_gpus_per_node=cluster_config["gpus_per_node"],
+        num_gpus_per_node=num_gpus_per_node,
         max_colocated_worker_groups=2 if colocated_inference else 1,
     )
     print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")

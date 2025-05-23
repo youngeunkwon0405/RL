@@ -15,11 +15,11 @@ import logging
 import os
 import uuid
 import re # Import re module for regex
-from typing import Dict, List, Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict, Union
 
 import ray
 import torch
-
+from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
 from nemo_rl.environments.utils import extract_answer_from_box
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES, RayVirtualCluster
@@ -195,33 +195,28 @@ Answer yes or no, then give your reasoning.
         return request_id, score
 
 
+    async def judge_batch(self, batch: List[Tuple[str, str, str, LLMJudgeEnvironmentMetadata, dict]]):
+        """Process a list of (request_id, question, response, metadata, sampling_params).
+
+        Returns: List[Tuple[str, float]] in the same order.
+        """
+        results = []
+        for req_id, q, r, meta, params in batch:
+            res = await self.judge(req_id, q, r, meta, params)
+            results.append(res)
+        return results
+
 @ray.remote(max_concurrency=16) # Allow concurrent processing of step calls
 class LLMJudgeAsyncEnvironment(EnvironmentInterface):
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM # The environment actor itself uses system python
 
-    def __init__(self, cfg: LLMJudgeAsyncConfig):
+    def __init__(self,cluster: RayVirtualCluster, cfg: LLMJudgeAsyncConfig, name_prefix: str = "vllm_judge", workers_per_node: Optional[Union[int, List[int]]] = None,):
         self.cfg = cfg
-        self.num_workers = cfg["num_workers"]
+        # self.num_workers = cfg["num_workers"]
         
         tensor_parallel_size = cfg.get("tensor_parallel_size", 1)
+        self.tensor_parallel_size = tensor_parallel_size
         
-        # Only create a RayVirtualCluster (and thereby reserve GPU bundles)
-        # if we actually need single-GPU bundles (tensor_parallel_size == 1).
-        if tensor_parallel_size == 1:
-            bundle_ct_per_node_list = [tensor_parallel_size] * self.num_workers  # == [1] * num_workers
-
-            self.virtual_cluster = RayVirtualCluster(
-                bundle_ct_per_node_list=bundle_ct_per_node_list,
-                use_gpus=True,
-                name="llm_judge_async_vc",
-            )
-            self.virtual_cluster.print_cluster_grid()
-            placement_groups = self.virtual_cluster.get_placement_groups()
-        else:
-            # No placement group / virtual cluster -> rely on Ray scheduler.
-            self.virtual_cluster = None
-            placement_groups = []
-
         # Pass down critical environment variables (HF cache, etc.) to workers.
         env_vars_to_pass = {}
         for key in [
@@ -237,55 +232,76 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         # Ensure xet is disabled to avoid CAS service issues if not explicitly set.
         env_vars_to_pass.setdefault("HUGGINGFACE_HUB_DISABLE_XET", "1")
 
-        worker_options = {
-            "runtime_env": {
-                "py_executable": AsyncVLLMWorker.DEFAULT_PY_EXECUTABLE,
-                "env_vars": env_vars_to_pass,
-            },
-            "num_gpus": tensor_parallel_size,
-        }
-        
-        self.workers = []
-        for i in range(self.num_workers):
-            # If tensor_parallel_size == 1, we can safely pin the actor to a
-            # single-GPU bundle inside the placement group. Otherwise, each
-            # actor needs multiple GPUs and cannot fit into the 1-GPU bundles
-            # created by RayVirtualCluster. In that case we rely on Ray's
-            # default scheduler (no placement group) to allocate all requested
-            # GPUs on the same node.
 
-            if tensor_parallel_size == 1:
-                pg_index = i % len(placement_groups)
-                pg = placement_groups[pg_index]
-                scheduling_kwargs = dict(
-                    scheduling_strategy=ray.util.scheduling_strategies.PlacementGroupSchedulingStrategy(
-                        placement_group=pg
-                    )
-                )
-            else:
-                # No placement group – let Ray handle multi-GPU allocation.
-                scheduling_kwargs = {}
-            worker = AsyncVLLMWorker.options(
-                **worker_options,
-                **scheduling_kwargs,
-            ).remote(
-                model_name=cfg["model_name"],
+        worker_builder = RayWorkerBuilder(AsyncVLLMWorker, model_name=cfg["model_name"],
                 tensor_parallel_size=tensor_parallel_size,
                 gpu_memory_utilization=cfg.get("gpu_memory_utilization", 0.85),
-                max_model_len=cfg.get("max_model_len"),
-                # Pass any other engine args from cfg if needed
-            )
-            self.workers.append(worker)
-        
-        logging.info(f"Created {len(self.workers)} AsyncVLLMWorker actors.")
-        self._request_counter = 0 # For generating unique request IDs per step call
-        self._actor_id_prefix = str(uuid.uuid4())[:8] # Unique prefix for this actor instance
+                max_model_len=cfg.get("max_model_len"))
 
+        if self.tensor_parallel_size > 1:
+            # For tensor parallelism, create node-aware worker groups
+            node_bundle_indices = self._get_tied_worker_bundle_indices(cluster)
+
+            self.worker_group = RayWorkerGroup(
+                cluster,
+                worker_builder,
+                name_prefix=name_prefix,
+                bundle_indices_list=node_bundle_indices,
+            )
+        else:
+            # Use standard worker group creation for non-TP case
+            self.worker_group = RayWorkerGroup(
+                cluster,
+                worker_builder,
+                name_prefix=name_prefix,
+                workers_per_node=workers_per_node,
+            )
+
+        # Number of data parallel groups is the number of tied worker groups
+        self.dp_size = self.worker_group.group_count
+
+        logging.info(f"Created {self.dp_size} tied worker groups for LLM judge")
+
+        self._request_counter = 0
+        self._actor_id_prefix = str(uuid.uuid4())[:8]
+        
+    def _get_tied_worker_bundle_indices(self, cluster):
+        """Calculate bundle indices for tensor parallel workers."""
+        # Get the placement groups (nodes) from the cluster
+        placement_groups = cluster.get_placement_groups()
+
+        tied_worker_groups = []
+
+        # For each node (placement group), create tied worker groups of size tensor_parallel_size
+        for node_idx, pg in enumerate(placement_groups):
+            # How many bundles (GPUs) are on this node
+            bundles_on_node = pg.bundle_count
+            tied_worker_groups_on_node = bundles_on_node // self.tensor_parallel_size
+
+            if tied_worker_groups_on_node > 0:
+                for group_idx in range(tied_worker_groups_on_node):
+                    # Local bundle indices for this tied worker group (consecutive GPUs on this node)
+                    start_idx = group_idx * self.tensor_parallel_size
+                    end_idx = start_idx + self.tensor_parallel_size
+                    local_bundle_indices = list(range(start_idx, end_idx))
+                    tied_worker_groups.append((node_idx, local_bundle_indices))
+
+        if not tied_worker_groups:
+            raise ValueError(
+                f"Cannot create any tensor parallel tied worker groups with size {self.tensor_parallel_size}. "
+                f"Make sure each node has at least {self.tensor_parallel_size} GPUs."
+            )
+
+        return tied_worker_groups
+    
     def shutdown(self):
-        for worker in self.workers:
-            ray.kill(worker)
-        if self.virtual_cluster is not None:
-            self.virtual_cluster.shutdown()
+        """Shut down all vLLM workers and clean up resources."""
+        try:
+            # Use the worker group's shutdown method with the worker's cleanup method
+            return self.worker_group.shutdown(cleanup_method="shutdown")
+        except Exception as e:
+            print(f"Error during policy shutdown: {e}")
+            return False
 
     def step(
         self,
@@ -302,54 +318,67 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
                   each observation is a dictionary representing the judge's feedback
                   (e.g., `{"role": "environment", "content": "Environment: Score = X.XX"}`).
         """
-        assistant_responses = []
-        questions = []
-        for conversation in message_log_batch:
-            assert len(conversation) == 2, "LLMJudgeAsyncEnvironment only supports single turn conversations for now"
-            # conversation[0]["content_in_oai_format"] has the format of:
-            # [
-            #     {"role": "system", "content": "You are a helpful assistant."} (optional),
-            #     {"role": "user", "content": "What is the capital of the moon?"},
-            # ]
-            assert isinstance(conversation[0]["content_in_oai_format"], list)
-            question = None
-            for l in conversation[0]["content_in_oai_format"]:
-                if l["role"] == "user":
-                    question = l["content"]
-            assert question is not None, "Question not found in conversation"
-            questions.append(question)
-            assistant_responses.append(conversation[-1]["content"])
+        # ----------------------------------------------------------
+        # Pre-process batch into lists
+        # ----------------------------------------------------------
 
-        futures = []
-        
-        # Prepare default sampling parameters from config
+        samples = []  # list of dicts per sample
+        for idx, conversation in enumerate(message_log_batch):
+            assert len(conversation) == 2, (
+                "LLMJudgeAsyncEnvironment only supports single-turn conversations"
+            )
+            user_messages = conversation[0]["content_in_oai_format"]
+            assert isinstance(user_messages, list)
+            question = next(
+                m["content"] for m in user_messages if m["role"] == "user"
+            )
+            response = conversation[-1]["content"]
+            samples.append((idx, question, response, metadata[idx]))
+
+        # Default sampling params template
         default_sampling_params = {
             "temperature": self.cfg.get("temperature", 0.0),
             "max_tokens": self.cfg.get("max_tokens", 512),
             "stop": self.cfg.get("stop", None),
         }
 
-        # For each batch, loop through each conversation and send it to a judge worker asynchronously
-        for i, (question_str, response_str, single_metadata) in enumerate(zip(questions, assistant_responses, metadata)):
-            # Generate a unique request ID for vLLM for this specific call to judge
-            request_id = f"env_{self._actor_id_prefix}_step_{self._request_counter}_{i}"
-            
-            worker_idx = i % self.num_workers # Simple round-robin
-            
-            current_sampling_params = default_sampling_params.copy()
+        # ----------------------------------------------------------
+        # Shard samples across data-parallel vLLM engines
+        # ----------------------------------------------------------
+        dp = self.dp_size if getattr(self, "dp_size", 0) else 1
+        shards: List[list] = [[] for _ in range(dp)]
 
-            future = self.workers[worker_idx].judge.remote(
-                request_id, question_str, response_str, single_metadata, current_sampling_params,
+        for sample in samples:
+            shard_id = sample[0] % dp
+            idx, q, r, meta = sample
+            req_id = f"env_{self._actor_id_prefix}_step_{self._request_counter}_{idx}"
+            shards[shard_id].append(
+                (req_id, q, r, meta, default_sampling_params.copy())
             )
-            futures.append(future)
-        
-        self._request_counter += 1 # Increment for the next step call
 
-        results_tuples: List[Tuple[str, float]] = ray.get(futures)
-        
-        # Assuming ray.get(futures) preserves the order, which it does.
-        scores = [score for _, score in results_tuples]
+        futures = self.worker_group.run_all_workers_multiple_data(
+            "judge_batch",
+            shards,
+            only_on="tied_leader",
+        )
 
+        shard_results: List[List[Tuple[str, float]]] = self.worker_group.get_all_worker_results(
+            futures
+        )
+
+        # Flatten and restore original ordering
+        result_dict = {}
+        for shard in shard_results:
+            for req_id, score in shard:
+                # req_id includes original idx at the end after last '_'
+                idx = int(req_id.split("_")[-1])
+                result_dict[idx] = score
+
+        scores = [result_dict[i] for i in range(len(samples))]
+        
+        # Increment request counter for next step
+        self._request_counter += 1
+        
         observations = [
             {"role": "environment", "content": f"Environment: Score = {score:.2f}"}
             for score in scores
@@ -358,7 +387,7 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         rewards_tensor = torch.tensor(scores, dtype=torch.float32).cpu()
         terminateds_tensor = torch.ones_like(rewards_tensor).cpu()
         
-        next_stop_strings = [None] * len(message_log_batch) 
+        next_stop_strings = [None] * len(message_log_batch)
 
         return EnvironmentReturn(
             observations=observations,
