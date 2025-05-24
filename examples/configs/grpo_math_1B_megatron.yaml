@@ -41,6 +41,8 @@ policy:
   precision: "bfloat16"
   tensor_model_parallel_size: 1
   pipeline_model_parallel_size: 1
+  expert_tensor_parallel_size: 1
+  sequence_parallel: true
   pipeline_dtype: "float32"
   context_parallel_size: 1
   refit_buffer_size_gb: 4 # used for refitting inference engine, the unit is GB

@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 vllm = [
-    "vllm==0.8.4",
+    "vllm==0.8.5",
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)

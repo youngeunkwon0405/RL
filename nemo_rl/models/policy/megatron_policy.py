@@ -65,7 +65,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         )
 
         pre_init_queue = (
-            Queue()
+            Queue(1)
         )  # just for communication before torch distributed is set up
         worker_builder = RayWorkerBuilder(
             "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker",

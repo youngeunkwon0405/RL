@@ -154,7 +154,8 @@ def setup_megatron_model(
         tensor_model_parallel_size=cfg.model_config.tensor_model_parallel_size,
     )
     if not cfg.model_config.vocab_size:
-        cfg.model_config.vocab_size = tokenizer.vocab_size
+        # cfg.model_config.vocab_size = tokenizer.vocab_size
+        cfg.model_config.vocab_size = cfg.tokenizer_config.padded_vocab_size
 
     torch.distributed.barrier()
 
@@ -177,13 +178,6 @@ def setup_megatron_model(
         optimizer = None
         scheduler = None
 
-    _update_model_config_funcs(
-        model,
-        cfg.model_config,
-        cfg.ddp_config,
-        optimizer,
-        align_grad_reduce=cfg.dist_config.align_grad_reduce,
-    )
     print("Model, optimizer, and learning rate scheduler built")
     torch.distributed.barrier()
 
@@ -251,7 +245,9 @@ class MegatronPolicyWorker:
             os.path.join(output_path, "iter_0000000")
         )
 
-        if get_rank_safe() == 0:
+        # if get_rank_safe() == 0:
+        if pre_init_communication_queue.empty():
+            pre_init_communication_queue.put(True)
             if pt_checkpoint_exists:
                 print(f"Checkpoint already exists at {output_path}. Skipping import.")
             else:
@@ -271,16 +267,24 @@ class MegatronPolicyWorker:
                         hf_model_name,
                         output_path=f"/opt/checkpoints/tron/{hf_model_name}",
                     )
+                elif "deepseek" in hf_model_name.lower():
+                    from nemo.tron.converter.deepseek import HFDeepSeekImporter
+
+                    print(f"Importing model {hf_model_name} to {output_path}...")
+                    importer = HFDeepSeekImporter(
+                        hf_model_name,
+                        output_path=f"/opt/checkpoints/tron/{hf_model_name}",
+                    )
                 else:
                     raise ValueError(f"Unknown model: {hf_model_name}")
                 importer.apply()
                 import megatron.core.rerun_state_machine
 
                 megatron.core.rerun_state_machine.destroy_rerun_state_machine()
-            pre_init_communication_queue.put(True)
-        else:
             pre_init_communication_queue.get()
+        else:
             pre_init_communication_queue.put(True)
+            pre_init_communication_queue.get()
 
         pretrained_ckpt = f"/opt/checkpoints/tron/{hf_model_name}"
         pretrained_run_config = os.path.join(
@@ -302,6 +306,8 @@ class MegatronPolicyWorker:
         model_cfg.pipeline_model_parallel_size = self.cfg[
             "pipeline_model_parallel_size"
         ]
+        model_cfg.expert_tensor_parallel_size = self.cfg["expert_tensor_parallel_size"]
+        model_cfg.sequence_parallel = self.cfg["sequence_parallel"]
         model_cfg.context_parallel_size = self.cfg[
             "context_parallel_size"
         ]  # not supported right now
@@ -310,6 +316,8 @@ class MegatronPolicyWorker:
         model_cfg.params_dtype = self.dtype  # amp
         model_cfg.pipeline_dtype = self.dtype  # dtype_map[self.cfg["pipeline_dtype"]]
         model_cfg.parallel_output = True
+        from megatron.core.transformer.enums import AttnBackend
+        # model_cfg.attention_backend = AttnBackend.unfused
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
@@ -410,6 +418,14 @@ class MegatronPolicyWorker:
                 item = item.detach().to(device="cuda", non_blocking=True, copy=True)
             self.model.state_dict()[name] = item
 
+        _update_model_config_funcs(
+            [self.model],
+            self.megatron_cfg.model_config,
+            self.megatron_cfg.ddp_config,
+            self.optimizer,
+            align_grad_reduce=self.megatron_cfg.dist_config.align_grad_reduce,
+        )
+
         from nemo.tron.tokenizers.tokenizer import build_tokenizer
 
         tokenizer_config = TokenizerConfig(
@@ -501,7 +517,7 @@ class MegatronPolicyWorker:
                         decoder_seq_length=self.cfg[
                             "max_total_sequence_length"
                         ],  # model_config.seq_length,
-                        forward_only=False,
+                        forward_only=eval_mode,
                     )
 
                 # Empty unused memory.
@@ -656,7 +672,7 @@ class MegatronPolicyWorker:
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
 
-                return torch.tensor(0.0), {"logprobs": token_logprobs}
+                return torch.tensor(0.0, device=token_logprobs.device), {"logprobs": token_logprobs}
 
             return output_tensor, collection_fn
 
@@ -910,6 +926,7 @@ class MegatronPolicyWorker:
 
             tp_dim = get_tp_dim(self.model, name, named_modules_dict)
             if tp_dim is not None:
+                # TODO(yifu): take care of expert_tensor_parallel_size which may be different from tensor_model_parallel_size
                 tp = tp_world_size
             else:
                 tp = 1

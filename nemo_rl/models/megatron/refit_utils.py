@@ -21,15 +21,28 @@ from megatron.core.tensor_parallel.layers import (
     ColumnParallelLinear,
     RowParallelLinear,
 )
+from megatron.core.extensions.transformer_engine import (
+    TEColumnParallelLinear,
+    TERowParallelLinear,
+    TEColumnParallelGroupedLinear,
+    TERowParallelGroupedLinear,
+)
 from nemo.collections.llm.gpt.model.base import GPTConfig
 
 import nemo_rl.models.megatron.converters as model_converters
 
 
 def get_tp_dim(model, param_name, named_modules_dict):
+    # if param_name == "decoder.layers.3.mlp.shared_experts.linear_fc1.weight":
+    #     if torch.distributed.get_rank() == 0:
+    #         import pdb
+
+    #         pdb.set_trace()
+    #     torch.distributed.barrier()
     # pass in named_modules_dict so we can get it ahead of time instead
     # of once for each param
-    if not param_name.endswith(".weight") and not param_name.endswith(".bias"):
+    pattern = re.compile(r"\.(?:weight|bias)\d*$")
+    if not pattern.search(param_name):
         return None
 
     prefix = ""
@@ -42,19 +55,34 @@ def get_tp_dim(model, param_name, named_modules_dict):
     if module is None:
         print(f"Module {key} not found in named_modules_dict")
         return None
-    if hasattr(module, "parallel_mode"):
-        # TE layers have parallel_mode we can check directly
+    if hasattr(module, "parallel_mode") and module.parallel_mode is not None:
+        # TE layers sometimes have parallel_mode we can check directly
         if module.parallel_mode == "column":
             return 0
         elif module.parallel_mode == "row":
             return 1
         else:
             return None
-    elif isinstance(module, VocabParallelEmbedding) or isinstance(
-        module, ColumnParallelLinear
+    elif (
+        isinstance(module, VocabParallelEmbedding)
+        or isinstance(module, ColumnParallelLinear)
+        # for MoE, parallel_mode isn't set for these
+        or isinstance(
+            module,
+            TEColumnParallelGroupedLinear,
+        )
+        or isinstance(module, TEColumnParallelLinear)
     ):
         return 0
-    elif isinstance(module, RowParallelLinear):
+    elif (
+        isinstance(module, RowParallelLinear)
+        # for MoE, parallel_mode isn't set for these
+        or isinstance(
+            module,
+            TERowParallelGroupedLinear,
+        )
+        or isinstance(module, TERowParallelLinear)
+    ):
         return 1
     # TODO(yifu): moe layers
     else:

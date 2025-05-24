@@ -28,6 +28,7 @@ from transformers.integrations.accelerate import init_empty_weights
 
 import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 import nemo_rl.models.megatron.converters.llama as llama_converter
+import nemo_rl.models.megatron.converters.deepseek as deepseek_converter
 from nemo_rl.models.megatron.refit_utils import get_global_param_key_to_local_key_map
 
 _GROUP_TO_RANKS_CACHE = {}
@@ -170,6 +171,7 @@ def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
 def update_transforms_for_nemorl(export_transforms):
     # In place update
     for transform in export_transforms:
+        # if transform.transform.__name__ == "split_fc1" and transform.source_key not in ("decoder.layers.*.mlp.experts.linear_fc1.weight", ):
         if transform.transform.__name__ == "split_fc1":
             # Need to modify this transform to take into account the TP size
             transform.transform = split_fc1_tp
@@ -186,22 +188,11 @@ class MegatronToHFConverter:
     def __init__(self, hf_model_name, megatron_model):
         # We only care about the state_dict keys and the config, so we
         # don't need to load the model weights
-        config = AutoConfig.from_pretrained(hf_model_name)
+        config = AutoConfig.from_pretrained(hf_model_name, trust_remote_code=True)
         with init_empty_weights():
-            self.target_model = AutoModelForCausalLM.from_config(config)
-        # TODO(yifu): inheritence for this?
-        if "qwen" in hf_model_name.lower():
-            self.export_mapping = qwen2_converter.get_export_mapping()
-            self.export_transforms = qwen2_converter.get_export_transforms()
-        elif "llama" in hf_model_name.lower():
-            self.export_mapping = llama_converter.get_export_mapping()
-            self.export_transforms = llama_converter.get_export_transforms(config)
-        else:
-            raise ValueError(
-                f"No converter mapping and transforms found for {hf_model_name}"
+            self.target_model = AutoModelForCausalLM.from_config(
+                config, trust_remote_code=True
             )
-
-        self.export_transforms = update_transforms_for_nemorl(self.export_transforms)
 
         # Get all local keys across PP ranks
         local_keys = list(megatron_model.state_dict().keys())
@@ -219,13 +210,47 @@ class MegatronToHFConverter:
         )
         global_keys = list(global_key_map.keys())
 
+        global_keys_map = {k: None for k in global_keys}
+
+        # TODO(yifu): inheritence for this?
+        if "qwen" in hf_model_name.lower():
+            self.export_mapping = qwen2_converter.get_export_mapping()
+            self.export_transforms = qwen2_converter.get_export_transforms()
+            self.get_source_fn = lambda source_state_dict, _: _ModelState(
+                source_state_dict
+            )
+        elif "llama" in hf_model_name.lower():
+            self.export_mapping = llama_converter.get_export_mapping()
+            self.export_transforms = llama_converter.get_export_transforms(config)
+            self.get_source_fn = lambda source_state_dict, _: _ModelState(
+                source_state_dict
+            )
+        elif "deepseek" in hf_model_name.lower():
+            self.export_mapping = deepseek_converter.get_export_mapping(
+                source=global_keys_map,
+                source_config=megatron_model.config.__dict__,
+            )
+            self.export_transforms = deepseek_converter.get_export_transforms()
+            self.get_source_fn = deepseek_converter.get_source_fn
+        else:
+            raise ValueError(
+                f"No converter mapping and transforms found for {hf_model_name}"
+            )
+
+        self.export_transforms = update_transforms_for_nemorl(self.export_transforms)
+
+        updated_global_keys_map = self.get_source_fn(
+            global_keys_map, megatron_model.config.__dict__
+        ).state_dict()
+
         # Set the value of the state_dict to the megatron key name so that
         # StateDictTransform will set the value of the target state dict to
         # the megatron key name
-        dummy_source_state_dict = {k: k for k in global_keys}
+        dummy_source = _ModelState({k: k for k in updated_global_keys_map.keys()})
+
         ctx = TransformCTX(
-            source=_ModelState(dummy_source_state_dict),
-            source_state=dummy_source_state_dict,
+            source=dummy_source,
+            source_state=dummy_source.state_dict(),
             target=self.target_model,
             target_state=self._get_empty_state_dict(),
         )
@@ -267,29 +292,161 @@ class MegatronToHFConverter:
         state_dict = {k: None for k in target_keys}
         return state_dict
 
-    def convert(self, state_dict, megatron_config):
-        source = _ModelState(state_dict)
-        source.config = megatron_config
-        ctx = TransformCTX(
-            source=source,
-            source_state=state_dict,
-            target=self.target_model,
-            target_state=self._get_empty_state_dict(list(state_dict.keys())),
-        )
+    def _group(
+        self,
+        state_dict,
+        key,
+        item,
+        main_state_dict_keys,
+        main_items,
+        exception_state_dict_keys_list,
+        exception_items,
+    ):
+        source_matches = _match_keys(list(state_dict.keys()), key)
+        if source_matches.size == 1 and source_matches == np.array(None):
+            # no match, don't include these keys
+            return
+        elif source_matches.ndim == 1:
+            # normal case
+            main_state_dict_keys.extend(source_matches)
+            main_items.append(item)
+        elif source_matches.ndim == 2:
+            for source_match in source_matches:
+                if None in source_match:
+                    # partial wildcard match case (e.g. an MoE layer with missing experts in this batch)
+                    non_none_sources = [s for s in source_match if s is not None]
+                    exception_state_dict_keys_list.append(non_none_sources)
+                    exception_items.append(item)
+                else:
+                    # normal case
+                    main_state_dict_keys.extend(source_match)
+                    main_items.append(item)
+        else:
+            raise NotImplementedError(
+                f"source_matches.ndim = {source_matches.ndim}. Expressions with more than 2 wildcard expressions are not supported."
+            )
+
+    def _get_groups(self, state_dict):
+        """This function is used to group mappings and transforms together.
+
+        Goes through the mappings and transforms once to collect mapping and transform groups
+        [(mapping, state_dict_keys)], [(transforms, state_dict_keys)] that can be converted
+        together.
+
+        This is necessary because:
+        1. If the mapping or transform expression has 2 wildcard expressions,
+           _match_keys assumes the matches for each wildcard are the same size. For example,
+           if the mapping is "layers.*.mlp.experts.*.linear_fc1.weight", where the first wildcard
+           matches the layer number and the second wildcard matches the expert number, it assumes
+           the number of experts is the same for each layer. This will fail in the case we're doing
+           batched streaming refit and the current state dict is missing experts from some layers.
+           To handle this, we separate out the partial keys (e.g. the ones corresponding to less experts)
+           in a separate group and run them through the mapping and transforms separately.
+
+           NOTE: this function currently only handles expressions with up to 2 wildcard expressions
+           and will fail if the mapping or transform expression has more than 2 wildcard expressions.
+
+        2. An expression matches 0 keys in the current state dict. This can happen during batched
+           streaming refit if the current state dict doesn't have any keys that match the expression.
+           To handle this, we skip these mapping/transforms.
+
+        """
+        # Most of the keys will be able to converted together (main)
+        # For the keys that can't be converted together (exception), we need to handle them separately
+        main_state_dict_keys = []
+        exception_state_dict_keys_list = []
+
+        main_mappings = []
+        exception_mappings = []
         for key, val in self.export_mapping.items():
-            source_matches = _match_keys(list(state_dict.keys()), key)
-            if source_matches.size == 1 and source_matches == np.array(None):
-                continue
-            ctx = StateDictTransform(key, val)(ctx)
+            self._group(
+                state_dict,
+                key,
+                (key, val),
+                main_state_dict_keys,
+                main_mappings,
+                exception_state_dict_keys_list,
+                exception_mappings,
+            )
+
+        main_transforms = []
+        exception_transforms = []
         for transform in self.export_transforms:
             if type(transform.source_key) == tuple:
                 source_keys = transform.source_key
             else:
                 source_keys = (transform.source_key,)
-            source_matches = _match_keys(list(state_dict.keys()), source_keys)
-            if source_matches.size == 1 and source_matches == np.array(None):
-                continue
-            ctx = transform(ctx)
+            for source_key in source_keys:
+                self._group(
+                    state_dict,
+                    source_key,
+                    transform,
+                    main_state_dict_keys,
+                    main_transforms,
+                    exception_state_dict_keys_list,
+                    exception_transforms,
+                )
 
-        converted_state_dict = ctx.target_state
+        mapping_groups = [({k: v for k, v in main_mappings}, main_state_dict_keys)]
+        for (k, v), exception_state_dict_keys in zip(
+            exception_mappings, exception_state_dict_keys_list
+        ):
+            mapping_groups.append(({k: v}, exception_state_dict_keys))
+        transform_groups = [(main_transforms, main_state_dict_keys)]
+        for exception_transform, exception_state_dict_keys in zip(
+            exception_transforms, exception_state_dict_keys_list
+        ):
+            transform_groups.append(([exception_transform], exception_state_dict_keys))
+
+        return mapping_groups, transform_groups
+
+    def convert(self, state_dict, megatron_config):
+        state_dict = self.get_source_fn(
+            state_dict, megatron_config.__dict__
+        ).state_dict()
+
+        mapping_groups, transform_groups = self._get_groups(state_dict)
+
+        converted_state_dict = {}
+        for mapping, state_dict_keys in mapping_groups:
+            source = _ModelState({k: state_dict[k] for k in state_dict_keys})
+            source.config = megatron_config
+            ctx = TransformCTX(
+                source=source,
+                source_state=source.state_dict(),
+                target=self.target_model,
+                target_state=self._get_empty_state_dict(list(state_dict_keys)),
+            )
+
+            for key, val in mapping.items():
+                ctx = StateDictTransform(key, val)(ctx)
+
+            for k, v in ctx.target_state.items():
+                if v is not None:
+                    converted_state_dict[k] = v
+
+        for transforms, state_dict_keys in transform_groups:
+            source = _ModelState({k: state_dict[k] for k in state_dict_keys})
+            source.config = megatron_config
+            ctx = TransformCTX(
+                source=source,
+                source_state=source.state_dict(),
+                target=self.target_model,
+                target_state=self._get_empty_state_dict(list(state_dict_keys)),
+            )
+            for transform in transforms:
+                ctx = transform(ctx)
+
+            for k, v in ctx.target_state.items():
+                if v is not None:
+                    converted_state_dict[k] = v
+
+        # if torch.distributed.get_rank() == 0:
+        #     import pdb
+
+        #     pdb.set_trace()
+        # torch.distributed.barrier()
+        # [v for k, v in converted_state_dict.items() if v is None]
+        # len([v for k, v in converted_state_dict.items() if v is None])
+
         return converted_state_dict
