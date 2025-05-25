@@ -112,8 +112,9 @@ def get_global_param_key_to_local_key_map(
     # The global key is computed by replacing the local layer number (after "layers.")
     # with its corresponding global layer number (if applicable).
     local_map = {}
+    state_dict = model.state_dict()
     for local_key in keys:
-        if local_key not in model.state_dict():
+        if local_key not in state_dict:
             continue
         local_layer = model_converters.get_local_layer_num(local_key)
         if local_layer is not None:
@@ -156,15 +157,22 @@ def gather_params(
     import time
 
     st = time.time()
+
+    from collections import defaultdict
+    timers = defaultdict(list)
+
     # Process each parameter (by its unique global key) one at a time.
     gathered_params = {}
     named_modules_dict = dict(model.named_modules())
+    state_dict = model.state_dict()
     for gk in sorted(param_name_to_rank_and_key.keys()):
         owner_pp_global_rank, owner_raw_key = param_name_to_rank_and_key[gk]
 
         # Only the owner PP rank has the parameter locally.
         if torch.distributed.get_rank() == owner_pp_global_rank:
-            param = model.state_dict()[owner_raw_key]
+            st_get_param = time.time()
+            param = state_dict[owner_raw_key]
+            timers["get_param"].append(time.time() - st_get_param)
 
             # Check if param is TP-sharded
             tp_dim = get_tp_dim(model, owner_raw_key, named_modules_dict)
@@ -176,7 +184,9 @@ def gather_params(
                 gathered_slices = [
                     torch.empty_like(param) for _ in range(tp_world_size)
                 ]
+                st_all_gather_tp = time.time()
                 torch.distributed.all_gather(gathered_slices, param, group=tp_group)
+                timers["all_gather_tp"].append(time.time() - st_all_gather_tp)
                 full_param = torch.cat(gathered_slices, dim=tp_dim).to(torch.bfloat16)
             else:
                 full_param = torch.clone(param).to(torch.bfloat16)
@@ -193,9 +203,11 @@ def gather_params(
         else:
             target_keys = [None]  # Placeholder to be filled by broadcast.
 
+        st_broadcast_target_keys = time.time()
         torch.distributed.broadcast_object_list(
             target_keys, src=owner_pp_global_rank, group=pp_group
         )
+        timers["broadcast_target_keys"].append(time.time() - st_broadcast_target_keys)
         if "None" in target_keys[0]:
             continue
 
@@ -209,21 +221,28 @@ def gather_params(
             meta = [None]
             if torch.distributed.get_rank() == owner_pp_global_rank:
                 meta[0] = (tensor_to_send.shape, str(tensor_to_send.dtype))
+            st_broadcast_meta = time.time()
             torch.distributed.broadcast_object_list(
                 meta, src=owner_pp_global_rank, group=pp_group
             )
+            timers["broadcast_meta"].append(time.time() - st_broadcast_meta)
             shape, dtype_str = meta[0]
             dtype = getattr(torch, dtype_str.split(".")[-1])
             if torch.distributed.get_rank() != owner_pp_global_rank:
                 tensor_to_send = torch.empty(
                     *shape, dtype=dtype, device=torch.cuda.current_device()
                 )
+            st_broadcast_tensor = time.time()
             torch.distributed.broadcast(
                 tensor_to_send, src=owner_pp_global_rank, group=pp_group
             )
+            timers["broadcast_tensor"].append(time.time() - st_broadcast_tensor)
             gathered_params[target_key] = tensor_to_send
 
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
     print(f"Time taken to gather params: {time.time() - st}")
+    for timer_name, timer_list in timers.items():
+        print(f"Sum of {timer_name}: {sum(timer_list)}")
+        print(f"Count of {timer_name}: {len(timer_list)}")
     return gathered_params

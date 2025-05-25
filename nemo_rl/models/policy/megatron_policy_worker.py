@@ -318,6 +318,7 @@ class MegatronPolicyWorker:
         model_cfg.parallel_output = True
         from megatron.core.transformer.enums import AttnBackend
         # model_cfg.attention_backend = AttnBackend.unfused
+        model_cfg.moe_router_dtype = "fp64"
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
@@ -987,19 +988,31 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
+        import time
+        timers = defaultdict(list)
+        st_param_name_to_rank_and_key = time.time()
         param_name_to_rank_and_key = get_global_param_key_to_local_key_map(
             self.model, self.megatron_cfg.model_config, keys
         )
+        timers["get_global_param_key_to_local_key_map"].append(time.time() - st_param_name_to_rank_and_key)
+        st_gather_params = time.time()
         gathered_megatron_params = gather_params(
             self.model,
             param_name_to_rank_and_key,
         )
+        timers["gather_params"].append(time.time() - st_gather_params)
+        st_convert_params = time.time()
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )
+        timers["convert_params"].append(time.time() - st_convert_params)
 
+        st_gc = time.time()
         gc.collect()
+        timers["gc"].append(time.time() - st_gc)
+        st_empty_cache = time.time()
         torch.cuda.empty_cache()
+        timers["empty_cache"].append(time.time() - st_empty_cache)
 
         # Get device UUID for IPC handles
         device_uuid = self.report_device_id()
@@ -1007,9 +1020,11 @@ class MegatronPolicyWorker:
 
         # Create IPC handles for each parameter
         all_handles = []
+        st_reduce_tensor = time.time()
         for key, tensor in gathered_hf_params.items():
             handle = reduce_tensor(tensor.detach())
             all_handles.append((key, handle))
+        timers["reduce_tensor"].append(time.time() - st_reduce_tensor)
 
         # Store references to avoid premature garbage collection
         self._held_gather_buffer = gathered_hf_params
@@ -1017,6 +1032,9 @@ class MegatronPolicyWorker:
         for key, tensor in gathered_hf_params.items():
             shapes[key] = tensor.shape
 
+        import pprint
+        print("TIMERS: ")
+        pprint.pprint(timers)
         return {device_uuid: all_handles}
 
     def prepare_for_lp_inference(self):
@@ -1086,10 +1104,11 @@ class MegatronPolicyWorker:
 
     def move_model(self, model, device):
         # return model
-        for name, item in model.state_dict().items():
+        state_dict = model.state_dict()
+        for name, item in state_dict.items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device=device, non_blocking=True, copy=True)
-            model.state_dict()[name] = item
+            state_dict[name] = item
         return model
 
     def save_checkpoint(
