@@ -87,14 +87,15 @@ from nemo_rl.models.generation.interfaces import (
     GenerationOutputSpec,
     verify_right_padding,
 )
+from nemo_rl.models.megatron.converters.common import MegatronToHFConverter
 from nemo_rl.models.megatron.common import (
     broadcast_tensor,
     forward_step_arbitrary_loss,
 )
 from nemo_rl.models.megatron.refit_utils import (
-    gather_and_convert_params,
+    gather_params,
     get_global_param_key_to_local_key_map,
-    get_param_conversion_recipe_dict,
+    get_tp_dim,
 )
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.utils import get_gpu_info
@@ -143,14 +144,8 @@ def setup_megatron_model(
     # Context used for persisting some state between checkpoint saves.
     checkpointing_context = _init_checkpointing_context(cfg.checkpoint_config)
 
-    # Tokenizer
-    tokenizer = build_tokenizer(
-        cfg.tokenizer_config,
-        make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by,
-        tensor_model_parallel_size=cfg.model_config.tensor_model_parallel_size,
-    )
     if not cfg.model_config.vocab_size:
-        cfg.model_config.vocab_size = tokenizer.vocab_size
+        cfg.model_config.vocab_size = cfg.tokenizer_config.padded_vocab_size
 
     torch.distributed.barrier()
 
@@ -173,13 +168,6 @@ def setup_megatron_model(
         optimizer = None
         scheduler = None
 
-    _update_model_config_funcs(
-        model,
-        cfg.model_config,
-        cfg.ddp_config,
-        optimizer,
-        align_grad_reduce=cfg.dist_config.align_grad_reduce,
-    )
     print("Model, optimizer, and learning rate scheduler built")
     torch.distributed.barrier()
 
@@ -289,6 +277,8 @@ class MegatronPolicyWorker:
         model_cfg.tensor_model_parallel_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
         model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
         model_cfg.context_parallel_size = self.cfg["megatron_cfg"]["context_parallel_size"] # not supported right now
+        model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"]["expert_tensor_parallel_size"]
+        model_cfg.sequence_parallel = self.cfg["megatron_cfg"]["sequence_parallel"]
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
         # model_cfg.params_dtype = torch.float32  # amp
@@ -397,6 +387,14 @@ class MegatronPolicyWorker:
                 item = item.detach().to(device="cuda", non_blocking=True, copy=True)
             state_dict[name] = item
 
+        _update_model_config_funcs(
+            [self.model],
+            self.megatron_cfg.model_config,
+            self.megatron_cfg.ddp_config,
+            self.optimizer,
+            align_grad_reduce=self.megatron_cfg.dist_config.align_grad_reduce,
+        )
+
         from nemo.tron.tokenizers.tokenizer import build_tokenizer
 
         tokenizer_config = TokenizerConfig(
@@ -413,6 +411,8 @@ class MegatronPolicyWorker:
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
         self._held_gather_buffer = None
+
+        self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
 
     def is_alive(self):
         return True
@@ -516,7 +516,7 @@ class MegatronPolicyWorker:
                         decoder_seq_length=self.cfg[
                             "max_total_sequence_length"
                         ],  # model_config.seq_length,
-                        forward_only=False,
+                        forward_only=eval_mode,
                     )
 
                 # Empty unused memory.
@@ -666,7 +666,7 @@ class MegatronPolicyWorker:
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
 
-                return torch.tensor(0.0), {"logprobs": token_logprobs}
+                return torch.tensor(0.0, device=token_logprobs.device), {"logprobs": token_logprobs}
 
             return output_tensor, collection_fn
 
@@ -909,21 +909,21 @@ class MegatronPolicyWorker:
         # Collect parameter info
         param_info = []
 
+        # Dictionary of modules we can quickly look up to check if a module has TP
+        named_modules_dict = dict(self.model.named_modules())
+
         # Process each parameter in the model
         for name, param in self.model.state_dict().items():
             # Skip _extra_state entries (these are metadata, not actual weights)
             if "_extra_state" in name:
                 continue
 
-            # Use the conversion dict to get the appropriate recipe for this parameter.
-            recipe_dict, _ = get_param_conversion_recipe_dict(
-                name, self.converter_type, self.megatron_cfg.model_config
-            )
-            tp = 1
-            if name in recipe_dict:
-                recipe = recipe_dict[name]
-                if "tp" in recipe and recipe["tp"] is not None:
-                    tp = tp_world_size
+            tp_dim = get_tp_dim(self.model, name, named_modules_dict)
+            if tp_dim is not None:
+                # TODO(yifu): take care of expert_tensor_parallel_size which may be different from tensor_model_parallel_size
+                tp = tp_world_size
+            else:
+                tp = 1
 
             # Calculate size for this parameter
             prec_to_bytes = {
@@ -933,7 +933,7 @@ class MegatronPolicyWorker:
             }
             scale = prec_to_bytes[self.dtype] / prec_to_bytes[param.dtype]
             size_in_bytes = param.element_size() * param.numel() * tp * scale
-            param_info.append(((name, recipe.get("hf", None)), size_in_bytes))
+            param_info.append((name, size_in_bytes))
 
         # Include buffers (non-parameter tensors)
         for name, buffer in self.model.named_buffers():
@@ -984,11 +984,12 @@ class MegatronPolicyWorker:
         param_name_to_rank_and_key = get_global_param_key_to_local_key_map(
             self.model, self.megatron_cfg.model_config, keys
         )
-        gathered_params = gather_and_convert_params(
+        gathered_megatron_params = gather_params(
             self.model,
-            self.converter_type,
-            self.megatron_cfg.model_config,
             param_name_to_rank_and_key,
+        )
+        gathered_hf_params = self.megatron_to_hf_converter.convert(
+            gathered_megatron_params, self.model.config
         )
         gc.collect()
         torch.cuda.empty_cache()
@@ -999,14 +1000,15 @@ class MegatronPolicyWorker:
 
         # Create IPC handles for each parameter
         all_handles = []
-        for key, tensor in gathered_params.items():
+        st_reduce_tensor = time.time()
+        for key, tensor in gathered_hf_params.items():
             handle = reduce_tensor(tensor.detach())
             all_handles.append((key, handle))
 
         # Store references to avoid premature garbage collection
-        self._held_gather_buffer = gathered_params
+        self._held_gather_buffer = gathered_hf_params
         shapes = {}
-        for key, tensor in gathered_params.items():
+        for key, tensor in gathered_hf_params.items():
             shapes[key] = tensor.shape
 
         return {device_uuid: all_handles}
