@@ -291,8 +291,10 @@ class MegatronPolicyWorker:
         model_cfg.context_parallel_size = self.cfg["megatron_cfg"]["context_parallel_size"] # not supported right now
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
-        model_cfg.params_dtype = torch.float32  # amp
-        model_cfg.pipeline_dtype = torch.float32  # dtype_map[self.cfg["pipeline_dtype"]]
+        # model_cfg.params_dtype = torch.float32  # amp
+        # model_cfg.pipeline_dtype = torch.float32  # dtype_map[self.cfg["pipeline_dtype"]]
+        model_cfg.params_dtype = self.dtype  # amp
+        model_cfg.pipeline_dtype = self.dtype  # dtype_map[self.cfg["pipeline_dtype"]]
         model_cfg.parallel_output = True
 
         checkpoint_config = CheckpointConfig(
@@ -348,10 +350,11 @@ class MegatronPolicyWorker:
             self.checkpointing_context,
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
-        for name, item in self.model.state_dict().items():
+        state_dict = self.model.state_dict()
+        for name, item in state_dict.items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device="cpu", non_blocking=True, copy=True)
-            self.model.state_dict()[name] = item
+            state_dict[name] = item
 
         if init_reference_model:
             ref_ckpt_context = _init_checkpointing_context(ref_checkpoint_config)
@@ -388,10 +391,11 @@ class MegatronPolicyWorker:
             else:
                 print("Reference model not loaded")
 
-        for name, item in self.model.state_dict().items():
+        state_dict = self.model.state_dict()
+        for name, item in state_dict.items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device="cuda", non_blocking=True, copy=True)
-            self.model.state_dict()[name] = item
+            state_dict[name] = item
 
         from nemo.tron.tokenizers.tokenizer import build_tokenizer
 
@@ -1078,10 +1082,11 @@ class MegatronPolicyWorker:
 
     def move_model(self, model, device):
         # return model
-        for name, item in model.state_dict().items():
+        state_dict = model.state_dict()
+        for name, item in state_dict.items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device=device, non_blocking=True, copy=True)
-            model.state_dict()[name] = item
+            state_dict[name] = item
         return model
 
     def save_checkpoint(
