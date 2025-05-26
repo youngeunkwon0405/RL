@@ -733,7 +733,7 @@ def validate(
                 val_task_to_env,
                 max_seq_len=master_config["actor"]["max_total_sequence_length"],
                 max_rollout_turns=master_config["quack"]["max_rollout_turns"],
-                greedy=False,
+                greedy=True,
             )
             rewards = val_batch["total_reward"]
 
