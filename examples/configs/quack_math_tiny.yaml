@@ -133,7 +133,7 @@ fit_data:
   prompt_file: "examples/prompts/quack/fit.txt"
   system_prompt_file: null
   dataset_name: null  # we use data from replay buffer
-  apply_chat_template: true
+  apply_chat_template: false
 
 replay_buffer:
   buffer_size: 1000000
