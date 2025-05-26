@@ -363,43 +363,43 @@ def fit_data_processor(
 
     message_log: LLMMessageLogType = []
 
-    message = task_data_spec.prompt.format(question, answer)
+    question_answer_message = task_data_spec.prompt.format(question, answer)
     user_message = {
         "role": "user",
-        "content": message,
+        "content": question_answer_message,
     }
     if apply_chat_template:
-        message = tokenizer.apply_chat_template(
+        question_answer_message = tokenizer.apply_chat_template(
             [user_message],
             tokenize=False,
             add_generation_prompt=True,
             add_special_tokens=False,
         )
-        user_message["content"] = message
-    user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
+        user_message["content"] = question_answer_message
+    user_message["token_ids"] = tokenizer(question_answer_message, return_tensors="pt")["input_ids"][0]
     message_log.append(user_message)
 
-    message = critique
+    critique_message = critique
     assistant_message = {
         "role": "assistant",
-        "content": message,
+        "content": critique_message,
     }
     if apply_chat_template:
-        message = tokenizer.apply_chat_template(
+        critique_message = tokenizer.apply_chat_template(
             [assistant_message],
             tokenize=False,
             add_generation_prompt=False,    # SET TO FALSE!!
             add_special_tokens=False,
         )
-        assistant_message["content"] = message
-    assistant_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
+        assistant_message["content"] = critique_message
+    assistant_message["token_ids"] = tokenizer(critique_message, return_tensors="pt")["input_ids"][0]
     message_log.append(assistant_message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
 
     loss_multiplier = 1.0
     if modify_loss_multiplier:  # NOTE: the only training signal is the verdict!
-        loss_multiplier = 1.0 * verdict_is_correct  # TODO(mfathi): make this controllable in config
+        loss_multiplier = 1.0 * verdict_is_correct
     if length > max_seq_length:
         # make smaller and mask out
         for message in message_log:
