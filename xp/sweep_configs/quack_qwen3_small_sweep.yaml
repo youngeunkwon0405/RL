@@ -10,5 +10,27 @@ script_path: "examples/run_quack_math.py"
 # If null and --config is not provided, no base config will be used
 config_path: "examples/configs/quack_math_small.yaml" 
 
+# Model configuration
+actor.model_name: ["Qwen/Qwen3-8B"]
+
 # Refit configuration
-quack.critic_refit_period: [1, 2, 4, 8]
+quack.critic_refit_period: [4, 8]
+
+# loss correction
+quack.verdict_loss_correction: [true, false]
+
+# critic generations per prompt
+quack.num_critic_generations_per_prompt: [4, 8, 16, 32]
+
+# hint critic
+quack.hint_critic: [true, false]
+
+# Ensure no chat template is used
+data.apply_chat_template: [true]
+critic_data.apply_chat_template: [true]
+fit_data.apply_chat_template: [true]
+
+# Use prompts specific to Qwen2.5-Math
+data.prompt_file: ["examples/prompts/quack/math.txt"]
+critic_data.prompt_file: ["examples/prompts/quack/critic.txt"]
+fit_data.prompt_file: ["examples/prompts/quack/fit.txt", "examples/prompts/quack/critic.txt"]
