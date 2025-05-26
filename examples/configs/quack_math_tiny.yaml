@@ -118,14 +118,14 @@ critic:
 
 data:
   max_input_seq_length: ${actor.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  prompt_file: "examples/prompts/cot.txt"
+  prompt_file: "examples/prompts/quack/qwen2.5-math/math.txt"
   system_prompt_file: null
   dataset_name: "OpenMathInstruct-2"
   apply_chat_template: false
 
 critic_data:
   max_input_seq_length: ${actor.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  prompt_file: "examples/prompts/critic.txt"
+  prompt_file: "examples/prompts/quack/critic.txt"
   system_prompt_file: null
   dataset_name: null  # we use data from replay buffer
   apply_chat_template: false
