@@ -1,10 +1,11 @@
 # QUACK Algorithm Configuration
 quack:
-  train_dataset_size: 1024
+  num_prompts_per_step: 128
+  num_generations_per_prompt: 4
+  num_quacks_per_step: 128
+  num_critic_generations_per_prompt: 8
+  train_dataset_size: ${mul:${quack.num_quacks_per_step}, ${quack.num_critic_generations_per_prompt}}   # unused
   critic_inference_batch_size: 256
-  train_dataset_batch_size: 32
-  num_prompts_per_step: 32
-  num_generations_per_prompt: 16
   critic_refit_period: 10
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
   max_num_steps: 1000000
@@ -14,6 +15,7 @@ quack:
   val_batch_size: 256
   verdict_loss_correction: true   # if true, we only train on samples where the math environment and the critique agree on the correctness of the answer
   hint_critic: true   # if true, we hint the critic with the correct verdict
+  #train_dataset_batch_size: 32
 
 checkpointing:
   enabled: true
