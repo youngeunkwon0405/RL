@@ -3,6 +3,7 @@ from collections import defaultdict
 from typing import Dict, Any, Optional, List, TypedDict, Union
 import random
 from collections import deque
+import torch
 
 from torch.utils.data import Dataset
 from transformers import AutoTokenizer
@@ -377,6 +378,11 @@ def fit_data_processor(
         )
         user_message["content"] = question_answer_message
     user_message["token_ids"] = tokenizer(question_answer_message, return_tensors="pt")["input_ids"][0]
+    if len(user_message["token_ids"]) == 0:
+        # if there is an empty message, the empty `token_ids` tensor ends up being in fp32,
+        # which causes `_validate_tensor_consistency` to fail. To fix this, we convert the
+        # empty tensor to int64.
+        user_message["token_ids"] = user_message["token_ids"].to(torch.int64)
     message_log.append(user_message)
 
     critique_message = f"{critique.strip()}"
@@ -393,6 +399,8 @@ def fit_data_processor(
         )
         assistant_message["content"] = critique_message
     assistant_message["token_ids"] = tokenizer(critique_message, return_tensors="pt")["input_ids"][0]
+    if len(assistant_message["token_ids"]) == 0:
+        assistant_message["token_ids"] = assistant_message["token_ids"].to(torch.int64)
     message_log.append(assistant_message)
 
     length = sum(len(m["token_ids"]) for m in message_log)
