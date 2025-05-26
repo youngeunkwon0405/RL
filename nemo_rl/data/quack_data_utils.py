@@ -357,7 +357,7 @@ def fit_data_processor(
     reward = datum_dict["reward"]
     critique = datum_dict["critique"]
     verdict = datum_dict["verdict"]
-    verdict_is_correct = reward == verdict
+    verdict_is_correct = float(float(reward) == float(verdict))
 
     extra_env_info = {}
 
