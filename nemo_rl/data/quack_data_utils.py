@@ -379,7 +379,7 @@ def fit_data_processor(
     user_message["token_ids"] = tokenizer(question_answer_message, return_tensors="pt")["input_ids"][0]
     message_log.append(user_message)
 
-    critique_message = critique
+    critique_message = f"{critique.strip()}"
     assistant_message = {
         "role": "assistant",
         "content": critique_message,
