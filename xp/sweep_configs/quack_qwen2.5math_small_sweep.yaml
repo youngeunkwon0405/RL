@@ -15,13 +15,16 @@ config_path: "examples/configs/quack_math_small.yaml"
 actor.model_name: ["Qwen/Qwen2.5-Math-7B"]
 
 # Refit configuration
-quack.critic_refit_period: [1, 2, 4, 8]
+quack.critic_refit_period: [4, 8]
 
 # loss correction
-quack.verdict_loss_correction: [true, false]
+quack.verdict_loss_correction: [true]
+
+# critic generations per prompt
+quack.num_critic_generations_per_prompt: [8, 16, 32]
 
 # hint critic
-quack.hint_critic: [true, false]
+quack.hint_critic: [true]
 
 # Ensure no chat template is used
 data.apply_chat_template: [false]
@@ -30,4 +33,4 @@ critic_data.apply_chat_template: [false]
 # Use prompts specific to Qwen2.5-Math
 data.prompt_file: ["examples/prompts/quack/qwen2.5-math/math.txt"]
 critic_data.prompt_file: ["examples/prompts/quack/qwen2.5-math/critic.txt"]
-fit_data.prompt_file: ["examples/prompts/quack/qwen2.5-math/fit.txt"]
+fit_data.prompt_file: ["examples/prompts/quack/qwen2.5-math/fit.txt", "examples/prompts/quack/qwen2.5-math/critic.txt"]
