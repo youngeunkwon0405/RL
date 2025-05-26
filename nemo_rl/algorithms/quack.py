@@ -545,6 +545,9 @@ def quack_train(
                 train_dataset_samples = [train_dataset[i] for i in range(len(train_dataset))]
                 train_dataset = rl_collate_fn(train_dataset_samples)
 
+                print("▶ Train dataset sample:")
+                print(train_dataset["message_log"][0])
+
                 ## add loss mask based on role to every message
                 add_loss_mask_to_message_log(
                     train_dataset["message_log"],
