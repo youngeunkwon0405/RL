@@ -18,13 +18,13 @@ actor.model_name: ["Qwen/Qwen2.5-Math-7B"]
 quack.critic_refit_period: [4, 8]
 
 # loss correction
-quack.verdict_loss_correction: [true]
+quack.verdict_loss_correction: [true, false]
 
 # critic generations per prompt
 quack.num_critic_generations_per_prompt: [8, 16, 32]
 
 # hint critic
-quack.hint_critic: [true]
+quack.hint_critic: [true, false]
 
 # Ensure no chat template is used
 data.apply_chat_template: [false]
