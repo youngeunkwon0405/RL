@@ -9,6 +9,7 @@ from torch.utils.data import Dataset
 from transformers import AutoTokenizer
 
 from nemo_rl.data import DataConfig
+from nemo_rl.data.llm_message_utils import get_formatted_message_log
 from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType, TaskDataSpec
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -369,39 +370,37 @@ def fit_data_processor(
         "role": "user",
         "content": question_answer_message,
     }
-    if apply_chat_template:
-        question_answer_message = tokenizer.apply_chat_template(
-            [user_message],
-            tokenize=False,
-            add_generation_prompt=True,
-            add_special_tokens=False,
-        )
-        user_message["content"] = question_answer_message
-    user_message["token_ids"] = tokenizer(question_answer_message, return_tensors="pt")["input_ids"][0]
-    if len(user_message["token_ids"]) == 0:
-        # if there is an empty message, the empty `token_ids` tensor ends up being in fp32,
-        # which causes `_validate_tensor_consistency` to fail. To fix this, we convert the
-        # empty tensor to int64.
-        user_message["token_ids"] = user_message["token_ids"].to(torch.int64)
-    message_log.append(user_message)
 
     critique_message = f"{critique.strip()}"
     assistant_message = {
         "role": "assistant",
         "content": critique_message,
     }
-    if apply_chat_template:
-        critique_message = tokenizer.apply_chat_template(
-            [assistant_message],
-            tokenize=False,
-            add_generation_prompt=False,    # SET TO FALSE!!
-            add_special_tokens=False,
-        )
-        assistant_message["content"] = critique_message
-    assistant_message["token_ids"] = tokenizer(critique_message, return_tensors="pt")["input_ids"][0]
-    if len(assistant_message["token_ids"]) == 0:
-        assistant_message["token_ids"] = assistant_message["token_ids"].to(torch.int64)
+
+    message_log.append(user_message)
     message_log.append(assistant_message)
+
+    if apply_chat_template:
+        message_log = get_formatted_message_log(
+            message_log, 
+            tokenizer, 
+            TaskDataSpec(task_name="fit", prompt_file=None, system_prompt_file=None),
+            add_bos_token=True, 
+            add_eos_token=True, 
+            add_generation_prompt=True
+        )
+    else:
+        message_log[0]["token_ids"] = tokenizer(question_answer_message, return_tensors="pt")["input_ids"][0]
+        if len(message_log[0]["token_ids"]) == 0:
+            # if there is an empty message, the empty `token_ids` tensor ends up being in fp32,
+            # which causes `_validate_tensor_consistency` to fail. To fix this, we convert the
+            # empty tensor to int64.
+            message_log[0]["token_ids"] = message_log[0]["token_ids"].to(torch.int64)
+
+        message_log[1]["token_ids"] = tokenizer(critique_message, return_tensors="pt")["input_ids"][0]
+        if len(message_log[1]["token_ids"]) == 0:
+            message_log[1]["token_ids"] = message_log[1]["token_ids"].to(torch.int64)
+
 
     length = sum(len(m["token_ids"]) for m in message_log)
 
