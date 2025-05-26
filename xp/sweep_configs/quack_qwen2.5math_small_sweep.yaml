@@ -29,6 +29,7 @@ quack.hint_critic: [true]
 # Ensure no chat template is used
 data.apply_chat_template: [false]
 critic_data.apply_chat_template: [false]
+fit_data.apply_chat_template: [false]
 
 # Use prompts specific to Qwen2.5-Math
 data.prompt_file: ["examples/prompts/quack/qwen2.5-math/math.txt"]
