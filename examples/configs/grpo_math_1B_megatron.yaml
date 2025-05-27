@@ -23,7 +23,7 @@ loss_fn:
 
 checkpointing:
   enabled: false
-  checkpoint_dir: "results/grpo_megatron"
+  checkpoint_dir: "results/grpo_megatron_debugcrash"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
@@ -69,7 +69,6 @@ policy:
   megatron_cfg:
     enabled: true
     empty_unused_memory_level: 0
-    converter_type: "Qwen2ForCausalLM"
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
     context_parallel_size: 1

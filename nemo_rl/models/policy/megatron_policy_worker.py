@@ -409,7 +409,6 @@ class MegatronPolicyWorker:
         )
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
-        self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
         self._held_gather_buffer = None
     
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
