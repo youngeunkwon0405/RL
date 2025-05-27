@@ -419,7 +419,7 @@ def save_checkpoint(
         checkpointer.finalize_checkpoint(checkpoint_path)
 
 
-def reduce_microbatch_metrics(metrics):
+def reduce_microbatch_metrics(metrics: dict) -> dict:
     """Reduce microbatch metrics to a single value.
 
     For num_valid_samples, takes the sum across microbatches.
