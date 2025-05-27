@@ -7,7 +7,7 @@ grpo:
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
-  val_period: 1
+  val_period: 10
   val_at_start: false
   max_val_samples: 256
   val_batch_size: 256
@@ -23,7 +23,7 @@ loss_fn:
 
 checkpointing:
   enabled: false
-  checkpoint_dir: "results/grpo_megatron"
+  checkpoint_dir: "results/grpo_megatron_debugcrash"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
@@ -55,7 +55,6 @@ policy:
   megatron_cfg:
     enabled: true
     empty_unused_memory_level: 1
-    converter_type: "Qwen2ForCausalLM"
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
     context_parallel_size: 1
