@@ -679,9 +679,8 @@ class VllmGenerationWorker:
                 "report_device_id cannot be used with async_engine=True. Use report_device_id_async instead."
             )
 
-        result_or_coro = self.llm.collective_rpc("report_device_id", args=tuple())
-        list_of_worker_results = result_or_coro
-        return cast(str, list_of_worker_results[0])
+        list_of_worker_results = self.llm.collective_rpc("report_device_id", args=tuple())
+        return list_of_worker_results
 
     async def report_device_id_async(self) -> str:
         """Async version of report_device_id."""
@@ -703,7 +702,7 @@ class VllmGenerationWorker:
         else:
             list_of_worker_results = result_or_coro
 
-        return cast(str, list_of_worker_results[0])
+        return list_of_worker_results
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         """Update weights from IPC handles by delegating to the vLLM Worker implementation.
@@ -906,6 +905,9 @@ class VllmGeneration(GenerationInterface):
             sharding_annotations=self.sharding_annotations,
         )
 
+        # Save the device uuids for the workers
+        self.device_uuids = self._report_device_id()
+
     def _get_tied_worker_bundle_indices(
         self, cluster: RayVirtualCluster
     ) -> list[tuple[int, list[int]]]:
@@ -937,6 +939,15 @@ class VllmGeneration(GenerationInterface):
             )
 
         return tied_worker_groups
+
+    def _report_device_id(self) -> str:
+        """Report the device ID of vllm workers."""
+        futures = self.worker_group.run_all_workers_single_data(
+            "report_device_id",
+            run_rank_0_only_axes=["tensor_parallel"],
+        )
+        results = ray.get(futures)
+        return results
 
     def generate(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
@@ -1147,12 +1158,24 @@ class VllmGeneration(GenerationInterface):
                 if self.cfg["vllm_cfg"]["async_engine"]
                 else "update_weights_from_ipc_handles"
             )
-            # Directly pass ipc_handles to the method
-            futures = self.worker_group.run_all_workers_single_data(
-                method_name,
-                ipc_handles=ipc_handles,
-                run_rank_0_only_axes=["tensor_parallel"],
-            )
+
+            futures = []
+            for worker_idx, worker in enumerate(self.worker_group.workers):
+                worker_coords = self.sharding_annotations.get_worker_coords(worker_idx)
+
+                # only leader worker should receive data
+                if worker_coords["tensor_parallel"] == 0:
+                    # only send the ipc handles required by the current worker
+                    group_idx = self.worker_group.worker_metadata[worker_idx]["tied_group_idx"]
+                    worker_device_uuids = self.device_uuids[group_idx]
+                    worker_ipc_handles = {
+                        device_uuid: ipc_handles[device_uuid]
+                        for device_uuid in worker_device_uuids
+                    }
+
+                    method = getattr(worker, method_name)
+                    futures.append(method.remote(ipc_handles=worker_ipc_handles))
+
             # Wait for all futures to complete
             results = ray.get(futures)
             return all(result for result in results if result is not None)
