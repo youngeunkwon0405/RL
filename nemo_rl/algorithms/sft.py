@@ -13,7 +13,7 @@
 # limitations under the License.
 import math
 import warnings
-from typing import Tuple, TypedDict
+from typing import TypedDict
 
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import AutoTokenizer
@@ -39,9 +39,9 @@ from nemo_rl.data.llm_message_utils import (
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
-from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.interfaces import PolicyInterface
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import Logger, LoggerConfig
 from nemo_rl.utils.timer import Timer
@@ -90,7 +90,7 @@ def setup(
     tokenizer: AutoTokenizer,
     train_dataset: AllTaskProcessedDataset,
     val_dataset: AllTaskProcessedDataset,
-) -> Tuple[
+) -> tuple[
     HfPolicy,
     RayVirtualCluster,
     StatefulDataLoader,

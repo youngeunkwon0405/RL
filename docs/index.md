@@ -15,6 +15,7 @@ cluster.md
 :caption: 🚀 E2E Examples
 :hidden:
 
+guides/grpo-deepscaler.md
 guides/sft-openmathinstruct2.md
 ```
 
@@ -44,6 +45,7 @@ docker.md
 
 testing.md
 documentation.md
+debugging.md
 apidocs/index.rst
 ```
 
@@ -58,5 +60,6 @@ design-docs/uv.md
 design-docs/chat-datasets.md
 design-docs/generation.md
 design-docs/checkpointing.md
-design-docs/loss_functions.md
+design-docs/loss-functions.md
+design-docs/fsdp2-parallel-plan.md
 ```
