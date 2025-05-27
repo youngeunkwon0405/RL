@@ -559,7 +559,8 @@ class MegatronPolicyWorker:
                                 # and so the denominator is 1.
                                 numerator += val
                                 denominator += 1
-                        loss_metrics[key] = numerator / denominator
+                        # loss_metrics[key] = numerator / denominator
+                        loss_metrics[key] = numerator
 
                     loss_metrics["lr"] = curr_lr
                     loss_metrics["wd"] = curr_wd
