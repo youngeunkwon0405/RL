@@ -668,7 +668,7 @@ class VllmGenerationWorker:
             print(f"Error during vLLM shutdown: {e}")
             return False
 
-    def report_device_id(self) -> str:
+    def report_device_id(self) -> list[str]:
         """Report device ID from the vLLM worker."""
         assert self.llm is not None, (
             "Attempting to report device id with either an uninitialized vLLM or non-model-owner"
@@ -679,10 +679,12 @@ class VllmGenerationWorker:
                 "report_device_id cannot be used with async_engine=True. Use report_device_id_async instead."
             )
 
-        list_of_worker_results = self.llm.collective_rpc("report_device_id", args=tuple())
-        return list_of_worker_results
+        list_of_worker_results = self.llm.collective_rpc(
+            "report_device_id", args=tuple()
+        )
+        return cast(list[str], list_of_worker_results)
 
-    async def report_device_id_async(self) -> str:
+    async def report_device_id_async(self) -> list[str]:
         """Async version of report_device_id."""
         assert self.llm is not None, (
             "Attempting to report device id with either an uninitialized vLLM or non-model-owner"
@@ -702,7 +704,7 @@ class VllmGenerationWorker:
         else:
             list_of_worker_results = result_or_coro
 
-        return list_of_worker_results
+        return cast(list[str], list_of_worker_results)
 
     def update_weights_from_ipc_handles(self, ipc_handles: dict[str, Any]) -> bool:
         """Update weights from IPC handles by delegating to the vLLM Worker implementation.
@@ -940,7 +942,7 @@ class VllmGeneration(GenerationInterface):
 
         return tied_worker_groups
 
-    def _report_device_id(self) -> str:
+    def _report_device_id(self) -> list[list[str]]:
         """Report the device ID of vllm workers."""
         futures = self.worker_group.run_all_workers_single_data(
             "report_device_id",
@@ -1166,7 +1168,9 @@ class VllmGeneration(GenerationInterface):
                 # only leader worker should receive data
                 if worker_coords["tensor_parallel"] == 0:
                     # only send the ipc handles required by the current worker
-                    group_idx = self.worker_group.worker_metadata[worker_idx]["tied_group_idx"]
+                    group_idx = self.worker_group.worker_metadata[worker_idx][
+                        "tied_group_idx"
+                    ]
                     worker_device_uuids = self.device_uuids[group_idx]
                     worker_ipc_handles = {
                         device_uuid: ipc_handles[device_uuid]
