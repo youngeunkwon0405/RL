@@ -302,13 +302,13 @@ def critique_data_processor(
 
     message_log: LLMMessageLogType = []
     message = task_data_spec.prompt.format(question, answer)
+    if hint_critic:
+        hint = "correct" if reward == 1.0 else "incorrect"
+        message = message + f"\n\n*Hint*: The provided answer by the student is {hint}."
     user_message = {
         "role": "user",
         "content": message,
     }
-    if hint_critic:
-        hint = "correct" if reward == 1.0 else "incorrect"
-        message = message + f"\n\n*Hint*: The provided answer by the student is {hint}."
     if apply_chat_template:
         message = tokenizer.apply_chat_template(
             [user_message],
