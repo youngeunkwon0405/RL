@@ -29,6 +29,7 @@ actor:
   model_name: "Qwen/Qwen3-8B"
   tokenizer:
     name: ${actor.model_name} ## specify if you'd like to use a tokenizer different from the model's default
+    chat_template: null
   train_global_batch_size: 256
   train_micro_batch_size: 4
   generation_batch_size: 32 # Only used when generating using HF backend

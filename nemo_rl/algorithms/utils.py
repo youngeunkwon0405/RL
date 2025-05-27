@@ -201,7 +201,7 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_config["name"])
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    if "chat_template" in tokenizer_config:
+    if "chat_template" in tokenizer_config and tokenizer_config["chat_template"] is not None:
         if tokenizer_config["chat_template"] is None:
             print("Using passthrough chat template")
             tokenizer.chat_template = (
@@ -209,6 +209,11 @@ def get_tokenizer(tokenizer_config: TokenizerConfig) -> AutoTokenizer:
             )
         elif tokenizer_config["chat_template"].lower() == "default":
             print("Using tokenizer's default chat template")
+        elif tokenizer_config["chat_template"].endswith(".jinja"):
+            print("Using jinja chat template from file")
+            with open(tokenizer_config["chat_template"], "r") as f:
+                template = f.read()
+            tokenizer.chat_template = template
         else:
             print("Using custom chat template")
             tokenizer.chat_template = tokenizer_config["chat_template"]

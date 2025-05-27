@@ -13,6 +13,7 @@ config_path: "examples/configs/quack_math_small.yaml"
 
 # Model configuration
 actor.model_name: ["Qwen/Qwen2.5-Math-7B"]
+actor.tokenizer.chat_template: ["examples/prompts/quack/qwen2.5-math.jinja"]
 
 # Refit configuration
 quack.critic_refit_period: [4, 8]
@@ -27,11 +28,11 @@ quack.num_critic_generations_per_prompt: [8, 16, 32]
 quack.hint_critic: [true, false]
 
 # Ensure no chat template is used
-data.apply_chat_template: [false]
-critic_data.apply_chat_template: [false]
-fit_data.apply_chat_template: [false]
+data.apply_chat_template: [true]
+critic_data.apply_chat_template: [true]
+fit_data.apply_chat_template: [true]
 
 # Use prompts specific to Qwen2.5-Math
-data.prompt_file: ["examples/prompts/quack/qwen2.5-math/math.txt"]
-critic_data.prompt_file: ["examples/prompts/quack/qwen2.5-math/critic.txt"]
-fit_data.prompt_file: ["examples/prompts/quack/qwen2.5-math/fit.txt", "examples/prompts/quack/qwen2.5-math/critic.txt"]
+data.prompt_file: ["examples/prompts/quack/math.txt"]
+critic_data.prompt_file: ["examples/prompts/quack/critic.txt"]
+fit_data.prompt_file: ["examples/prompts/quack/fit.txt", "examples/prompts/quack/critic.txt"]
