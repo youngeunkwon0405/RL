@@ -364,6 +364,9 @@ def setup_dataloaders(
     val_dataloader: Optional[StatefulDataLoader] = None
     # If validation is enabled, load the validation dataloader
     if algorithm_config["val_period"] > 0 or algorithm_config["val_at_start"]:
+        assert val_dataset is not None, (
+            "Validation dataset is required if validation is enabled"
+        )
         val_dataloader = StatefulDataLoader(
             val_dataset,
             batch_size=(
@@ -459,7 +462,7 @@ def log_metrics(
     2. For training metrics, shows detailed timing breakdown
     3. Logs all metrics and timing info to the logger with appropriate prefixes
     """
-    prefix = "validation" if is_val else "train"
+    prefix: str = "validation" if is_val else "train"
 
     ## print metrics to std out
     print(f"\n📊 {prefix.capitalize()} Results:")
