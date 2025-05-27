@@ -88,9 +88,9 @@ def extract_verdict(critique):
         verdict_text = verdict_text
 
         # Check if verdict is either "right" or "wrong"
-        if "right" in verdict_text:
+        if "right" in verdict_text or "correct" in verdict_text:
             return 1
-        elif "wrong" in verdict_text:
+        elif "wrong" in verdict_text or "incorrect" in verdict_text:
             return 0
         else:
             return 0
