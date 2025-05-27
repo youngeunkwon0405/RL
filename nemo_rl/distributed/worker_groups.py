@@ -534,6 +534,7 @@ class RayWorkerGroup:
 
         return futures
 
+    # due to some sort of ray bug, when we pass 'data' to the workers, we do it as a kwarg instead of an arg
     def run_all_workers_sharded_data(
         self,
         method_name: str,
@@ -630,7 +631,7 @@ class RayWorkerGroup:
 
                 # Call the method on the worker with its data slice
                 future = getattr(worker, method_name).remote(
-                    worker_data, **common_kwargs
+                    data=worker_data, **common_kwargs
                 )
                 futures.append(future)
                 called_workers.append(worker_idx)
@@ -638,7 +639,7 @@ class RayWorkerGroup:
                 # If this worker doesn't need data:
                 if make_dummy_calls_to_free_axes:
                     # If make_dummy_calls_to_free_axes is True, just call the method with None
-                    future = getattr(worker, method_name).remote(None, **common_kwargs)
+                    future = getattr(worker, method_name).remote(data=None, **common_kwargs)
                     futures.append(future)
                     called_workers.append(worker_idx)
                 else:

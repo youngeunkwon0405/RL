@@ -31,7 +31,7 @@ from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.dtensor_policy_worker import DTensorPolicyWorker
-from nemo_rl.models.policy.hf_policy import Policy
+from nemo_rl.models.policy.lm_policy import Policy
 from tests.unit.conftest import TEST_ASSETS
 from tests.unit.test_utils import SimpleLoss
 

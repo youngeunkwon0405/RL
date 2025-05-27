@@ -21,7 +21,7 @@ from transformers import AutoModelForCausalLM
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.models.policy.hf_policy import Policy
+from nemo_rl.models.policy.lm_policy import Policy
 from nemo_rl.utils.native_checkpoint import (
     ModelState,
     OptimizerState,

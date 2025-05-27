@@ -348,11 +348,7 @@ class MegatronPolicyWorker:
             self.checkpointing_context,
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
-        for name, item in self.model.state_dict().items():
-            if isinstance(item, torch.Tensor):
-                item = item.detach().to(device="cpu", non_blocking=True, copy=True)
-            self.model.state_dict()[name] = item
-
+        self.model = self.move_model(self.model, "cpu")
         if init_reference_model:
             ref_ckpt_context = _init_checkpointing_context(ref_checkpoint_config)
             reference_model = get_model_from_config(
@@ -388,10 +384,7 @@ class MegatronPolicyWorker:
             else:
                 print("Reference model not loaded")
 
-        for name, item in self.model.state_dict().items():
-            if isinstance(item, torch.Tensor):
-                item = item.detach().to(device="cuda", non_blocking=True, copy=True)
-            self.model.state_dict()[name] = item
+        self.model = self.move_model(self.model, "cuda")
 
         from nemo.tron.tokenizers.tokenizer import build_tokenizer
 
@@ -609,8 +602,9 @@ class MegatronPolicyWorker:
         }
         return metrics
 
+    # Temporary fix, 'data' is a kwarg due to some sort of ray bug
     def get_logprobs(
-        self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
+        self, data: BatchedDataDict[Any] = None, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[Any]:
         """Get the logprobs of the model for a batch of data.
         Uses the configured logprob_batch_size to do microbatching.
@@ -730,8 +724,9 @@ class MegatronPolicyWorker:
                 gc.collect()
                 torch.cuda.empty_cache()
 
+    # Temporary fix, 'data' is a kwarg due to some sort of ray bug
     def get_reference_policy_logprobs(
-        self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
+        self, data: BatchedDataDict[Any] = None, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[Any]:
         """Get the logprobs from the reference policy for a batch of data.
         If micro_batch_size is provided, it will be used instead of the configured
@@ -897,7 +892,6 @@ class MegatronPolicyWorker:
         no_grad.__enter__()
         # Ensure model is in evaluation mode
         self.model.eval()
-        no_grad.__exit__(None, None, None)
 
         # Get tensor parallel info
         tp_world_size = parallel_state.get_tensor_model_parallel_world_size()
@@ -970,7 +964,8 @@ class MegatronPolicyWorker:
         no_grad.__exit__(None, None, None)
         return param_info
 
-    def get_weights_ipc_handles(self, keys: list[str]) -> dict[str, Any]:
+    # Temporary fix, 'keys' is a kwarg due to some sort of ray bug
+    def get_weights_ipc_handles(self, keys: list[str] = None) -> dict[str, Any]:
         """Get IPC handles for the requested Megatron model weights.
         Args:
             keys: List of parameter names to get handles for
@@ -1031,6 +1026,11 @@ class MegatronPolicyWorker:
         """Offload the optimizer and buffers to the CPU."""
         no_grad = torch.no_grad()
         no_grad.__enter__()
+        allocated = torch.cuda.memory_allocated() / (1024**3)  # Convert to GB
+        reserved = torch.cuda.memory_reserved() / (1024**3)  # Convert to GB
+        print(
+            f"GPU Memory before optimizer offload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
+        )
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
             # Iterate through the state dictionaries for each parameter group
