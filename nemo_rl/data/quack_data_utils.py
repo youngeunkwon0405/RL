@@ -249,6 +249,7 @@ def prompt_data_processor(
             tokenize=False,
             add_generation_prompt=True,
             add_special_tokens=False,
+            enable_thinking=False,
         )
         user_message["content"] = message
     user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]
@@ -314,6 +315,7 @@ def critique_data_processor(
             tokenize=False,
             add_generation_prompt=True,
             add_special_tokens=False,
+            enable_thinking=False,
         )
         user_message["content"] = message
     user_message["token_ids"] = tokenizer(message, return_tensors="pt")["input_ids"][0]

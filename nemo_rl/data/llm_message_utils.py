@@ -401,6 +401,7 @@ def get_formatted_message_log(
             add_generation_prompt=add_generation_prompt and message["role"] == "user",
             tokenize=False,
             add_special_tokens=False,
+            enable_thinking=False,
         )
 
         ## get the length of the previous message, excluding the eos token (if present)

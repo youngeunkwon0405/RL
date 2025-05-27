@@ -33,7 +33,7 @@ actor:
   train_micro_batch_size: 4
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 4
-  max_total_sequence_length: 8192
+  max_total_sequence_length: 4096
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
@@ -83,7 +83,7 @@ actor:
 
   generation:
     backend: "vllm"
-    max_new_tokens: 3000
+    max_new_tokens: 1600
     temperature: 1.0
     top_p: 0.95
     top_k: null
@@ -102,7 +102,7 @@ critic:
   num_nodes: null   # if null or 0, the critic will run on the actor cluster
   generation:
     backend: "vllm"
-    max_new_tokens: 3000
+    max_new_tokens: 1600
     temperature: 1.0
     top_p: 0.95
     top_k: null
