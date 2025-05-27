@@ -51,7 +51,6 @@ policy:
   megatron_cfg:
     enabled: false
     empty_unused_memory_level: 1
-    converter_type: "Qwen2ForCausalLM"
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
     context_parallel_size: 1
