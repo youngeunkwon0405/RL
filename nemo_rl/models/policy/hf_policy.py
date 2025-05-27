@@ -408,9 +408,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         """Save a checkpoint of the model."""
         futures = self.worker_group.run_all_workers_single_data(
             "save_checkpoint",
-            weights_path,
-            optimizer_path,
-            tokenizer_path,
+            weights_path=weights_path,
+            optimizer_path=optimizer_path,
+            tokenizer_path=tokenizer_path,
         )
         ray.get(futures)
 
