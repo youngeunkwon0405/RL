@@ -10,7 +10,7 @@ quack:
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
   max_num_steps: 1000000
   val_period: 10
-  val_at_start: false
+  val_at_start: true
   max_val_samples: 256
   val_batch_size: 256
   verdict_loss_correction: true   # if true, we only train on samples where the math environment and the critique agree on the correctness of the answer
