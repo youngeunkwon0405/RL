@@ -44,6 +44,7 @@ from megatron.core.parallel_state import (
 )
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.rerun_state_machine import get_rerun_state_machine
+from megatron.core.optimizer import ChainedOptimizer
 from megatron.inference.text_generation.mcore_engine_server import (
     run_mcore_engine,
 )
@@ -304,7 +305,7 @@ class MegatronPolicyWorker:
             "pipeline_model_parallel_size"
         ]
         model_cfg.expert_tensor_parallel_size = self.cfg.get("expert_tensor_parallel_size", 1)
-        model_cfg.sequence_parallel = self.cfg.get("expert_tensor_parallel_size", False)
+        model_cfg.sequence_parallel = self.cfg.get("sequence_parallel", False)
         model_cfg.expert_model_parallel_size = self.cfg.get("expert_model_parallel_size", 1)
         model_cfg.context_parallel_size = self.cfg[
             "context_parallel_size"
@@ -507,8 +508,8 @@ class MegatronPolicyWorker:
                 )
                 # grad_norm and num_zeros_in_grad will be None on ranks without trainable params,
                 # so we must gather across mp ranks
-                grad_norm = reduce_max_stat_across_model_parallel_group(grad_norm)
-                num_zeros_in_grad = reduce_max_stat_across_model_parallel_group(
+                grad_norm: float = reduce_max_stat_across_model_parallel_group(grad_norm)
+                num_zeros_in_grad: float = reduce_max_stat_across_model_parallel_group(
                     num_zeros_in_grad
                 )
 
@@ -552,6 +553,7 @@ class MegatronPolicyWorker:
 
                     loss_metrics["lr"] = curr_lr
                     loss_metrics["wd"] = curr_wd
+                    loss_metrics["grad_norm"] = grad_norm
                     torch.distributed.broadcast_object_list(
                         [loss_metrics],
                         src=get_pipeline_model_parallel_last_rank(),
@@ -582,6 +584,7 @@ class MegatronPolicyWorker:
             "global_loss": loss.cpu(),
             "rank": torch.distributed.get_rank(),
             "all_mb_metrics": dict(mb_metrics),
+            "grad_norm": mb_metrics["grad_norm"][-1], # TODO @sahilj: return an average or something later
         }
         return metrics
 
@@ -946,8 +949,7 @@ class MegatronPolicyWorker:
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         return param_info
 
-    @torch.no_grad()
-    def get_weights_ipc_handles(self, keys):
+    def get_weights_ipc_handles(self, keys=None):
         """Get IPC handles for the requested Megatron model weights.
 
         Args:
@@ -997,8 +999,11 @@ class MegatronPolicyWorker:
 
         # Move optimizer state to CUDA if it exists
         if hasattr(self, "optimizer") and self.optimizer is not None:
-            # for state in self.optimizer.state.values():
-            for state in self.optimizer._get_state().values():
+            if isinstance(self.optimizer, ChainedOptimizer):
+                optimizer_state = self.optimizer.state
+            else:
+                optimizer_state = self.optimizer._get_state()
+            for _, state in optimizer_state.items():
                 for k, v in state.items():
                     if torch.is_tensor(v) and not v.is_cuda:
                         state[k] = v.to("cuda")
@@ -1011,7 +1016,11 @@ class MegatronPolicyWorker:
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
             # Iterate through the state dictionaries for each parameter group
-            for state in self.optimizer._get_state().values():
+            if isinstance(self.optimizer, ChainedOptimizer):
+                optimizer_state = self.optimizer.state
+            else:
+                optimizer_state = self.optimizer._get_state()
+            for _, state in optimizer_state.items():
                 # Iterate through the state items (e.g., momentum, variance) for a parameter
                 for k, v in state.items():
                     # Check if the item is a tensor and on the GPU

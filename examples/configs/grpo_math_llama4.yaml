@@ -2,8 +2,8 @@
 defaults: "grpo_math_1B.yaml"
 
 grpo:
-  num_prompts_per_step: 32
-  num_generations_per_prompt: 16
+  num_prompts_per_step: 8
+  num_generations_per_prompt: 1
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
@@ -39,9 +39,10 @@ policy:
   logprob_batch_size: 1
   max_total_sequence_length: 256
   precision: "bfloat16"
-  tensor_model_parallel_size: 8
+  tensor_model_parallel_size: 2
   sequence_parallel: True
   expert_tensor_parallel_size: ${policy.tensor_model_parallel_size}
+  expert_model_parallel_size: 4
   pipeline_model_parallel_size: 1
   pipeline_dtype: "bfloat16"
   context_parallel_size: 1

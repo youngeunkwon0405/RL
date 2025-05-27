@@ -208,6 +208,8 @@ def gather_and_convert_params(
     model_cfg: GPTConfig,
     param_name_to_rank_and_key,
 ):
+    import time
+    st = time.time()
     # Process each parameter (by its unique global key) one at a time.
     gathered_params = {}
     model_state_dict = model.state_dict()
@@ -312,4 +314,5 @@ def gather_and_convert_params(
 
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
+    print(f'Time taken to gather and convert params: {time.time() - st}')
     return gathered_params

@@ -20,6 +20,8 @@ import ray
 from ray.util.queue import Queue
 from transformers import AutoTokenizer
 
+import torch
+
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.named_sharding import NamedSharding
@@ -56,15 +58,17 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         if optimizer_path:
             optimizer_path = os.path.abspath(optimizer_path)
 
+        # order = "tp-cp-ep-dp-pp"
         self.sharding_annotations = NamedSharding(
             layout=np.arange(cluster.world_size()).reshape(
                 (
                     config["pipeline_model_parallel_size"],
                     -1,
+                    config["expert_model_parallel_size"],
                     config["tensor_model_parallel_size"],
                 )
             ),
-            names=["pipeline_model_parallel", "data_parallel", "tensor_model_parallel"],
+            names=["pipeline_model_parallel", "data_parallel", "expert_model_parallel_size", "tensor_model_parallel"],
         )
 
         pre_init_queue = (
@@ -106,8 +110,8 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             "get_logprobs",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["pipeline_model_parallel", "tensor_model_parallel"],
-            output_is_replicated=["tensor_model_parallel", "pipeline_model_parallel"],
+            replicate_on_axes=["pipeline_model_parallel", "expert_model_parallel_size", "tensor_model_parallel", ],
+            output_is_replicated=["tensor_model_parallel", "expert_model_parallel_size", "pipeline_model_parallel", ],
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -128,8 +132,8 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             "get_reference_policy_logprobs",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["pipeline_model_parallel", "tensor_model_parallel"],
-            output_is_replicated=["tensor_model_parallel", "pipeline_model_parallel"],
+            replicate_on_axes=["pipeline_model_parallel", "expert_model_parallel_size", "tensor_model_parallel", ],
+            output_is_replicated=["tensor_model_parallel", "expert_model_parallel_size", "pipeline_model_parallel", ],
         )
         logprobs = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -155,8 +159,8 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             "train",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["pipeline_model_parallel", "tensor_model_parallel"],
-            output_is_replicated=["tensor_model_parallel", "pipeline_model_parallel"],
+            replicate_on_axes=["pipeline_model_parallel", "expert_model_parallel_size", "tensor_model_parallel", ],
+            output_is_replicated=["tensor_model_parallel", "expert_model_parallel_size", "pipeline_model_parallel", ],
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
@@ -169,6 +173,8 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         # Aggregate the results
         aggregated_results = {}
         aggregated_results["loss"] = results[0]["global_loss"]
+        aggregated_results["grad_norm"] = torch.tensor(results[0].get("grad_norm", 0.), device="cpu")
+        # aggregated_results["sums"] = results[0]["sums"]
 
         # Aggregate metrics across all workers
         all_mb_metrics = defaultdict(list)
@@ -196,9 +202,9 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
             "generate",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["pipeline_model_parallel", "tensor_model_parallel"],
+            replicate_on_axes=["pipeline_model_parallel", "expert_model_parallel_size", "tensor_model_parallel", ],
+            output_is_replicated=["tensor_model_parallel", "expert_model_parallel_size", "pipeline_model_parallel", ],
             common_kwargs={"greedy": greedy},
-            output_is_replicated=["tensor_model_parallel", "pipeline_model_parallel"],
         )
         result = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures),
@@ -260,7 +266,7 @@ class MegatronPolicy(PolicyInterface, GenerationInterface):
         # Collect IPC handles from all workers
         worker_handles = ray.get(
             [
-                worker.get_weights_ipc_handles.remote(keys)
+                worker.get_weights_ipc_handles.remote(keys=keys)
                 for worker in self.worker_group.workers
             ]
         )
