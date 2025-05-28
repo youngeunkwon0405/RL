@@ -21,8 +21,6 @@ data:
   seed: 420 # unused if shuffle is False
   jsonl_path: ???
 
-  max_input_seq_length: ${server_cfg.max_model_len}
-
 cluster:
   gpus_per_node: 1
   num_nodes: 1
