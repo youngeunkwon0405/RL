@@ -75,13 +75,15 @@ from nemo_rl.environments.utils import chunk_list_to_workers
 def extract_verdict(critique):
     """
     Extract the verdict from the critique.
-    Returns 1 if the verdict is "right" and 0 if the verdict is "wrong".
+    Returns 1.0 if the verdict is "right" and 0.0 if the verdict is "wrong".
+    Returns -1.0 if the verdict is not found or if there is an error.
+    We always consider -1.0 as a failed verdict and do not use it in our training.
     """
     try:
         # Find the verdict after "Conclusion: "
         conclusion_start = critique.find("Conclusion")
         if conclusion_start == -1:
-            return 0
+            return -1.0
 
         verdict_text = critique[conclusion_start + len("Conclusion: "):].strip().lower()
         verdict_text = verdict_text.replace("**", "")
@@ -89,13 +91,13 @@ def extract_verdict(critique):
 
         # Check if verdict is either "right" or "wrong"
         if "right" in verdict_text or "correct" in verdict_text:
-            return 1
+            return 1.0
         elif "wrong" in verdict_text or "incorrect" in verdict_text:
-            return 0
+            return 0.0
         else:
-            return 0
+            return -1.0
     except:
-        return 0
+        return -1.0
 
 
 class LLMJudgeEnvConfig(TypedDict):
