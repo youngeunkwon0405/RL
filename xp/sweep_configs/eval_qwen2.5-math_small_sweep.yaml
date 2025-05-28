@@ -1,0 +1,9 @@
+# Example sweep configuration for evaluation experiments
+# This file demonstrates how to sweep over different evaluation parameters
+
+generation.model_name: "Qwen/Qwen2.5-Math-7B"
+tokenizer.chat_template: ["examples/prompts/quack/qwen2.5-math.jinja"]
+data.prompt_file: ["examples/prompts/quack/math.txt"]
+
+# Different datasets to evaluate on
+data.dataset_name: ["HuggingFaceH4/aime_2024", "HuggingFaceH4/MATH-500"] 
