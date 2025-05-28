@@ -1260,13 +1260,13 @@ wheels = [
 
 [[package]]
 name = "flash-attn"
-version = "2.7.4.post1"
+version = "2.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/11/34/9bf60e736ed7bbe15055ac2dab48ec67d9dbd088d2b4ae318fd77190ab4e/flash_attn-2.7.4.post1.tar.gz", hash = "sha256:f03485c9a49a4d68d0733acdcad80ab0e72afa025a777fdc2966ceccf9d51765", size = 5986610, upload-time = "2025-01-30T06:39:51.93Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/81/f5/59b0727da8c041c0e5eb9feba068e27c88b2cead0e03083c5c6d444d004b/flash_attn-2.7.3.tar.gz", hash = "sha256:9078cf92355c4e3f77f01626ece8c71aad26bdbfa827c2af8c6ac5632cc1cc58", size = 3223463, upload-time = "2025-01-12T03:29:38.819Z" }
 
 [[package]]
 name = "flask"
@@ -2889,7 +2889,7 @@ requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets" },
-    { name = "flash-attn" },
+    { name = "flash-attn", specifier = "==2.7.3" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM-workspace" },
