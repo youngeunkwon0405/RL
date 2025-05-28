@@ -128,7 +128,7 @@ def get_hf_checkpoint_path(dcp_ckpt_path: str, dcp_config: str, log_dir: str) ->
     path_parts = dcp_ckpt_path.strip('/').split('/')
     model_identifier = ""
     for part in reversed(path_parts):
-        if part and part != "weights" and part != "policy":
+        if part and part != "weights" and part != "policy" and part != "actor":
             model_identifier = part
             break
     
@@ -149,23 +149,6 @@ def create_conversion_command(
     Returns:
         str: Shell command to execute for conversion
     """
-    # Build the base conversion command
-    base_conversion = f"""
-    echo "No cached checkpoint found, converting DCP to HF format..."
-    mkdir -p $(dirname "{hf_ckpt_path}")
-    uv run python examples/convert_dcp_to_hf.py \\
-        --config {dcp_config} \\
-        --dcp-ckpt-path {dcp_ckpt_path} \\
-        --hf-ckpt-path {hf_ckpt_path}
-    
-    if [ $? -eq 0 ]; then
-        echo "Successfully converted checkpoint to: {hf_ckpt_path}"
-        export HF_MODEL_PATH={hf_ckpt_path}
-    else
-        echo "Error: Failed to convert checkpoint"
-        exit 1
-    fi"""
-    
     if force_conversion:
         # Force conversion case - always convert
         conversion_cmd = f"""
@@ -192,7 +175,21 @@ if [ -d "{hf_ckpt_path}" ] && [ -f "{hf_ckpt_path}/config.json" ]; then
     echo "Found cached HF checkpoint at: {hf_ckpt_path}"
     echo "Using cached checkpoint, skipping conversion"
     export HF_MODEL_PATH={hf_ckpt_path}
-else{base_conversion}
+else
+    echo "No cached checkpoint found, converting DCP to HF format..."
+    mkdir -p $(dirname "{hf_ckpt_path}")
+    uv run python examples/convert_dcp_to_hf.py \\
+        --config {dcp_config} \\
+        --dcp-ckpt-path {dcp_ckpt_path} \\
+        --hf-ckpt-path {hf_ckpt_path}
+    
+    if [ $? -eq 0 ]; then
+        echo "Successfully converted checkpoint to: {hf_ckpt_path}"
+        export HF_MODEL_PATH={hf_ckpt_path}
+    else
+        echo "Error: Failed to convert checkpoint"
+        exit 1
+    fi
 fi"""
     
     return conversion_cmd.strip()
