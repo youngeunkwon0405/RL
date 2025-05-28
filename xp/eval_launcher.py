@@ -151,48 +151,36 @@ def create_conversion_command(
     """
     if force_conversion:
         # Force conversion case - always convert
-        conversion_cmd = f"""
-# Force conversion flag is set
-echo "Converting DCP to HF format (forced)..."
-mkdir -p $(dirname "{hf_ckpt_path}")
-uv run python examples/convert_dcp_to_hf.py \\
-    --config {dcp_config} \\
-    --dcp-ckpt-path {dcp_ckpt_path} \\
-    --hf-ckpt-path {hf_ckpt_path}
-
-if [ $? -eq 0 ]; then
-    echo "Successfully converted checkpoint to: {hf_ckpt_path}"
-    export HF_MODEL_PATH={hf_ckpt_path}
-else
-    echo "Error: Failed to convert checkpoint"
-    exit 1
-fi"""
+        conversion_cmd = (
+            f"echo 'Converting DCP to HF format (forced)...' && "
+            f"mkdir -p $(dirname '{hf_ckpt_path}') && "
+            f"uv run python examples/convert_dcp_to_hf.py "
+            f"--config {dcp_config} "
+            f"--dcp-ckpt-path {dcp_ckpt_path} "
+            f"--hf-ckpt-path {hf_ckpt_path} && "
+            f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}' && "
+            f"export HF_MODEL_PATH={hf_ckpt_path}"
+        )
     else:
         # Normal case - check cache first
-        conversion_cmd = f"""
-# Check if HF checkpoint already exists
-if [ -d "{hf_ckpt_path}" ] && [ -f "{hf_ckpt_path}/config.json" ]; then
-    echo "Found cached HF checkpoint at: {hf_ckpt_path}"
-    echo "Using cached checkpoint, skipping conversion"
-    export HF_MODEL_PATH={hf_ckpt_path}
-else
-    echo "No cached checkpoint found, converting DCP to HF format..."
-    mkdir -p $(dirname "{hf_ckpt_path}")
-    uv run python examples/convert_dcp_to_hf.py \\
-        --config {dcp_config} \\
-        --dcp-ckpt-path {dcp_ckpt_path} \\
-        --hf-ckpt-path {hf_ckpt_path}
+        conversion_cmd = (
+            f"if [ -d '{hf_ckpt_path}' ] && [ -f '{hf_ckpt_path}/config.json' ]; then "
+            f"echo 'Found cached HF checkpoint at: {hf_ckpt_path}' && "
+            f"echo 'Using cached checkpoint, skipping conversion' && "
+            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"else "
+            f"echo 'No cached checkpoint found, converting DCP to HF format...' && "
+            f"mkdir -p $(dirname '{hf_ckpt_path}') && "
+            f"uv run python examples/convert_dcp_to_hf.py "
+            f"--config {dcp_config} "
+            f"--dcp-ckpt-path {dcp_ckpt_path} "
+            f"--hf-ckpt-path {hf_ckpt_path} && "
+            f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}' && "
+            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"fi"
+        )
     
-    if [ $? -eq 0 ]; then
-        echo "Successfully converted checkpoint to: {hf_ckpt_path}"
-        export HF_MODEL_PATH={hf_ckpt_path}
-    else
-        echo "Error: Failed to convert checkpoint"
-        exit 1
-    fi
-fi"""
-    
-    return conversion_cmd.strip()
+    return conversion_cmd
 
 
 def generate_parameter_combinations(sweep_config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -320,7 +308,8 @@ def launch_eval_experiment(
     
     # Combine conversion and evaluation commands
     if conversion_cmd:
-        full_command = f"{conversion_cmd}\n\n# Run evaluation\n{eval_command}"
+        # The conversion command sets HF_MODEL_PATH, so we need to ensure it's available for the eval command
+        full_command = f"{conversion_cmd} && {eval_command}"
     else:
         full_command = eval_command
     
@@ -345,6 +334,11 @@ def launch_eval_experiment(
     full_cmd = " \\\n".join(sbatch_cmd)
     
     if dry_run:
+        # For dry run, show the command that will be executed
+        if conversion_cmd:
+            print("\n--- Command that will be executed ---")
+            print(full_command)
+            print("--- End of command ---\n")
         return full_cmd, None
     else:
         result = subprocess.run(full_cmd, shell=True, capture_output=True, text=True)
