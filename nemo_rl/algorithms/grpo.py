@@ -596,7 +596,7 @@ def grpo_train(
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
+            if k in {"lr", "wd", "reward", "global_valid_seqs", "global_valid_toks"}:
                 metrics[k] = np.mean(v).item()
             else:
                 metrics[k] = np.sum(v).item()
