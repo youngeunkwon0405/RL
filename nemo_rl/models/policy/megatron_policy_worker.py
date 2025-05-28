@@ -433,6 +433,7 @@ class MegatronPolicyWorker:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
         dataset_size = data.size
+        num_global_batches = dataset_size // local_gbs
 
         if eval_mode:
             ctx = torch.no_grad()
@@ -542,30 +543,21 @@ class MegatronPolicyWorker:
                     torch.cuda.empty_cache()
 
                 if parallel_state.is_pipeline_last_stage(ignore_virtual=True):
-                    # Average loss across microbatches.
-                    loss_metrics = {}
-                    for key in losses_reduced[0].keys():
-                        numerator = 0
-                        denominator = 0
-                        for x in losses_reduced:
-                            val = x[key]
-                            # there is one dict per microbatch. in new reporting, we average
-                            # over the total number of tokens across the global batch.
-                            if isinstance(val, tuple) or isinstance(val, list):
-                                numerator += val[0]
-                                denominator += val[1]
-                            else:
-                                # legacy behavior. we average over the number of microbatches,
-                                # and so the denominator is 1.
-                                numerator += val
-                                denominator += 1
-                        loss_metrics[key] = numerator / denominator
+                    # keep all microbatch metrics to be normalized later
+                    gb_loss_metrics = []
+                    for x in losses_reduced:
+                        loss_metrics = {}
+                        for k in x.keys():
+                            loss_metrics[k] = x[k] / num_global_batches
+                        gb_loss_metrics.append(loss_metrics)
+                        loss_metrics["lr"] = curr_lr
+                        loss_metrics["wd"] = curr_wd
+                        loss_metrics["grad_norm"] = grad_norm
+                        loss_metrics["global_valid_seqs"] = global_valid_seqs.item()
+                        loss_metrics["global_valid_toks"] = global_valid_toks.item()
 
-                    loss_metrics["lr"] = curr_lr
-                    loss_metrics["wd"] = curr_wd
-                    loss_metrics["grad_norm"] = grad_norm
                     torch.distributed.broadcast_object_list(
-                        [loss_metrics],
+                        [gb_loss_metrics],
                         src=get_pipeline_model_parallel_last_rank(),
                         group=get_pipeline_model_parallel_group(),
                     )
@@ -576,9 +568,9 @@ class MegatronPolicyWorker:
                         src=get_pipeline_model_parallel_last_rank(),
                         group=get_pipeline_model_parallel_group(),
                     )
-                    loss_metrics = loss_metrics[0]
+                    gb_loss_metrics = loss_metrics[0]
 
-                all_mb_metrics.append(loss_metrics)
+                all_mb_metrics.extend(gb_loss_metrics)
 
         # Aggregate metrics across all microbatches
         mb_metrics = defaultdict(list)

@@ -36,22 +36,18 @@ def forward_step_arbitrary_loss(
         data_iterator : Input data iterator
         model (GPTModel): The GPT Model
     """
-    # timers = state.timers
     straggler_timer = state.straggler_timer
 
-    # timers("batch-generator", log_level=2).start()
     with straggler_timer(bdata=True):
         data_dict = next(data_iterator).to("cuda")
         input_ids = data_dict["input_ids"]
         attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
             input_ids, 0, False, False, False
         )
-        output_tensor = model(input_ids, position_ids, attention_mask)
-        loss_data = data_dict
-    # timers("batch-generator").stop()
-
+    
     with straggler_timer:
         output_tensor = model(input_ids, position_ids, attention_mask)
+        loss_data = data_dict
 
     return output_tensor, partial(
         loss_fn,
@@ -60,7 +56,7 @@ def forward_step_arbitrary_loss(
         global_valid_toks=global_valid_toks,
         vocab_parallel_rank=get_tensor_model_parallel_rank(),
         vocab_parallel_group=get_tensor_model_parallel_group(),
-    )  # lambda x: (torch.sum(x), {'a': x}) #
+    )
 
 
 def broadcast_tensor(
