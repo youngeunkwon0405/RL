@@ -1,0 +1,209 @@
+# Evaluation Launcher for NeMo RL
+
+The `eval_launcher.py` script provides a convenient way to launch evaluation experiments on SLURM clusters with automatic DCP to HuggingFace checkpoint conversion and parameter sweeps.
+
+## Features
+
+- **Smart Checkpoint Caching**: Automatically caches converted HF checkpoints to avoid redundant conversions
+- **In-Job Conversion**: DCP to HF conversion happens inside the SLURM job, not on the login node
+- **SLURM Resource Management**: Handles job submission with configurable resources
+- **Parameter Sweeps**: Support for sweeping over multiple evaluation parameters
+- **Dry Run Mode**: Preview commands before execution
+
+## How It Works
+
+### Smart Caching System
+
+When converting DCP checkpoints:
+1. The script generates a unique hash based on the DCP checkpoint path and config file
+2. Converted checkpoints are stored in `$LOG/nemo-rl/hf_eval_checkpoints/` with descriptive names
+3. Before conversion, the script checks if a cached version already exists
+4. If found, it uses the cached checkpoint; otherwise, it performs the conversion
+5. All conversion happens inside the SLURM job to utilize compute resources
+
+## Usage
+
+### Basic Evaluation
+
+Evaluate a HuggingFace model:
+```bash
+python xp/eval_launcher.py generation.model_name=meta-llama/Llama-3.2-1B-Instruct
+```
+
+### Evaluate with DCP Checkpoint Conversion
+
+Convert a DCP checkpoint and evaluate (with automatic caching):
+```bash
+python xp/eval_launcher.py \
+    --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
+    --dcp-config results/grpo/step_170/config.yaml
+```
+
+The converted checkpoint will be cached at:
+`$LOG/nemo-rl/hf_eval_checkpoints/step_170_<hash>/`
+
+### Force Re-conversion
+
+To force re-conversion even if a cached version exists:
+```bash
+python xp/eval_launcher.py \
+    --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
+    --dcp-config results/grpo/step_170/config.yaml \
+    --force-conversion
+```
+
+### Specify Custom HF Path
+
+To save the converted checkpoint at a specific location:
+```bash
+python xp/eval_launcher.py \
+    --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
+    --dcp-config results/grpo/step_170/config.yaml \
+    --hf-ckpt-path /custom/path/to/hf_checkpoint
+```
+
+### Multi-node Evaluation
+
+Run evaluation on multiple nodes:
+```bash
+python xp/eval_launcher.py \
+    --nodes 2 \
+    --gpus 8 \
+    generation.model_name=Qwen/Qwen2.5-32B \
+    generation.vllm_cfg.tensor_parallel_size=4
+```
+
+### Parameter Sweeps
+
+Create a sweep configuration file (e.g., `eval_sweep.yaml`):
+```yaml
+generation.temperature: [0.6, 0.8, 1.0]
+generation.top_p: [0.9, 0.95]
+eval.num_tests_per_prompt: [8, 16]
+```
+
+Run the sweep:
+```bash
+python xp/eval_launcher.py \
+    --sweep eval_sweep.yaml \
+    --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
+    --dcp-config results/grpo/step_170/config.yaml
+```
+
+### Custom Evaluation Config
+
+Use a custom evaluation configuration:
+```bash
+python xp/eval_launcher.py \
+    --config examples/configs/eval_custom.yaml \
+    generation.model_name=agentica-org/DeepScaleR-1.5B-Preview
+```
+
+## Command Line Arguments
+
+### Evaluation Arguments
+- `--config`: Path to evaluation config YAML file (default: examples/configs/eval.yaml)
+- `--sweep`: Path to sweep config YAML file for parameter sweeps
+
+### Checkpoint Conversion Arguments
+- `--dcp-ckpt-path`: Path to DCP checkpoint to convert
+- `--dcp-config`: Path to config file for DCP checkpoint (required with --dcp-ckpt-path)
+- `--hf-ckpt-path`: Path to save converted HF checkpoint (optional, auto-generated with caching if not provided)
+- `--skip-conversion`: Skip checkpoint conversion (use with pre-converted checkpoints)
+- `--force-conversion`: Force re-conversion even if cached version exists
+
+### SLURM Arguments
+- `--nodes`: Number of nodes to use (default: from config or 1)
+- `--gpus`: Number of GPUs per node (default: 8)
+- `--time`: Time limit for the job (default: "2:0:0")
+- `--account`: SLURM account to use
+- `--partition`: SLURM partition to use (default: "batch")
+- `--container`: Container to use
+- `--mounts`: Mount points (default: "/lustre:/lustre")
+- `--jobname`: Base name for the job (default: "eval")
+- `--dry`: Print commands without executing (dry run mode)
+
+### Additional Parameters
+Any additional parameters can be passed directly and will be forwarded to the evaluation script:
+```bash
+python xp/eval_launcher.py \
+    generation.model_name=model_path \
+    data.dataset_name=HuggingFaceH4/MATH-500 \
+    eval.num_tests_per_prompt=16
+```
+
+## Examples
+
+### Example 1: Evaluate DeepScaleR on MATH-500
+```bash
+python xp/eval_launcher.py \
+    --nodes 1 \
+    --gpus 8 \
+    --time "4:0:0" \
+    generation.model_name=agentica-org/DeepScaleR-1.5B-Preview \
+    generation.temperature=0.6 \
+    generation.top_p=0.95 \
+    generation.vllm_cfg.max_model_len=32768 \
+    data.dataset_name=HuggingFaceH4/MATH-500 \
+    data.dataset_key=test \
+    eval.num_tests_per_prompt=16
+```
+
+### Example 2: Convert and Evaluate GRPO Checkpoint (with caching)
+```bash
+python xp/eval_launcher.py \
+    --dcp-ckpt-path /path/to/grpo/checkpoint/weights/ \
+    --dcp-config /path/to/grpo/checkpoint/config.yaml \
+    --nodes 2 \
+    --jobname grpo_eval \
+    data.dataset_name=openai/gsm8k
+```
+
+### Example 3: Dry Run with Sweep
+```bash
+python xp/eval_launcher.py \
+    --dry \
+    --sweep xp/eval_sweep_example.yaml \
+    --dcp-ckpt-path results/checkpoint/weights/ \
+    --dcp-config results/checkpoint/config.yaml
+```
+
+### Example 4: View What Commands Will Be Run
+Use dry run to see the full command that will be executed inside the SLURM job:
+```bash
+python xp/eval_launcher.py \
+    --dry \
+    --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
+    --dcp-config results/grpo/step_170/config.yaml
+```
+
+## Environment Variables
+
+The script uses the following environment variables with defaults:
+- `LOG`: Base log directory (default: "/tmp")
+- `ACCOUNT`: SLURM account (default: "default")
+- `CON`: Container directory (default: "/containers")
+
+## Notes
+
+1. **Caching System**: The script uses MD5 hashing of the checkpoint paths to create unique identifiers for cached checkpoints
+2. **In-Job Conversion**: All DCP to HF conversion happens inside the SLURM job, utilizing compute resources efficiently
+3. **Automatic Path Detection**: The script extracts meaningful identifiers from checkpoint paths for readable cache directory names
+4. **Sweep Efficiency**: When using sweeps with the same checkpoint, conversion only happens once due to caching
+5. **Error Handling**: If conversion fails, the job will exit with an error message
+
+## Cache Directory Structure
+
+Converted checkpoints are stored as:
+```
+$LOG/nemo-rl/hf_eval_checkpoints/
+├── step_170_a1b2c3d4e5f6g7h8/
+│   ├── config.json
+│   ├── model.safetensors
+│   └── ...
+├── checkpoint_final_9i8j7k6l5m4n3o2/
+│   └── ...
+└── ...
+```
+
+Where the directory name format is: `<checkpoint_identifier>_<hash>` 
