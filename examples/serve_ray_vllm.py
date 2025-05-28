@@ -256,11 +256,14 @@ async def process_requests_concurrently(cfg):
         )
         print(f"Batch size: {len(batch)}, Remaining time: {remaining_time:.2f} hours")
 
-        # Create a mapping from coroutines to their metadata for result processing
-        coro_to_metadata = {req[0]: (req[1], req[2]) for req in batch}
+        # Create tasks from coroutines and map them to their metadata for result processing
+        batch_tasks = [asyncio.create_task(req[0]) for req in batch]
+        task_to_metadata = {
+            task: (batch[i][1], batch[i][2]) for i, task in enumerate(batch_tasks)
+        }
 
         # Process requests as they complete instead of waiting for all to finish
-        pending_tasks = set(batch_requests)
+        pending_tasks = set(batch_tasks)
 
         while pending_tasks:
             try:
@@ -275,7 +278,7 @@ async def process_requests_concurrently(cfg):
                         result = await task
                         if result is not None:
                             all_results.append(result)
-                            sample_idx, test_idx = coro_to_metadata[task]
+                            sample_idx, test_idx = task_to_metadata[task]
                             completed_requests.add(f"{sample_idx}_{test_idx}")
                             processed_count += 1
 
@@ -295,8 +298,8 @@ async def process_requests_concurrently(cfg):
                     except Exception as e:
                         print(f"Error in request: {str(e)}")
                         # Find the metadata for this failed request
-                        if task in coro_to_metadata:
-                            metadata = coro_to_metadata[task]
+                        if task in task_to_metadata:
+                            metadata = task_to_metadata[task]
                             print(
                                 f"Failed request was for sample {metadata[0]}, test {metadata[1]}"
                             )
