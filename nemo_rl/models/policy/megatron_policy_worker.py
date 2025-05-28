@@ -1075,12 +1075,10 @@ class MegatronPolicyWorker:
         no_grad.__exit__(None, None, None)
 
     def move_model(self, model, device):
-        # return model
-        state_dict = model.state_dict()
-        for name, item in state_dict.items():
+        for name, item in model.state_dict().items():
             if isinstance(item, torch.Tensor):
                 item = item.detach().to(device=device, non_blocking=True, copy=True)
-            state_dict[name] = item
+            model.state_dict()[name] = item
         return model
 
     def save_checkpoint(
