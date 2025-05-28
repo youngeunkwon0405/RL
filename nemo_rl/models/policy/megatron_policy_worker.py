@@ -145,6 +145,12 @@ def setup_megatron_model(
     # Context used for persisting some state between checkpoint saves.
     checkpointing_context = _init_checkpointing_context(cfg.checkpoint_config)
 
+    # Tokenizer
+    build_tokenizer(
+        cfg.tokenizer_config,
+        make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by,
+        tensor_model_parallel_size=cfg.model_config.tensor_model_parallel_size,
+    )
     if not cfg.model_config.vocab_size:
         cfg.model_config.vocab_size = cfg.tokenizer_config.padded_vocab_size
 
@@ -277,6 +283,9 @@ class MegatronPolicyWorker:
         model_cfg.params_dtype = torch.float32  # amp
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
+
+        # from megatron.core.transformer.enums import AttnBackend
+        # model_cfg.attention_backend = AttnBackend.unfused
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
