@@ -13,21 +13,24 @@
 # limitations under the License.
 
 from collections import defaultdict
+
 import einops
 import numpy as np
+import torch
 from megatron.core import parallel_state
 from nemo.lightning.io.state import (
-    TransformCTX,
-    _ModelState,
     StateDictTransform,
+    TransformCTX,
     _match_keys,
+    _ModelState,
 )
-import torch
 from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.integrations.accelerate import init_empty_weights
 
-import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 import nemo_rl.models.megatron.converters.llama as llama_converter
+import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
+import nemo_rl.models.megatron.converters.qwen3 as qwen3_converter
+
 # import nemo_rl.models.megatron.converters.deepseek as deepseek_converter
 from nemo_rl.models.megatron.refit_utils import get_global_param_key_to_local_key_map
 
@@ -99,8 +102,7 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
 
 
 def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
-    """
-    Split interleave-concatenated qkv to q, k, v
+    """Split interleave-concatenated qkv to q, k, v.
 
     Example: export layer linear_qkv to HF {q|k|v}_proj
     """
@@ -136,8 +138,7 @@ def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
 
 
 def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
-    """
-    Split interleave-concatenated qkv bias to separate q, k, v bias
+    """Split interleave-concatenated qkv bias to separate q, k, v bias.
 
     Example: export layer linear_qkv bias to HF {q|k|v}_proj bias
     """
@@ -213,9 +214,15 @@ class MegatronToHFConverter:
         global_keys_map = {k: None for k in global_keys}
 
         # TODO(yifu): inheritence for this?
-        if "qwen" in hf_model_name.lower():
+        if "qwen2" in hf_model_name.lower():
             self.export_mapping = qwen2_converter.get_export_mapping()
             self.export_transforms = qwen2_converter.get_export_transforms()
+            self.get_source_fn = lambda source_state_dict, _: _ModelState(
+                source_state_dict
+            )
+        elif "qwen3" in hf_model_name.lower():
+            self.export_mapping = qwen3_converter.get_export_mapping()
+            self.export_transforms = qwen3_converter.get_export_transforms()
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )

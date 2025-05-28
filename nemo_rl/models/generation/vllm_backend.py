@@ -54,6 +54,19 @@ class VllmInternalWorkerExtension:
                 tensor = func(*list_args)
                 weights.append((name, tensor))
 
+            """## TODO: is this needed for non-llama?
+            model = self.model_runner.model.language_model.model
+            named_params = model.named_parameters()
+            for name, param in named_params:
+                if "feed_forward.experts" in name:
+                    # extract the layer number from the name
+                    # e.g. "layers.0.feed_forward.experts.gate_up_proj" -> 0
+                    layer_num = int(name.split(".")[1])
+                    weight_loader = model.layers[
+                        layer_num
+                    ].feed_forward.experts.weight_loader
+                    setattr(param, "weight_loader", weight_loader)"""
+
             # Load weights into the model
             self.model_runner.model.load_weights(weights=weights)
             torch.cuda.synchronize()
