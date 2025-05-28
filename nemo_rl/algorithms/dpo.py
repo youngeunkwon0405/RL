@@ -81,7 +81,7 @@ def _default_dpo_save_state() -> DPOSaveState:
     }
 
 
-class MasterConfig(TypedDict):
+class DPOMasterConfig(TypedDict):
     policy: PolicyConfig
     data: DataConfig
     dpo: DPOConfig
@@ -94,7 +94,7 @@ class MasterConfig(TypedDict):
 # Setup & Initialization
 # =======================================================
 def setup(
-    master_config: MasterConfig,
+    master_config: DPOMasterConfig,
     tokenizer: AutoTokenizer,
     train_dataset: AllTaskProcessedDataset,
     val_dataset: AllTaskProcessedDataset,
@@ -107,7 +107,7 @@ def setup(
     Logger,
     CheckpointManager,
     DPOSaveState,
-    MasterConfig,
+    DPOMasterConfig,
 ]:
     """Main entry point for running DPO algorithm.
 
@@ -239,7 +239,7 @@ def validate(
     tokenizer,
     loss_fn,
     step: int,
-    master_config: MasterConfig,
+    master_config: DPOMasterConfig,
     val_batches: int,
     val_batch_size: int,
     val_mbs: int,

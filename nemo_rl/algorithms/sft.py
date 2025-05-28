@@ -73,7 +73,7 @@ def _default_sft_save_state() -> SFTSaveState:
     }
 
 
-class MasterConfig(TypedDict):
+class SFTMasterConfig(TypedDict):
     policy: PolicyConfig
     data: DataConfig
     sft: SFTConfig
@@ -86,7 +86,7 @@ class MasterConfig(TypedDict):
 # Setup & Initialization
 # =======================================================
 def setup(
-    master_config: MasterConfig,
+    master_config: SFTMasterConfig,
     tokenizer: AutoTokenizer,
     train_dataset: AllTaskProcessedDataset,
     val_dataset: AllTaskProcessedDataset,
@@ -99,7 +99,7 @@ def setup(
     Logger,
     CheckpointManager,
     SFTSaveState,
-    MasterConfig,
+    SFTMasterConfig,
 ]:
     """Main entry point for running SFT algorithm.
 
@@ -209,7 +209,7 @@ def validate(
     tokenizer,
     loss_fn,
     step: int,
-    master_config: MasterConfig,
+    master_config: SFTMasterConfig,
     sft_task_spec: TaskDataSpec,
     val_batches: int,
     val_batch_size: int,

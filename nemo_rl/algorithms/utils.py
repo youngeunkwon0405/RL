@@ -395,7 +395,7 @@ def save_checkpoint(
 
     Args:
         checkpointer (CheckpointManager): The checkpoint manager to use for checkpointing
-        master_config (MasterConfig): The master configuration to dump to the checkpoint
+        master_config (TypedDict): The master configuration to dump to the checkpoint
         save_state (TypedDict): The save state to dump to the checkpoint
         total_steps (int): The number of training steps
         train_dataloader (StatefulDataLoader): The training dataloader

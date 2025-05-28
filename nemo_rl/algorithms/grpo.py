@@ -72,15 +72,14 @@ TokenizerType = PreTrainedTokenizerBase
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
-    max_rollout_turns: int
     max_num_steps: int
     max_rollout_turns: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
+    val_batch_size: int
     val_at_start: bool
     max_val_samples: int
-    val_batch_size: int
 
 
 class GRPOSaveState(TypedDict):
@@ -99,7 +98,7 @@ class GRPOLoggerConfig(LoggerConfig):
     num_val_samples_to_print: int  # number of val samples to print to stdout
 
 
-class MasterConfig(TypedDict):
+class GRPOMasterConfig(TypedDict):
     policy: PolicyConfig
     loss_fn: ClippedPGLossConfig
     env: dict[str, Any]
@@ -116,7 +115,7 @@ class MasterConfig(TypedDict):
 
 
 def setup(
-    master_config: MasterConfig,
+    master_config: GRPOMasterConfig,
     tokenizer: TokenizerType,
     dataset: AllTaskProcessedDataset,
     val_dataset: Optional[AllTaskProcessedDataset],
@@ -130,7 +129,7 @@ def setup(
     Logger,
     CheckpointManager,
     GRPOSaveState,
-    MasterConfig,
+    GRPOMasterConfig,
 ]:
     """Main entry point for running GRPO algorithm.
 
@@ -298,7 +297,7 @@ def grpo_train(
     logger: Logger,
     checkpointer: CheckpointManager,
     grpo_save_state: GRPOSaveState,
-    master_config: MasterConfig,
+    master_config: GRPOMasterConfig,
 ) -> None:
     """Run GRPO training algorithm."""
     timer = Timer()
@@ -571,7 +570,7 @@ def validate(
     tokenizer,
     val_task_to_env: Optional[dict[str, EnvironmentInterface]],
     step: int,
-    master_config: MasterConfig,
+    master_config: GRPOMasterConfig,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
