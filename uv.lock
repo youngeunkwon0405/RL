@@ -29,7 +29,7 @@ members = [
 
 [[manifest.dependency-metadata]]
 name = "flash-attn"
-requires-dist = ["torch", "einops"]
+requires-dist = ["torch", "einops", "setuptools"]
 
 [[package]]
 name = "absl-py"
@@ -1264,6 +1264,8 @@ version = "2.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
+    { name = "setuptools", version = "79.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
+    { name = "setuptools", version = "80.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "torch" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/81/f5/59b0727da8c041c0e5eb9feba068e27c88b2cead0e03083c5c6d444d004b/flash_attn-2.7.3.tar.gz", hash = "sha256:9078cf92355c4e3f77f01626ece8c71aad26bdbfa827c2af8c6ac5632cc1cc58", size = 3223463, upload-time = "2025-01-12T03:29:38.819Z" }
