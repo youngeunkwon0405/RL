@@ -149,14 +149,8 @@ def create_conversion_command(
     Returns:
         str: Shell command to execute for conversion
     """
-    # Create the conversion command with existence check
-    conversion_cmd = f"""
-# Check if HF checkpoint already exists
-if [ -d "{hf_ckpt_path}" ] && [ -f "{hf_ckpt_path}/config.json" ]; then
-    echo "Found cached HF checkpoint at: {hf_ckpt_path}"
-    {"echo 'Force conversion flag set, re-converting...'" if force_conversion else f"echo 'Using cached checkpoint, skipping conversion'"}
-    {"" if force_conversion else f"export HF_MODEL_PATH={hf_ckpt_path}"}
-else
+    # Build the base conversion command
+    base_conversion = f"""
     echo "No cached checkpoint found, converting DCP to HF format..."
     mkdir -p $(dirname "{hf_ckpt_path}")
     uv run python examples/convert_dcp_to_hf.py \\
@@ -170,11 +164,12 @@ else
     else
         echo "Error: Failed to convert checkpoint"
         exit 1
-    fi
-fi
-
-{"" if not force_conversion else f"""
-# Force conversion case
+    fi"""
+    
+    if force_conversion:
+        # Force conversion case - always convert
+        conversion_cmd = f"""
+# Force conversion flag is set
 echo "Converting DCP to HF format (forced)..."
 mkdir -p $(dirname "{hf_ckpt_path}")
 uv run python examples/convert_dcp_to_hf.py \\
@@ -188,9 +183,18 @@ if [ $? -eq 0 ]; then
 else
     echo "Error: Failed to convert checkpoint"
     exit 1
-fi
-"""}
-"""
+fi"""
+    else:
+        # Normal case - check cache first
+        conversion_cmd = f"""
+# Check if HF checkpoint already exists
+if [ -d "{hf_ckpt_path}" ] && [ -f "{hf_ckpt_path}/config.json" ]; then
+    echo "Found cached HF checkpoint at: {hf_ckpt_path}"
+    echo "Using cached checkpoint, skipping conversion"
+    export HF_MODEL_PATH={hf_ckpt_path}
+else{base_conversion}
+fi"""
+    
     return conversion_cmd.strip()
 
 
