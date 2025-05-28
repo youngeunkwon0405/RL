@@ -28,7 +28,7 @@ checkpointing:
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
-  save_period: 5
+  save_period: 10
 
 policy:
   training_backend: "megatron"
