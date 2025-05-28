@@ -154,6 +154,7 @@ def gather_params(
     param_name_to_rank_and_key,
 ):
     import time
+
     st = time.time()
     # Process each parameter (by its unique global key) one at a time.
     gathered_params = {}

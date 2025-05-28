@@ -28,9 +28,15 @@ from nemo_rl.algorithms.loss_functions import LossFunction
 
 
 def forward_step_arbitrary_loss(
-    state: GlobalState, global_valid_seqs: torch.Tensor, global_valid_toks: torch.Tensor, data_iterator: Iterable, model: GPTModel, loss_fn: LossFunction
+    state: GlobalState,
+    global_valid_seqs: torch.Tensor,
+    global_valid_toks: torch.Tensor,
+    data_iterator: Iterable,
+    model: GPTModel,
+    loss_fn: LossFunction,
 ):
     """Forward training step.
+
     Args:
         state (GlobalState): Global state for the run
         data_iterator : Input data iterator
@@ -44,7 +50,7 @@ def forward_step_arbitrary_loss(
         attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
             input_ids, 0, False, False, False
         )
-    
+
     with straggler_timer:
         output_tensor = model(input_ids, position_ids, attention_mask)
         loss_data = data_dict
@@ -66,6 +72,7 @@ def broadcast_tensor(
     Handles the case where the input tensor might be None on non-source ranks.
     If the input tensor is provided on non-source ranks, it must have the
     correct shape and dtype matching the tensor on the source rank.
+
     Args:
         tensor: The tensor to broadcast on the source rank. Can be None on
                 non-source ranks (will be created with correct shape/dtype).
@@ -73,9 +80,11 @@ def broadcast_tensor(
                 for the broadcast and must match the source tensor's metadata.
         src_rank (int): The global rank of the source process.
         group: The process group for communication.
+
     Returns:
         torch.Tensor: The broadcasted tensor. On non-source ranks, this will
                       be the tensor received from the source.
+
     Raises:
         ValueError: If the tensor is None on the source rank, or if a tensor
                     provided on a non-source rank has mismatched shape/dtype/device.
