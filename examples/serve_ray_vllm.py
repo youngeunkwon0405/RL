@@ -260,40 +260,53 @@ async def process_requests_concurrently(cfg):
         coro_to_metadata = {req[0]: (req[1], req[2]) for req in batch}
 
         # Process requests as they complete instead of waiting for all to finish
-        for coro in asyncio.as_completed(batch_requests):
-            try:
-                result = await coro
-                if result is not None:
-                    all_results.append(result)
-                    sample_idx, test_idx = coro_to_metadata[coro]
-                    completed_requests.add(f"{sample_idx}_{test_idx}")
-                    processed_count += 1
+        pending_tasks = set(batch_requests)
 
-                    # Check if we should save progress while processing
-                    current_time = time.time()
-                    if current_time - last_save_time >= save_interval:
-                        batch_num = save_progress_state_and_generations(
-                            output_dir,
-                            list(completed_requests),
-                            batch_num,
-                            start_time,
-                            all_results,
-                        )
-                        all_results = []  # Clear results after saving
-                        last_save_time = current_time
+        while pending_tasks:
+            try:
+                # Wait for at least one task to complete
+                done, pending_tasks = await asyncio.wait(
+                    pending_tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+
+                # Process all completed tasks
+                for task in done:
+                    try:
+                        result = await task
+                        if result is not None:
+                            all_results.append(result)
+                            sample_idx, test_idx = coro_to_metadata[task]
+                            completed_requests.add(f"{sample_idx}_{test_idx}")
+                            processed_count += 1
+
+                            # Check if we should save progress while processing
+                            current_time = time.time()
+                            if current_time - last_save_time >= save_interval:
+                                batch_num = save_progress_state_and_generations(
+                                    output_dir,
+                                    list(completed_requests),
+                                    batch_num,
+                                    start_time,
+                                    all_results,
+                                )
+                                all_results = []  # Clear results after saving
+                                last_save_time = current_time
+
+                    except Exception as e:
+                        print(f"Error in request: {str(e)}")
+                        # Find the metadata for this failed request
+                        if task in coro_to_metadata:
+                            metadata = coro_to_metadata[task]
+                            print(
+                                f"Failed request was for sample {metadata[0]}, test {metadata[1]}"
+                            )
 
             except Exception as e:
-                print(f"Error in request: {str(e)}")
-                # Find the metadata for this failed request
-                for req_coro, metadata in coro_to_metadata.items():
-                    if req_coro == coro:
-                        print(
-                            f"Failed request was for sample {metadata[0]}, test {metadata[1]}"
-                        )
-                        break
+                print(f"Error in batch processing: {str(e)}")
+                break
 
-        # Small delay to prevent overwhelming the server
-        await asyncio.sleep(0.1)
+            # Small delay to prevent overwhelming the server
+            await asyncio.sleep(0.1)
 
     # Final save with any remaining results
     batch_num = save_progress_state_and_generations(
