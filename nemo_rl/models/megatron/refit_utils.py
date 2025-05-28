@@ -45,10 +45,12 @@ def get_global_param_key_to_local_key_map(
     model, model_cfg: GPTConfig, keys: List[Tuple[str, str]]
 ) -> Dict[str, Tuple[int, str]]:
     """Get a mapping from global parameter keys to local parameter keys.
+
     Args:
         model: The model to get the mapping for.
         model_cfg: The model configuration.
         keys: The keys to get the mapping for. Tuple of (local_key, global_hf_key)
+
     Returns:
         A dictionary mapping global parameter keys to a tuple of (rank, local parameter key).
     """
@@ -97,6 +99,140 @@ def get_global_param_key_to_local_key_map(
     return union_global_map
 
 
+def _modify_model_state_dict(model_state_dict, param_name_to_rank_and_key):
+    # Process the model state dict to combine expert weights and biases
+    # This combines tensors like "decoder.layers.0.mlp.experts.linear_fc1.weight0" through "weight15"
+    # and potentially "decoder.layers.0.mlp.experts.linear_fc1.bias0" through "bias15"
+    # into single tensors like "...linear_fc1.weight" and "...linear_fc1.bias".
+    # It also modifies param_name_to_rank_and_key similarly.
+
+    combined_params_data = {}  # For model_state_dict
+    combined_keys_rank_info = {}  # For param_name_to_rank_and_key
+    keys_to_remove_state_dict = []
+    keys_to_remove_rank_map = []
+
+    # Regex to match expert weights or biases with their index
+    expert_pattern = re.compile(
+        r"(decoder\.layers\.\d+\.mlp\.experts\.linear_fc[12])\.(weight|bias)(\d+)"
+    )
+
+    # --- First pass: Identify expert params in model_state_dict, group them, mark originals for removal ---
+    for key in model_state_dict:
+        match = expert_pattern.match(key)
+        if match:
+            base_key = match.group(1)
+            param_type = match.group(2)  # 'weight' or 'bias'
+            expert_idx = int(match.group(3))
+
+            # Create the combined key (e.g., "...linear_fc1.weight")
+            combined_key = f"{base_key}.{param_type}"
+            keys_to_remove_state_dict.append(
+                key
+            )  # Mark original expert param for removal
+
+            # Initialize the list for this combined param if first time seeing it
+            if combined_key not in combined_params_data:
+                combined_params_data[combined_key] = []
+
+            # Ensure the list has enough slots (pad with None if needed)
+            while len(combined_params_data[combined_key]) <= expert_idx:
+                combined_params_data[combined_key].append(None)
+
+            # Store the expert param tensor at the correct index
+            combined_params_data[combined_key][expert_idx] = model_state_dict[key]
+
+    # --- Second pass: Stack the gathered expert params and add to model_state_dict ---
+    keys_added_state_dict = []
+    for key, expert_list in combined_params_data.items():
+        if isinstance(expert_list, list):
+            # Check if all expert params were found
+            if None in expert_list:
+                missing_indices = [i for i, p in enumerate(expert_list) if p is None]
+                print(
+                    f"WARNING: [State Dict] Missing expert params for {key} at indices: {missing_indices}",
+                    flush=True,
+                )
+                continue  # Skip this key
+
+            # Stack the expert params along a new first dimension (num_experts, ...)
+            try:
+                stacked_param = torch.stack(expert_list, dim=0)
+                model_state_dict[key] = stacked_param  # Add the combined tensor
+                keys_added_state_dict.append(key)
+            except Exception as e:
+                print(
+                    f"[State Dict] Error stacking experts for key {key}: {e}",
+                    flush=True,
+                )
+                for i, p in enumerate(expert_list):
+                    print(
+                        f"  Expert {i} shape: {p.shape if p is not None else 'None'}",
+                        flush=True,
+                    )
+                continue  # Skip this key
+
+    # --- Third pass: remove the original individual expert keys from model_state_dict ---
+    for key_to_remove in keys_to_remove_state_dict:
+        if key_to_remove in model_state_dict:
+            del model_state_dict[key_to_remove]
+
+    # --- Fourth pass: Process param_name_to_rank_and_key ---
+    for key, rank_and_local_key in param_name_to_rank_and_key.items():
+        match = expert_pattern.match(key)
+        if match:
+            base_key = match.group(1)
+            param_type = match.group(2)
+            # We only need *one* representative rank/key for the combined entry
+            combined_key = f"{base_key}.{param_type}"
+            if combined_key not in combined_keys_rank_info:
+                # Store the rank and local key from the first expert instance encountered
+                # Note: Assuming all experts for a given layer/type have the same rank owner
+                # and the local key structure is similar (e.g., differing only by index).
+                # We need the owner_raw_key without the expert index for recipe lookup later.
+                local_key_base = expert_pattern.sub(r"\1.\2", rank_and_local_key[1])
+                combined_keys_rank_info[combined_key] = (
+                    rank_and_local_key[0],
+                    local_key_base,
+                )
+
+            keys_to_remove_rank_map.append(key)  # Mark original expert key for removal
+
+    # --- Fifth pass: Add combined keys and remove original keys from param_name_to_rank_and_key ---
+    keys_added_rank_map = 0
+    for combined_key, rank_info in combined_keys_rank_info.items():
+        if (
+            combined_key not in param_name_to_rank_and_key
+        ):  # Avoid overwriting if somehow already exists
+            param_name_to_rank_and_key[combined_key] = rank_info
+            keys_added_rank_map += 1
+        else:
+            print(
+                f"WARNING: [Rank Map] Combined key {combined_key} already exists. Skipping addition.",
+                flush=True,
+            )
+
+    for key_to_remove in keys_to_remove_rank_map:
+        if key_to_remove in param_name_to_rank_and_key:
+            del param_name_to_rank_and_key[key_to_remove]
+
+    print(
+        f"Combined {len(keys_added_state_dict)} expert parameter groups in state_dict.",
+        flush=True,
+    )
+    print(
+        f"Removed {len(keys_to_remove_state_dict)} individual expert parameter keys from state_dict.",
+        flush=True,
+    )
+    print(
+        f"Added {keys_added_rank_map} combined expert key entries to rank map.",
+        flush=True,
+    )
+    print(
+        f"Removed {len(keys_to_remove_rank_map)} individual expert key entries from rank map.",
+        flush=True,
+    )
+
+
 @torch.no_grad()
 def gather_and_convert_params(
     model,
@@ -105,21 +241,32 @@ def gather_and_convert_params(
     param_name_to_rank_and_key,
 ):
     import time
+
     st = time.time()
     # Process each parameter (by its unique global key) one at a time.
     gathered_params = {}
+    model_state_dict = model.state_dict()
+
+    # Modify the model state dict and rank map to combine expert weights/biases
+    _modify_model_state_dict(model_state_dict, param_name_to_rank_and_key)
+
     for gk in sorted(param_name_to_rank_and_key.keys()):
         owner_pp_global_rank, owner_raw_key = param_name_to_rank_and_key[gk]
 
         # Only the owner PP rank has the parameter locally.
         if torch.distributed.get_rank() == owner_pp_global_rank:
-            param = model.state_dict()[owner_raw_key]
+            # Use the potentially modified owner_raw_key (now points to combined param)
+            param = model_state_dict[owner_raw_key]
 
             # Use the conversion dict to get the appropriate recipe for this parameter.
             recipe_dict, format_dict = get_param_conversion_recipe_dict(
                 owner_raw_key, converter_type, model_cfg
             )
-            recipe = recipe_dict.get(owner_raw_key, None)
+            # We need to look up the recipe using the pattern *without* the expert index,
+            # as that's how recipes are defined. Let's try matching the potentially combined key.
+            recipe_key_to_lookup = owner_raw_key
+            # For combined keys (e.g., "...linear_fc1.weight"), the recipe should match this base form.
+            recipe = recipe_dict.get(recipe_key_to_lookup, None)
             if recipe is None and "_extra_state" not in owner_raw_key:
                 print(
                     f"WARNING: {owner_raw_key} has no recipe mapping for conversion",
@@ -195,5 +342,5 @@ def gather_and_convert_params(
 
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
-    print(f'Time taken to gather and convert params: {time.time() - st}')
+    print(f"Time taken to gather and convert params: {time.time() - st}")
     return gathered_params
