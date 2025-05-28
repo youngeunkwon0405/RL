@@ -285,7 +285,7 @@ class MegatronPolicyWorker:
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
         model_cfg.params_dtype = torch.float32  # amp
-        model_cfg.pipeline_dtype = torch.float32  # dtype_map[self.cfg["pipeline_dtype"]]
+        model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
 
         checkpoint_config = CheckpointConfig(
@@ -296,10 +296,12 @@ class MegatronPolicyWorker:
             async_save=False,
             fully_parallel_save=True,
             fully_parallel_load=True,  # Enable fully parallel load
+            load_rng=False,
         )
         ref_checkpoint_config = CheckpointConfig(
             pretrained_checkpoint=pretrained_path,  # This is the path to the pretrained ckpt for the SFT case
             fully_parallel_load=True,  # Enable fully parallel load
+            load_rng=False,
         )
         self.megatron_cfg = ConfigContainer(
             model_config=model_cfg,
