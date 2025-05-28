@@ -656,9 +656,10 @@ def quack_train(
         metrics = {}
         metrics["loss"] = train_results["loss"].numpy()
         metrics["reward"] = repeated_batch["total_reward"].numpy()  # read from repeated_batch to reflect the reward of the latest generated answers
-        metrics["critic_batch_verdict"] = np.array([item['verdict'] for item in critic_buffer_items])
+        metrics["critic_batch_verdict"] = np.array([1.0 if item['verdict'] == 1.0 else 0.0 for item in critic_buffer_items])    # remove -1.0 verdicts
+        train_batch_verdict = np.array([item['verdict'] for item in critic_buffer_items])
         train_batch_reward = np.array([item['reward'] for item in critic_buffer_items])
-        metrics["critic_batch_reward"] = np.where(train_batch_reward == metrics['critic_batch_verdict'], 1.0, 0.0)
+        metrics["critic_batch_reward"] = np.where(train_batch_reward == train_batch_verdict, 1.0, 0.0)
         metrics["grad_norm"] = train_results["grad_norm"].numpy()
         
 
