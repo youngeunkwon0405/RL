@@ -94,5 +94,6 @@ setuptools.setup(
         # From megatron/core/requirements.txt
         "torch",  # Repeated with ^ just to make it easy to map back to the original requirements.txt
         "packaging",
+        "nvtx",
     ],
 )
