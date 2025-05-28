@@ -197,7 +197,7 @@ class RayWorkerBuilder:
         """Create a Ray worker asynchronously, returning futures.
 
         This method returns immediately with futures that can be awaited later.
-        
+
         Args:
             placement_group: Ray placement group for resource allocation
             placement_group_bundle_index: Index of the bundle in the placement group
@@ -237,7 +237,7 @@ class RayWorkerBuilder:
         isolated_initializer = self.IsolatedWorkerInitializer.options(  # type: ignore # @ray.remote call
             **initializer_options
         ).remote(self.ray_actor_class_fqn, *self.args, **self.kwargs)
-        
+
         # Return the future and the initializer actor
         worker_future = isolated_initializer.create_worker.remote(
             placement_group,
@@ -246,7 +246,7 @@ class RayWorkerBuilder:
             bundle_indices,
             **options,
         )
-        
+
         return worker_future, isolated_initializer
 
     def __call__(
@@ -283,12 +283,12 @@ class RayWorkerBuilder:
             placement_group_bundle_index,
             num_gpus,
             bundle_indices,
-            **extra_options
+            **extra_options,
         )
-        
+
         # Block to get the worker
         worker = ray.get(worker_future)
-        
+
         # We hold onto a reference to the initializer actor to avoid gc (would kill the child, 'real' actor)
         worker._RAY_INITIALIZER_ACTOR_REF_TO_AVOID_GC = isolated_initializer
         return worker
@@ -404,7 +404,7 @@ class RayWorkerGroup:
         # Collect all async creation calls
         worker_futures = []
         worker_info = []  # Store metadata for each worker
-        
+
         for group_idx, (node_idx, local_bundle_indices) in enumerate(
             bundle_indices_list
         ):
@@ -465,40 +465,47 @@ class RayWorkerGroup:
                 # Store the future and metadata
                 worker_idx = len(worker_futures)
                 worker_futures.append((worker_future, initializer))
-                worker_info.append({
-                    "group_idx": group_idx,
-                    "worker_idx": worker_idx,
-                    "node_idx": node_idx,
-                    "local_rank": local_rank,
-                    "global_rank": global_rank,
-                    "name": name,
-                    "bundle_indices": worker_bundle_indices,
-                })
+                worker_info.append(
+                    {
+                        "group_idx": group_idx,
+                        "worker_idx": worker_idx,
+                        "node_idx": node_idx,
+                        "local_rank": local_rank,
+                        "global_rank": global_rank,
+                        "name": name,
+                        "bundle_indices": worker_bundle_indices,
+                    }
+                )
                 current_group.append(worker_idx)
 
                 global_rank += 1
 
-        print(f"Waiting for {len(worker_futures)} workers to finish initializing...", flush=True)
+        print(
+            f"Waiting for {len(worker_futures)} workers to finish initializing...",
+            flush=True,
+        )
         worker_refs = [future for future, _ in worker_futures]
         workers = ray.get(worker_refs)
-        
+
         for idx, (worker, (_, initializer)) in enumerate(zip(workers, worker_futures)):
             worker._RAY_INITIALIZER_ACTOR_REF_TO_AVOID_GC = initializer
             self._workers.append(worker)
-            
+
             # Get the corresponding metadata
             info = worker_info[idx]
-            self._worker_metadata.append({
-                "node_idx": info["node_idx"],
-                "local_rank": info["local_rank"],
-                "global_rank": info["global_rank"],
-                "name": info["name"],
-                "bundle_indices": info["bundle_indices"],
-                "tied_group_idx": info["group_idx"],
-            })
-            
+            self._worker_metadata.append(
+                {
+                    "node_idx": info["node_idx"],
+                    "local_rank": info["local_rank"],
+                    "global_rank": info["global_rank"],
+                    "name": info["name"],
+                    "bundle_indices": info["bundle_indices"],
+                    "tied_group_idx": info["group_idx"],
+                }
+            )
+
             self.worker_to_tied_group_index[idx] = info["group_idx"]
-        
+
         # Reconstruct tied worker groups
         for group_idx, (_, local_bundle_indices) in enumerate(bundle_indices_list):
             current_group = []
@@ -706,7 +713,9 @@ class RayWorkerGroup:
                 # If this worker doesn't need data:
                 if make_dummy_calls_to_free_axes:
                     # If make_dummy_calls_to_free_axes is True, just call the method with None
-                    future = getattr(worker, method_name).remote(data=None, **common_kwargs)
+                    future = getattr(worker, method_name).remote(
+                        data=None, **common_kwargs
+                    )
                     futures.append(future)
                     called_workers.append(worker_idx)
                 else:
