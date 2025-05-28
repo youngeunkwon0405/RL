@@ -75,6 +75,7 @@ from nemo.tron.utils.train_utils import (
     logical_and_across_model_parallel_group,
     reduce_max_stat_across_model_parallel_group,
 )
+from nemo.tron.utils.async_utils import maybe_finalize_async_save
 from ray.util.queue import Queue
 from transformers import AutoTokenizer
 
@@ -277,14 +278,6 @@ class MegatronPolicyWorker:
         cfg_from_pretrained = ConfigContainer.from_yaml(pretrained_run_config)
         model_cfg = cfg_from_pretrained.model_config
         cfg_from_pretrained.logger_config = LoggerConfig()
-        cfg_from_pretrained.checkpoint_config = CheckpointConfig(
-            save_interval=100,
-            save=weights_path,
-            load=weights_path,
-            pretrained_checkpoint=pretrained_path,  # This is the path to the pretrained ckpt for the SFT case
-            async_save=True,
-            fully_parallel_save=True,
-        )
 
         model_cfg.tensor_model_parallel_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
         model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
@@ -297,10 +290,10 @@ class MegatronPolicyWorker:
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
-            save="/nemo_run/checkpoints",
-            load="/nemo_run/checkpoints",
+            save=weights_path,
+            load=weights_path,
             pretrained_checkpoint=pretrained_path,  # This is the path to the pretrained ckpt for the SFT case
-            async_save=True,
+            async_save=False,
             fully_parallel_save=True,
             fully_parallel_load=True,  # Enable fully parallel load
         )
@@ -349,6 +342,7 @@ class MegatronPolicyWorker:
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
         self.model = self.move_model(self.model, "cpu")
+
         if init_reference_model:
             ref_ckpt_context = _init_checkpointing_context(ref_checkpoint_config)
             reference_model = get_model_from_config(
@@ -1109,11 +1103,12 @@ class MegatronPolicyWorker:
             )
 
         original_save_path = self.mcore_state.cfg.checkpoint_config.save
-        save_dir = os.path.dirname(weights_path)
+        # save_dir = os.path.dirname(weights_path)
         release_name = os.path.basename(weights_path)
 
         try:
-            self.mcore_state.cfg.checkpoint_config.save = save_dir
+            maybe_finalize_async_save(ckpt_cfg=self.mcore_state.cfg.checkpoint_config, blocking=False)
+            self.mcore_state.cfg.checkpoint_config.save = weights_path
 
             optimizer_to_save = None
             scheduler_to_save = None
@@ -1140,6 +1135,7 @@ class MegatronPolicyWorker:
                 checkpointing_context=self.checkpointing_context,
             )
             print(f"Saved checkpoint to {weights_path}")
+            maybe_finalize_async_save(ckpt_cfg=self.mcore_state.cfg.checkpoint_config, blocking=True, terminate=True)
 
             if not is_training: # Restore training state if it was changed
                 self.model.train()

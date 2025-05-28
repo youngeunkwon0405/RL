@@ -244,17 +244,20 @@ def setup(
         print(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
+    
+    if last_checkpoint_path:
+        weights_path = Path(last_checkpoint_path) / "policy" / "weights"
+        optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
+    else:
+        weights_path = None
+        optimizer_path = None
 
     policy = Policy(
         cluster=cluster,
         config=policy_config,
         tokenizer=tokenizer,
-        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy" / "optimizer"
-        if last_checkpoint_path
-        else None,
+        weights_path=weights_path,
+        optimizer_path=optimizer_path,
         init_optimizer=True,
     )
 
