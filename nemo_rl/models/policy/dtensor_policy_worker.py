@@ -465,7 +465,7 @@ class DTensorPolicyWorker:
                         "global_valid_seqs": global_valid_seqs.item(),
                         "global_valid_toks": global_valid_toks.item(),
                         "grad_norm": grad_norm.item(),
-                        "grad_sparsity": grad_sparsity.item(),
+                        "grad_sparsity": grad_sparsity,
                     }
                 )
 
