@@ -31,6 +31,14 @@ critic_data.apply_chat_template: [true]
 fit_data.apply_chat_template: [true]
 
 # Use prompts specific to Qwen2.5-Math
-data.prompt_file: ["examples/prompts/quack/math.txt"]
-critic_data.prompt_file: ["examples/prompts/quack/critic.txt"]
-fit_data.prompt_file: ["examples/prompts/quack/fit.txt", "examples/prompts/quack/critic.txt"]
+data.prompt_file: ["examples/prompts/quack/math-nothink.txt"]
+critic_data.prompt_file: ["examples/prompts/quack/critic-nothink.txt"]
+fit_data.prompt_file: ["examples/prompts/quack/fit-nothink.txt", "examples/prompts/quack/critic-nothink.txt"]
+
+# generation params
+actor.generation.temperature: [0.7]
+actor.generation.top_p: [0.8]
+actor.generation.top_k: [20]
+critic.generation.temperature: [0.7]
+critic.generation.top_p: [0.8]
+critic.generation.top_k: [20]
