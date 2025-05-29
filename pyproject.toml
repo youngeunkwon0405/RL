@@ -118,7 +118,7 @@ link-mode = "copy"
 [[tool.uv.dependency-metadata]]
 name = "flash-attn"
 version = "2.7.3"
-requires-dist = ["torch", "einops", "setuptools"]
+requires-dist = ["torch", "einops", "setuptools", "psutil"]
 
 [tool.black]
 line-length = 120

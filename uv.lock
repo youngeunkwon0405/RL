@@ -30,7 +30,7 @@ members = [
 [[manifest.dependency-metadata]]
 name = "flash-attn"
 version = "2.7.3"
-requires-dist = ["torch", "einops", "setuptools"]
+requires-dist = ["torch", "einops", "setuptools", "psutil"]
 
 [[package]]
 name = "absl-py"
@@ -1347,6 +1347,7 @@ version = "2.7.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "einops" },
+    { name = "psutil" },
     { name = "setuptools", version = "79.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "setuptools", version = "80.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "torch" },
