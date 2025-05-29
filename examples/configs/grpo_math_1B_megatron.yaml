@@ -67,6 +67,8 @@ policy:
     empty_unused_memory_level: 1
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
+    num_layers_in_first_pipeline_stage: null
+    num_layers_in_last_pipeline_stage: null
     context_parallel_size: 1
     pipeline_dtype: ${policy.precision}
     expert_tensor_parallel_size: 1

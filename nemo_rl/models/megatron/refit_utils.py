@@ -145,7 +145,6 @@ def get_global_param_key_to_local_key_map(
                     f"WARNING: {gk} already in union_global_map when gathering keys",
                     flush=True,
                 )
-
     return union_global_map
 
 
