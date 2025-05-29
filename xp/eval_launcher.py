@@ -165,14 +165,12 @@ def create_conversion_command(
             f"--config {dcp_config} "
             f"--dcp-ckpt-path {dcp_ckpt_path} "
             f"--hf-ckpt-path {hf_ckpt_path} && "
-            f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}'; "
             f"flock -u 200; "
             f"else "
             f"echo 'Another process is force converting, waiting for completion...' && "
             f"flock 200 && "
-            f"echo 'Force conversion completed by another process' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"echo 'Force conversion completed by another process'; "
             f"fi; "
             f"exec 200>&-"  # Close the file descriptor
         )
@@ -182,8 +180,7 @@ def create_conversion_command(
             # First check if conversion is already complete
             f"if [ -d '{hf_ckpt_path}' ] && [ -f '{hf_ckpt_path}/config.json' ]; then "
             f"echo 'Found cached HF checkpoint at: {hf_ckpt_path}' && "
-            f"echo 'Using cached checkpoint, skipping conversion' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"echo 'Using cached checkpoint, skipping conversion'; "
             f"else "
             # Try to acquire lock for conversion
             f"mkdir -p $(dirname '{hf_ckpt_path}') && "
@@ -191,8 +188,7 @@ def create_conversion_command(
             f"if flock -n 200; then "
             # We got the lock, check again if someone else completed it while we were waiting
             f"if [ -d '{hf_ckpt_path}' ] && [ -f '{hf_ckpt_path}/config.json' ]; then "
-            f"echo 'Another process completed conversion, using cached checkpoint' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"echo 'Another process completed conversion, using cached checkpoint'; "
             f"else "
             # Proceed with conversion
             f"echo 'Acquired lock, converting DCP to HF format...' && "
@@ -200,16 +196,14 @@ def create_conversion_command(
             f"--config {dcp_config} "
             f"--dcp-ckpt-path {dcp_ckpt_path} "
             f"--hf-ckpt-path {hf_ckpt_path} && "
-            f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}'; "
             f"fi; "
             f"flock -u 200; "
             f"else "
             # Could not get lock, wait for the other process
             f"echo 'Another process is converting, waiting for completion...' && "
             f"flock 200 && "
-            f"echo 'Conversion completed by another process' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"echo 'Conversion completed by another process'; "
             f"fi; "
             f"exec 200>&-; "  # Close the file descriptor
             f"fi"
@@ -295,6 +289,7 @@ def launch_eval_experiment(
     mounts: str,
     job_name: str,
     conversion_cmd: Optional[str] = None,
+    hf_checkpoint_path: Optional[str] = None,
     dry_run: bool = False,
     extra_args: List[str] = None,
 ) -> Tuple[str, Optional[str]]:
@@ -309,9 +304,9 @@ def launch_eval_experiment(
     # Parse extra arguments into overrides
     all_args = list(extra_args) if extra_args else []
     
-    # If we have a conversion command, use the HF_MODEL_PATH environment variable
-    if conversion_cmd:
-        model_path_arg = "generation.model_name=$HF_MODEL_PATH"
+    # If we have a conversion command, use the HF checkpoint path directly
+    if conversion_cmd and hf_checkpoint_path:
+        model_path_arg = f"generation.model_name={hf_checkpoint_path}"
     else:
         model_path_arg = f"generation.model_name={model_path}"
     
@@ -410,6 +405,7 @@ def main():
     # Handle checkpoint paths
     model_path = None
     conversion_cmd = None
+    hf_checkpoint_path = None
     
     if args.dcp_ckpt_path and not args.skip_conversion:
         if not args.dcp_config:
@@ -438,8 +434,8 @@ def main():
             args.force_conversion
         )
         
-        # Model path will be set by the conversion command
-        model_path = "WILL_BE_SET_BY_CONVERSION"
+        # Model path will be set to the HF checkpoint path
+        model_path = hf_checkpoint_path
         
     elif args.skip_conversion and args.hf_ckpt_path:
         model_path = args.hf_ckpt_path
@@ -467,6 +463,7 @@ def main():
     print(f"\n=== {mode} - Evaluation Experiments ===\n")
     if conversion_cmd:
         print(f"Model: Will be converted from DCP checkpoint")
+        print(f"Target HF path: {hf_checkpoint_path}")
     else:
         print(f"Model: {model_path}")
     print(f"Nodes: {num_nodes}")
@@ -496,6 +493,7 @@ def main():
             mounts=args.mounts,
             job_name=job_name,
             conversion_cmd=conversion_cmd,
+            hf_checkpoint_path=hf_checkpoint_path,
             dry_run=args.dry,
             extra_args=extra_args,
         )
