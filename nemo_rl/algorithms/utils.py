@@ -422,8 +422,8 @@ def save_checkpoint(
 def reduce_microbatch_metrics(metrics: dict) -> dict:
     """Reduce microbatch metrics to a single value.
 
-    For num_valid_samples, takes the sum across microbatches.
-    For all other metrics, takes the mean across microbatches.
+    For lr, global_valid_seqs, and global_valid_toks, takes the mean across microbatches.
+    For all other metrics, takes the sum across microbatches.
 
     Args:
         metrics (dict): The metrics to reduce

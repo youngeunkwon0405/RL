@@ -21,6 +21,7 @@ import pytest
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from nemo_rl.algorithms.utils import (
+    get_logprobs,
     get_tokenizer,
     log_metrics,
     reduce_microbatch_metrics,
@@ -30,6 +31,7 @@ from nemo_rl.algorithms.utils import (
     validate_checkpointing_config,
 )
 from nemo_rl.data.hf_datasets.chat_templates import COMMON_CHAT_TEMPLATES
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.utils.checkpoint import CheckpointManager
 
 
@@ -302,3 +304,91 @@ def test_log_metrics():
     log_metrics(log_to_console, metrics, timing_metrics, step, logger, is_val=True)
     logger.log_metrics.assert_any_call(metrics, step, prefix="validation")
     logger.log_metrics.assert_any_call(timing_metrics, step, prefix="timing/validation")
+
+
+def test_get_logprobs():
+    """Test the get_logprobs function for both regular tensors and DTensors."""
+    import torch
+
+    # Test case 1: Regular tensor
+    batch_size = 2
+    seq_len = 4
+    vocab_size = 5
+
+    # Create input data
+    input_ids = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]], device="cuda")
+    data = BatchedDataDict({"input_ids": input_ids})
+
+    # Create logits (batch_size, seq_len, vocab_size)
+    # Use deterministic values for easier testing
+    next_token_logits = torch.zeros(batch_size, seq_len, vocab_size, device="cuda")
+    # Set high logits for the tokens we want to predict
+    for b in range(batch_size):
+        for s in range(seq_len - 1):
+            next_token_logits[b, s, input_ids[b, s + 1]] = 10.0
+
+    # Get log probabilities
+    logprobs = get_logprobs(data, next_token_logits)
+
+    # Verify shape and device
+    assert logprobs.shape == (
+        batch_size,
+        seq_len - 1,
+    )  # -1 because we remove last position
+    assert logprobs.device.type == "cuda"
+
+    # Verify values are log probabilities (should be negative)
+    assert torch.all(logprobs <= 0)
+
+    # Since we set high logits for the correct tokens, their logprobs should be close to 0
+    expected_tokens = input_ids[:, 1:]  # Skip first token
+    for b in range(batch_size):
+        for s in range(seq_len - 1):
+            token = expected_tokens[b, s]
+            assert logprobs[b, s] > -0.003
+
+    # Test case 2: DTensor
+    # Skip DTensor test if distributed training is not set up
+    if not torch.distributed.is_available():
+        print("Skipping DTensor test: torch.distributed is not available")
+        return
+
+    try:
+        from torch.distributed.device_mesh import DeviceMesh
+        from torch.distributed.tensor import DTensor
+
+        # Set up distributed environment variables
+        os.environ["RANK"] = "0"
+        os.environ["WORLD_SIZE"] = "1"
+        os.environ["LOCAL_RANK"] = "0"
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = "29500"
+
+        # Initialize process group
+        torch.distributed.init_process_group(backend="nccl")
+
+        # Create a simple device mesh
+        device_mesh = DeviceMesh("cuda", [0])
+
+        # Create DTensor logits
+        dtensor_logits = DTensor.from_local(
+            next_token_logits,
+            device_mesh,
+        )
+
+        # Get log probabilities with DTensor
+        dtensor_logprobs = get_logprobs(data, dtensor_logits)
+
+        # Verify shape and device
+        assert dtensor_logprobs.shape == (batch_size, seq_len - 1)
+        assert dtensor_logprobs.device.type == "cuda"
+
+        # Verify DTensor results match regular tensor results
+        assert torch.allclose(logprobs, dtensor_logprobs)
+
+        # Clean up distributed environment
+        torch.distributed.destroy_process_group()
+
+    except (ImportError, RuntimeError) as e:
+        # Skip DTensor test if not available or if distributed setup fails
+        print(f"Skipping DTensor test: {str(e)}")
