@@ -5,6 +5,8 @@ The `eval_launcher.py` script provides a convenient way to launch evaluation exp
 ## Features
 
 - **Smart Checkpoint Caching**: Automatically caches converted HF checkpoints to avoid redundant conversions
+- **Race Condition Protection**: Uses file locking to prevent multiple jobs from converting the same checkpoint simultaneously
+- **Force Re-conversion**: Option to delete and re-convert existing checkpoints
 - **In-Job Conversion**: DCP to HF conversion happens inside the SLURM job, not on the login node
 - **SLURM Resource Management**: Handles job submission with configurable resources
 - **Parameter Sweeps**: Support for sweeping over multiple evaluation parameters
@@ -20,6 +22,20 @@ When converting DCP checkpoints:
 3. Before conversion, the script checks if a cached version already exists
 4. If found, it uses the cached checkpoint; otherwise, it performs the conversion
 5. All conversion happens inside the SLURM job to utilize compute resources
+
+### Race Condition Handling
+
+When multiple jobs try to convert the same checkpoint:
+1. The script uses file locking (`flock`) to ensure only one job performs the conversion
+2. Other jobs wait for the conversion to complete and then use the converted checkpoint
+3. This prevents duplicate work and potential file corruption from concurrent writes
+
+### Force Conversion
+
+When `--force-conversion` is used:
+1. Any existing converted checkpoint is deleted first
+2. A fresh conversion is performed regardless of cache status
+3. This is useful when you suspect the cached version is corrupted or outdated
 
 ## Usage
 
@@ -44,7 +60,7 @@ The converted checkpoint will be cached at:
 
 ### Force Re-conversion
 
-To force re-conversion even if a cached version exists:
+To delete existing cache and force re-conversion:
 ```bash
 python xp/eval_launcher.py \
     --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
@@ -90,6 +106,8 @@ python xp/eval_launcher.py \
     --dcp-config results/grpo/step_170/config.yaml
 ```
 
+When using sweeps with the same checkpoint, the conversion only happens once due to the caching system. Multiple jobs will coordinate through file locking to avoid race conditions.
+
 ### Custom Evaluation Config
 
 Use a custom evaluation configuration:
@@ -110,7 +128,7 @@ python xp/eval_launcher.py \
 - `--dcp-config`: Path to config file for DCP checkpoint (required with --dcp-ckpt-path)
 - `--hf-ckpt-path`: Path to save converted HF checkpoint (optional, auto-generated with caching if not provided)
 - `--skip-conversion`: Skip checkpoint conversion (use with pre-converted checkpoints)
-- `--force-conversion`: Force re-conversion even if cached version exists
+- `--force-conversion`: Force re-conversion even if cached version exists (deletes existing cache first)
 
 ### SLURM Arguments
 - `--nodes`: Number of nodes to use (default: from config or 1)
@@ -177,6 +195,15 @@ python xp/eval_launcher.py \
     --dcp-config results/grpo/step_170/config.yaml
 ```
 
+### Example 5: Force Re-conversion for Updated Checkpoint
+```bash
+python xp/eval_launcher.py \
+    --dcp-ckpt-path results/grpo/final/policy/weights/ \
+    --dcp-config results/grpo/final/config.yaml \
+    --force-conversion \
+    --jobname grpo_final_fresh
+```
+
 ## Environment Variables
 
 The script uses the following environment variables with defaults:
@@ -187,10 +214,11 @@ The script uses the following environment variables with defaults:
 ## Notes
 
 1. **Caching System**: The script uses MD5 hashing of the checkpoint paths to create unique identifiers for cached checkpoints
-2. **In-Job Conversion**: All DCP to HF conversion happens inside the SLURM job, utilizing compute resources efficiently
-3. **Automatic Path Detection**: The script extracts meaningful identifiers from checkpoint paths for readable cache directory names
-4. **Sweep Efficiency**: When using sweeps with the same checkpoint, conversion only happens once due to caching
-5. **Error Handling**: If conversion fails, the job will exit with an error message
+2. **Race Condition Protection**: File locking ensures that only one job performs the conversion when multiple jobs are launched simultaneously
+3. **Force Conversion**: The `--force-conversion` flag deletes any existing converted checkpoint before re-converting
+4. **In-Job Conversion**: All DCP to HF conversion happens inside the SLURM job, utilizing compute resources efficiently
+5. **Automatic Path Detection**: The script extracts meaningful identifiers from checkpoint paths for readable cache directory names
+6. **Error Handling**: If conversion fails, the job will exit with an error message
 
 ## Cache Directory Structure
 
@@ -201,9 +229,24 @@ $LOG/nemo-rl/hf_eval_checkpoints/
 │   ├── config.json
 │   ├── model.safetensors
 │   └── ...
+├── step_170_a1b2c3d4e5f6g7h8.lock  (temporary during conversion)
 ├── checkpoint_final_9i8j7k6l5m4n3o2/
 │   └── ...
 └── ...
 ```
 
-Where the directory name format is: `<checkpoint_identifier>_<hash>` 
+Where the directory name format is: `<checkpoint_identifier>_<hash>`
+
+## Troubleshooting
+
+### Multiple Jobs Converting Same Checkpoint
+If you launch multiple evaluation jobs with the same DCP checkpoint:
+- The first job to acquire the lock will perform the conversion
+- Other jobs will wait and use the converted checkpoint once ready
+- You'll see messages like "Another process is converting, waiting for completion..."
+
+### Corrupted or Outdated Cache
+If you suspect the cached checkpoint is corrupted or outdated:
+- Use `--force-conversion` to delete and re-convert
+- Check the conversion logs for any errors
+- Verify the checkpoint files exist and are readable 

@@ -149,34 +149,69 @@ def create_conversion_command(
     Returns:
         str: Shell command to execute for conversion
     """
+    # Create a lock file path based on the checkpoint hash
+    lock_file = f"{hf_ckpt_path}.lock"
+    
     if force_conversion:
-        # Force conversion case - always convert
+        # Force conversion case - delete existing and always convert with locking
         conversion_cmd = (
-            f"echo 'Converting DCP to HF format (forced)...' && "
             f"mkdir -p $(dirname '{hf_ckpt_path}') && "
+            f"exec 200>'{lock_file}' && "
+            f"if flock -n 200; then "
+            f"echo 'Force conversion enabled, removing existing checkpoint if present...' && "
+            f"rm -rf '{hf_ckpt_path}' && "
+            f"echo 'Converting DCP to HF format (forced)...' && "
             f"uv run python examples/convert_dcp_to_hf.py "
             f"--config {dcp_config} "
             f"--dcp-ckpt-path {dcp_ckpt_path} "
             f"--hf-ckpt-path {hf_ckpt_path} && "
             f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}' && "
-            f"export HF_MODEL_PATH={hf_ckpt_path}"
+            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"flock -u 200; "
+            f"else "
+            f"echo 'Another process is force converting, waiting for completion...' && "
+            f"flock 200 && "
+            f"echo 'Force conversion completed by another process' && "
+            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"fi; "
+            f"exec 200>&-"  # Close the file descriptor
         )
     else:
-        # Normal case - check cache first
+        # Normal case - check cache first with lock file for race condition handling
         conversion_cmd = (
+            # First check if conversion is already complete
             f"if [ -d '{hf_ckpt_path}' ] && [ -f '{hf_ckpt_path}/config.json' ]; then "
             f"echo 'Found cached HF checkpoint at: {hf_ckpt_path}' && "
             f"echo 'Using cached checkpoint, skipping conversion' && "
             f"export HF_MODEL_PATH={hf_ckpt_path}; "
             f"else "
-            f"echo 'No cached checkpoint found, converting DCP to HF format...' && "
+            # Try to acquire lock for conversion
             f"mkdir -p $(dirname '{hf_ckpt_path}') && "
+            f"exec 200>'{lock_file}' && "
+            f"if flock -n 200; then "
+            # We got the lock, check again if someone else completed it while we were waiting
+            f"if [ -d '{hf_ckpt_path}' ] && [ -f '{hf_ckpt_path}/config.json' ]; then "
+            f"echo 'Another process completed conversion, using cached checkpoint' && "
+            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"else "
+            # Proceed with conversion
+            f"echo 'Acquired lock, converting DCP to HF format...' && "
             f"uv run python examples/convert_dcp_to_hf.py "
             f"--config {dcp_config} "
             f"--dcp-ckpt-path {dcp_ckpt_path} "
             f"--hf-ckpt-path {hf_ckpt_path} && "
             f"echo 'Successfully converted checkpoint to: {hf_ckpt_path}' && "
             f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"fi; "
+            f"flock -u 200; "
+            f"else "
+            # Could not get lock, wait for the other process
+            f"echo 'Another process is converting, waiting for completion...' && "
+            f"flock 200 && "
+            f"echo 'Conversion completed by another process' && "
+            f"export HF_MODEL_PATH={hf_ckpt_path}; "
+            f"fi; "
+            f"exec 200>&-; "  # Close the file descriptor
             f"fi"
         )
     
