@@ -48,7 +48,7 @@ def parse_args():
     
     # SLURM arguments
     parser.add_argument("--nodes", type=int, default=None, help="Number of nodes to use")
-    parser.add_argument("--gpus", type=int, default=8, help="Number of GPUs per node")
+    parser.add_argument("--gpus", type=int, default=None, help="Number of GPUs per node")
     parser.add_argument("--time", type=str, default="2:0:0", help="Time limit for the job")
     parser.add_argument("--account", type=str, default=ACCOUNT, help="Slurm account to use")
     parser.add_argument("--partition", type=str, default="batch", help="Slurm partition to use")
@@ -93,6 +93,27 @@ def get_num_nodes(config_path: Optional[str], cli_nodes: Optional[int]) -> int:
         
     print("Warning: Number of nodes not specified in CLI or config, defaulting to 1.")
     return 1
+
+
+def get_num_gpus(config_path: Optional[str], cli_gpus: Optional[int]) -> int:
+    """
+    Determine the number of GPUs per node to use.
+    Reads from the config file (cluster.gpus_per_node) as default,
+    overrides with CLI argument if provided.
+    """
+    if cli_gpus is not None:
+        return cli_gpus
+    
+    config_gpus = None
+    if config_path:
+        config_data = load_yaml(config_path)
+        config_gpus = config_data.get("cluster", {}).get("gpus_per_node")
+
+    if isinstance(config_gpus, int) and config_gpus > 0:
+        return config_gpus
+        
+    print("Warning: Number of GPUs per node not specified in CLI or config, defaulting to 8.")
+    return 8
 
 
 def get_checkpoint_hash(dcp_ckpt_path: str, dcp_config: str) -> str:
@@ -458,6 +479,9 @@ def main():
     # Determine the number of nodes
     num_nodes = get_num_nodes(args.config, args.nodes)
     
+    # Determine the number of GPUs per node
+    num_gpus = get_num_gpus(args.config, args.gpus)
+    
     # Print header
     mode = "DRY RUN" if args.dry else "SUBMITTING"
     print(f"\n=== {mode} - Evaluation Experiments ===\n")
@@ -467,7 +491,7 @@ def main():
     else:
         print(f"Model: {model_path}")
     print(f"Nodes: {num_nodes}")
-    print(f"GPUs per node: {args.gpus}")
+    print(f"GPUs per node: {num_gpus}")
     
     # Launch experiments
     for i, params in enumerate(param_combinations):
@@ -485,7 +509,7 @@ def main():
             model_path=model_path,
             param_overrides=param_overrides,
             nodes=num_nodes,
-            gpus_per_node=args.gpus,
+            gpus_per_node=num_gpus,
             time=args.time,
             account=args.account,
             partition=args.partition,
