@@ -30,7 +30,7 @@ checkpointing:
 
 policy:
   training_backend: "megatron"
-  model_name: "/root/checkpoints/llama4-scout-custom-init"
+  model_name: "meta-llama/Llama-4-Scout-17B-16E-Instruct"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 8
@@ -57,10 +57,10 @@ policy:
     enabled: true
     empty_unused_memory_level: 1
     converter_type: "Llama4ForCausalLM"
-    tensor_model_parallel_size: 2
+    tensor_model_parallel_size: 4
     sequence_parallel: True
     expert_tensor_parallel_size: ${policy.megatron_cfg.tensor_model_parallel_size}
-    expert_model_parallel_size: 4
+    expert_model_parallel_size: 16
     pipeline_model_parallel_size: 1
 
     optimizer:
