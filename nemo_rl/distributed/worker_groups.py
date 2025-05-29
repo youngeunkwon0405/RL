@@ -49,13 +49,36 @@ class MultiWorkerFuture:
         worker group each worker belongs to, then selects only the first result from each group.
 
         Args:
-            worker_group: The RayWorkerGroup that created this bundle
+            worker_group: The RayWorkerGroup that spawned the futures.  The
+                mapping contained in worker_group.worker_to_tied_group_index
+                is required for the deduplication path.
 
         Returns:
             List of results, deduplicated by tied workers if respect_tied_workers is True
         """
-        # Basic case: Get all results
-        all_results = ray.get(self.futures)
+        from ray._raylet import ObjectRef, ObjectRefGenerator
+
+        # Flatten futures into a list of ObjectRefs
+        object_refs: list[ObjectRef] = []
+
+        has_generator = False
+
+        for idx, fut in enumerate(self.futures):
+            if isinstance(fut, ObjectRefGenerator):
+                # ray.get cannot be called directly on the generator object – it must be iterated to obtain the individual ObjectRef instances first.
+                for generated_ref in fut:
+                    object_refs.append(generated_ref)
+                    has_generator = True
+            else:
+                object_refs.append(fut)
+
+        # Retrieve the concrete results.
+        all_results = ray.get(object_refs)
+
+        # If expanded generator was present we are in streaming mode.
+        # Every ObjectRef now corresponds to a unique, ordered chunk of data
+        if has_generator:
+            return all_results
 
         if self.return_from_workers is not None:
             if self.called_workers is not None:

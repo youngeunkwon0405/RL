@@ -86,6 +86,7 @@ test = [
     "pytest>=7.0.0",
     "pytest-timeout",
     "pytest-cov",
+    "pytest-asyncio",
 ]
 
 [tool.uv.sources]
