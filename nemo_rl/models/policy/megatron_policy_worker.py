@@ -275,6 +275,9 @@ class MegatronPolicyWorker:
 
         model_cfg.tensor_model_parallel_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
         model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
+        model_cfg.num_layers_in_first_pipeline_stage = self.cfg["megatron_cfg"]["num_layers_in_first_pipeline_stage"]
+        model_cfg.num_layers_in_last_pipeline_stage = self.cfg["megatron_cfg"]["num_layers_in_last_pipeline_stage"]
+        model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
         model_cfg.context_parallel_size = self.cfg["megatron_cfg"]["context_parallel_size"] # not supported right now
         model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"]["expert_tensor_parallel_size"]
         model_cfg.sequence_parallel = self.cfg["megatron_cfg"]["sequence_parallel"]
@@ -283,6 +286,7 @@ class MegatronPolicyWorker:
         model_cfg.params_dtype = torch.float32  # amp
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
+        model_cfg.moe_router_dtype = 'fp64'
 
         # from megatron.core.transformer.enums import AttnBackend
         # model_cfg.attention_backend = AttnBackend.unfused

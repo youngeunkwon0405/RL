@@ -75,13 +75,30 @@ def get_global_layer_num(s, cfg):
     This function converts the local layer number to the global layer number.
     """
     local_layer_num = get_local_layer_num(s)
-    global_layer_num = (
-        parallel_state.get_pipeline_model_parallel_rank()
-        * cfg.num_layers
-        // parallel_state.get_pipeline_model_parallel_world_size()
-        + local_layer_num
-    )
-    return global_layer_num
+    pp_rank = parallel_state.get_pipeline_model_parallel_rank()
+    pp_size = parallel_state.get_pipeline_model_parallel_world_size()
+
+    first_stage_layers = cfg.num_layers_in_first_pipeline_stage
+    last_stage_layers = cfg.num_layers_in_last_pipeline_stage
+
+    if first_stage_layers is None and last_stage_layers is None:
+        first_stage_layers = last_stage_layers = cfg.num_layers // pp_size
+    elif first_stage_layers is None:
+        first_stage_layers = (cfg.num_layers - last_stage_layers) // (pp_size - 1)
+    elif last_stage_layers is None:
+        last_stage_layers = (cfg.num_layers - first_stage_layers) // (pp_size - 1)
+
+    # Calculate global offset based on rank
+    if pp_rank == 0:
+        global_offset = 0
+    elif pp_rank == pp_size - 1:
+        global_offset = cfg.num_layers - last_stage_layers
+    else:
+        middle_layers = cfg.num_layers - first_stage_layers - last_stage_layers
+        layers_per_middle_stage = middle_layers // (pp_size - 2)
+        global_offset = first_stage_layers + (pp_rank - 1) * layers_per_middle_stage
+
+    return global_offset + local_layer_num
 
 
 def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
@@ -91,6 +108,7 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
     # [ gate_tp1 ] --/ [  up_tp0  ] --/ (split  up)
     # [  up_tp1  ]     [  up_tp1  ]
     megatron_config = ctx.source.config
+    # TODO(yifu): handle expert_tensor_parallel_size
     tp = megatron_config.tensor_model_parallel_size
     linear_fc1 = einops.rearrange(linear_fc1, "(t c d) a1 ->  c (t d) a1", c=2, t=tp)
     mlp_gate_proj_weight = linear_fc1[0]
@@ -448,5 +466,11 @@ class MegatronToHFConverter:
         # torch.distributed.barrier()
         # [v for k, v in converted_state_dict.items() if v is None]
         # len([v for k, v in converted_state_dict.items() if v is None])
+
+        # for i in range(torch.distributed.get_world_size()):
+        #     if torch.distributed.get_rank() == i:
+        #         import pdb
+        #         pdb.set_trace()
+        #     torch.distributed.barrier()
 
         return converted_state_dict
