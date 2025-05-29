@@ -19,7 +19,6 @@ from typing import Dict, List, Optional, Tuple, TypedDict
 import ray
 import torch
 
-from nemo_rl.environments.utils import extract_answer_from_box
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import PY_EXECUTABLES, RayVirtualCluster
 from nemo_rl.environments.interfaces import (
@@ -29,6 +28,8 @@ from nemo_rl.environments.interfaces import (
 from nemo_rl.environments.metrics import (
     calculate_pass_rate_per_prompt,
 )
+from nemo_rl.environments.utils import extract_answer_from_box
+
 
 class LLMJudgeAsyncConfig(TypedDict):
     num_workers: int
@@ -39,23 +40,27 @@ class LLMJudgeAsyncConfig(TypedDict):
     # Default sampling parameters for the judge
     temperature: Optional[float]
     max_tokens: Optional[int]
-    stop: Optional[List[str]] # Note: vLLM's AsyncEngine uses 'stop'
-    max_concurrency: Optional[int] # Maximum concurrent step calls for the environment actor
+    stop: Optional[List[str]]  # Note: vLLM's AsyncEngine uses 'stop'
+    max_concurrency: Optional[
+        int
+    ]  # Maximum concurrent step calls for the environment actor
     # Any other vllm.SamplingParams can be added here
 
-class LLMJudgeEnvironmentMetadata(TypedDict): # Reusing from previous
+
+class LLMJudgeEnvironmentMetadata(TypedDict):  # Reusing from previous
     reference_answer: Optional[str]
     evaluation_criteria: Optional[str]
-    judge_prompt_template: Optional[str] # Added for per-sample judge prompts
+    judge_prompt_template: Optional[str]  # Added for per-sample judge prompts
     extract_box: Optional[bool]
-    question: Optional[str] # Added to store the question in metadata
+    question: Optional[str]  # Added to store the question in metadata
+
 
 @ray.remote
 class AsyncVLLMWorker:
-    """
-    Worker that serves an LLM using vllm.AsyncLLMEngine for judging responses.
+    """Worker that serves an LLM using vllm.AsyncLLMEngine for judging responses.
     Each call to judge() handles a single prompt asynchronously.
     """
+
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.VLLM
     DEFAULT_JUDGE_PROMPT_TEMPLATE = """You are an expert judge. You will be given a question, a model's prediction to evaluate, a reference answer, and evaluation criteria.
 
@@ -80,16 +85,16 @@ Answer yes or no, then give your reasoning.
         tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.85,
         max_model_len: Optional[int] = None,
-        disable_log_stats: bool = True, # Reduce verbose VLLM logging
-        **engine_kwargs, # Allow passing other EngineArgs
+        disable_log_stats: bool = True,  # Reduce verbose VLLM logging
+        **engine_kwargs,  # Allow passing other EngineArgs
     ):
         # Imports moved here to be within the Ray actor's context,
         # ensuring they are resolved correctly in the worker environment.
+        from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
         from vllm.engine.arg_utils import AsyncEngineArgs
         from vllm.engine.async_llm_engine import AsyncLLMEngine
         from vllm.sampling_params import SamplingParams
-        from huggingface_hub.constants import HUGGINGFACE_HUB_CACHE
-        
+
         self.SamplingParams = SamplingParams
         # Attempt to use HF_HOME from env, otherwise default to huggingface_hub's default cache
         # This ensures the worker tries to use the same cache path as the driver.
@@ -97,10 +102,14 @@ Answer yes or no, then give your reasoning.
         if not os.path.isdir(hf_home_cache_path):
             try:
                 os.makedirs(hf_home_cache_path, exist_ok=True)
-                logging.info(f"Created HF cache directory for worker: {hf_home_cache_path}")
+                logging.info(
+                    f"Created HF cache directory for worker: {hf_home_cache_path}"
+                )
             except OSError as e:
-                logging.warning(f"Worker could not create HF cache directory {hf_home_cache_path}: {e}. "
-                                 "This might lead to download issues if the default cache is not writable.")
+                logging.warning(
+                    f"Worker could not create HF cache directory {hf_home_cache_path}: {e}. "
+                    "This might lead to download issues if the default cache is not writable."
+                )
 
         # It's critical that download_dir is set for vLLM if HF_HOME is being customized,
         # or if there are any doubts about vLLM picking up the environment variable.
@@ -111,13 +120,18 @@ Answer yes or no, then give your reasoning.
             gpu_memory_utilization=gpu_memory_utilization,
             max_model_len=max_model_len,
             disable_log_stats=disable_log_stats,
-            download_dir=hf_home_cache_path, # Explicitly tell vLLM where to download/look for models
-            ignore_patterns=["*.safetensors.index.json", "*.pt", "*.bin.index.json", "*.gitattributes"], # Ignore common problematic files
-            **engine_kwargs
+            download_dir=hf_home_cache_path,  # Explicitly tell vLLM where to download/look for models
+            ignore_patterns=[
+                "*.safetensors.index.json",
+                "*.pt",
+                "*.bin.index.json",
+                "*.gitattributes",
+            ],  # Ignore common problematic files
+            **engine_kwargs,
         )
         self.engine = AsyncLLMEngine.from_engine_args(engine_args)
         logging.info(f"AsyncVLLMWorker initialized with model: {model_name}")
-        
+
     async def judge(
         self,
         request_id: str,
@@ -126,8 +140,7 @@ Answer yes or no, then give your reasoning.
         metadata: LLMJudgeEnvironmentMetadata,
         sampling_params_dict: dict,
     ) -> Tuple[str, float]:
-        """
-        Judges a single response using the LLM.
+        """Judges a single response using the LLM.
 
         Args:
             request_id: A unique ID for this generation request.
@@ -144,12 +157,18 @@ Answer yes or no, then give your reasoning.
         extract_box = metadata.get("extract_box", False)
 
         response_to_judge = response_to_judge.split("</think>")[-1].strip()
-        response_to_judge = extract_answer_from_box(response_to_judge) if extract_box else response_to_judge
+        response_to_judge = (
+            extract_answer_from_box(response_to_judge)
+            if extract_box
+            else response_to_judge
+        )
         response_to_judge = "None" if response_to_judge is None else response_to_judge
         # Prioritize metadata's judge_prompt_template, then default
         # Note that if you want to use a custom judge_prompt_template, you may need to change the verdict extraction logic accordingly
-        current_judge_prompt = metadata.get("judge_prompt_template") or self.DEFAULT_JUDGE_PROMPT_TEMPLATE
-        
+        current_judge_prompt = (
+            metadata.get("judge_prompt_template") or self.DEFAULT_JUDGE_PROMPT_TEMPLATE
+        )
+
         prompt = current_judge_prompt.format(
             question=question,
             response=response_to_judge,
@@ -159,16 +178,18 @@ Answer yes or no, then give your reasoning.
         logging.info(f"Prompt: {prompt}")
 
         sampling_params = self.SamplingParams(**sampling_params_dict)
-        
+
         results_generator = self.engine.generate(prompt, sampling_params, request_id)
-        
+
         final_output = None
         async for request_output in results_generator:
             final_output = request_output
-        
+
         score = 0.0
         if final_output and not final_output.finished:
-            logging.info(f"Request {request_id} did not finish within the token limit, but we will score it anyway. Output: {final_output}")
+            logging.info(
+                f"Request {request_id} did not finish within the token limit, but we will score it anyway. Output: {final_output}"
+            )
         elif final_output:
             generated_text = final_output.outputs[0].text.strip()
             generated_text_lower = generated_text.lower()
@@ -177,11 +198,15 @@ Answer yes or no, then give your reasoning.
 
             if has_yes:
                 score = 1.0
-                logging.info(f"Parsed 'yes' for request {request_id}. Score: {score}. Output: '{generated_text}'")
+                logging.info(
+                    f"Parsed 'yes' for request {request_id}. Score: {score}. Output: '{generated_text}'"
+                )
             else:
                 score = 0.0
-                logging.info(f"No 'yes' found in {request_id}. Score: {score}. Output: '{generated_text}'")
-            
+                logging.info(
+                    f"No 'yes' found in {request_id}. Score: {score}. Output: '{generated_text}'"
+                )
+
         else:
             logging.warning(f"No output received from LLM for request {request_id}.")
 
@@ -190,18 +215,22 @@ Answer yes or no, then give your reasoning.
 
 @ray.remote
 class LLMJudgeAsyncEnvironment(EnvironmentInterface):
-    DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM # The environment actor itself uses system python
+    DEFAULT_PY_EXECUTABLE = (
+        PY_EXECUTABLES.SYSTEM
+    )  # The environment actor itself uses system python
 
     def __init__(self, cfg: LLMJudgeAsyncConfig):
         self.cfg = cfg
         self.num_workers = cfg["num_workers"]
-        
+
         tensor_parallel_size = cfg.get("tensor_parallel_size", 1)
-        
+
         # Only create a RayVirtualCluster (and thereby reserve GPU bundles)
         # if we actually need single-GPU bundles (tensor_parallel_size == 1).
         if tensor_parallel_size == 1:
-            bundle_ct_per_node_list = [tensor_parallel_size] * self.num_workers  # == [1] * num_workers
+            bundle_ct_per_node_list = [
+                tensor_parallel_size
+            ] * self.num_workers  # == [1] * num_workers
 
             self.virtual_cluster = RayVirtualCluster(
                 bundle_ct_per_node_list=bundle_ct_per_node_list,
@@ -237,7 +266,7 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
             },
             "num_gpus": tensor_parallel_size,
         }
-        
+
         self.workers = []
         for i in range(self.num_workers):
             # If tensor_parallel_size == 1, we can safely pin the actor to a
@@ -270,10 +299,12 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
                 # Pass any other engine args from cfg if needed
             )
             self.workers.append(worker)
-        
+
         logging.info(f"Created {len(self.workers)} AsyncVLLMWorker actors.")
-        self._request_counter = 0 # For generating unique request IDs per step call
-        self._actor_id_prefix = str(uuid.uuid4())[:8] # Unique prefix for this actor instance
+        self._request_counter = 0  # For generating unique request IDs per step call
+        self._actor_id_prefix = str(uuid.uuid4())[
+            :8
+        ]  # Unique prefix for this actor instance
 
     def shutdown(self):
         for worker in self.workers:
@@ -286,8 +317,7 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         message_log_batch: List[List[Dict[str, str]]],
         metadata: List[LLMJudgeEnvironmentMetadata],
     ) -> EnvironmentReturn:
-        """
-        message_log_batch: List[List[Dict[str, str]]] - List of conversations, each conversation is a list of messages
+        """message_log_batch: List[List[Dict[str, str]]] - List of conversations, each conversation is a list of messages
         metadata: List[LLMJudgeEnvironmentMetadata] - List of metadata for each conversation
 
         Returns:
@@ -299,8 +329,10 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         assistant_responses = []
         questions = []
         for conversation, single_metadata in zip(message_log_batch, metadata):
-            assert len(conversation) == 2, "LLMJudgeAsyncEnvironment only supports single turn conversations for now"
-            
+            assert len(conversation) == 2, (
+                "LLMJudgeAsyncEnvironment only supports single turn conversations for now"
+            )
+
             # Read question from metadata instead of parsing conversation
             question = single_metadata.get("question")
             assert question is not None, "Question not found in metadata"
@@ -308,7 +340,7 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
             assistant_responses.append(conversation[-1]["content"])
 
         futures = []
-        
+
         # Prepare default sampling parameters from config
         default_sampling_params = {
             "temperature": self.cfg.get("temperature", 0.0),
@@ -317,23 +349,29 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         }
 
         # For each batch, loop through each conversation and send it to a judge worker asynchronously
-        for i, (question_str, response_str, single_metadata) in enumerate(zip(questions, assistant_responses, metadata)):
+        for i, (question_str, response_str, single_metadata) in enumerate(
+            zip(questions, assistant_responses, metadata)
+        ):
             # Generate a unique request ID for vLLM for this specific call to judge
             request_id = f"env_{self._actor_id_prefix}_step_{self._request_counter}_{i}"
-            
-            worker_idx = i % self.num_workers # Simple round-robin
-            
+
+            worker_idx = i % self.num_workers  # Simple round-robin
+
             current_sampling_params = default_sampling_params.copy()
 
             future = self.workers[worker_idx].judge.remote(
-                request_id, question_str, response_str, single_metadata, current_sampling_params,
+                request_id,
+                question_str,
+                response_str,
+                single_metadata,
+                current_sampling_params,
             )
             futures.append(future)
-        
-        self._request_counter += 1 # Increment for the next step call
+
+        self._request_counter += 1  # Increment for the next step call
 
         results_tuples: List[Tuple[str, float]] = ray.get(futures)
-        
+
         # Assuming ray.get(futures) preserves the order, which it does.
         scores = [score for _, score in results_tuples]
 
@@ -341,17 +379,20 @@ class LLMJudgeAsyncEnvironment(EnvironmentInterface):
         for score, single_meta in zip(scores, metadata):
             ref_answer = single_meta.get("reference_answer", "N/A")
             observations.append(
-                {"role": "environment", "content": f"Environment: Score = {score:.2f}\nGround Truth: {ref_answer}"}
+                {
+                    "role": "environment",
+                    "content": f"Environment: Score = {score:.2f}\nGround Truth: {ref_answer}",
+                }
             )
-        
+
         rewards_tensor = torch.tensor(scores, dtype=torch.float32).cpu()
         terminateds_tensor = torch.ones_like(rewards_tensor).cpu()
-        
-        next_stop_strings = [None] * len(message_log_batch) 
+
+        next_stop_strings = [None] * len(message_log_batch)
 
         return EnvironmentReturn(
             observations=observations,
-            metadata=metadata, 
+            metadata=metadata,
             next_stop_strings=next_stop_strings,
             rewards=rewards_tensor,
             terminateds=terminateds_tensor,
