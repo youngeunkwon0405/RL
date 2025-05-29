@@ -39,11 +39,6 @@ policy:
   logprob_batch_size: 1
   max_total_sequence_length: 256
   precision: "bfloat16"
-  tensor_model_parallel_size: 2
-  sequence_parallel: True
-  expert_tensor_parallel_size: ${policy.tensor_model_parallel_size}
-  expert_model_parallel_size: 4
-  pipeline_model_parallel_size: 1
   pipeline_dtype: "bfloat16"
   context_parallel_size: 1
   refit_buffer_size_gb: 4 # used for refitting inference engine, the unit is GB
@@ -54,7 +49,7 @@ policy:
   max_grad_norm: 1.0
   # makes the training sequence length divisible by the tensor parallel size
   # this is useful for sequence parallel training
-  make_sequence_length_divisible_by: ${policy.tensor_model_parallel_size}
+  make_sequence_length_divisible_by: ${policy.megatron_cfg.tensor_model_parallel_size}
 
   optimizer: null # remove default FSDP optimizer
 
@@ -62,6 +57,11 @@ policy:
     enabled: true
     empty_unused_memory_level: 1
     converter_type: "Llama4ForCausalLM"
+    tensor_model_parallel_size: 2
+    sequence_parallel: True
+    expert_tensor_parallel_size: ${policy.megatron_cfg.tensor_model_parallel_size}
+    expert_model_parallel_size: 4
+    pipeline_model_parallel_size: 1
 
     optimizer:
       optimizer: "adam"

@@ -15,6 +15,9 @@
 """
 python /lustre/fsw/portfolios/coreai/users/yuya/nemo-rl/examples/run_grpo_math.py \
   --config examples/configs/grpo_math_llama4.yaml
+
+
+uv run python examples/run_grpo_math.py --config examples/configs/grpo_math_llama4.yaml
 """
 
 

@@ -242,7 +242,7 @@ class MegatronPolicyWorker:
         # cfg["model_name"] is allowed to be either an HF model name or a path to a Megatron checkpoint dir
         # check if hf_model_name is a path
         hf_model_name = self.cfg["model_name"]
-        if os.path.exists(hf_model_name):
+        if False: #os.path.exists(hf_model_name):
             pt_checkpoint_exists = True
             pretrained_path = hf_model_name
             pretrained_run_config = os.path.join(
@@ -282,7 +282,7 @@ class MegatronPolicyWorker:
 
         model_cfg.tensor_model_parallel_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
         model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
-        model_cfg.context_parallel_size = self.cfg["megatron_cfg"]["context_parallel_size"] # not supported right now
+        model_cfg.context_parallel_size = self.cfg["megatron_cfg"].get("context_parallel_size", 1) # not supported right now
         model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"].get("expert_tensor_parallel_size", 1)
         model_cfg.sequence_parallel = self.cfg["megatron_cfg"].get("sequence_parallel", False)
         model_cfg.expert_model_parallel_size = self.cfg["megatron_cfg"].get("expert_model_parallel_size", 1)
