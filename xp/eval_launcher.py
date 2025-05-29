@@ -233,11 +233,45 @@ def create_conversion_command(
     return conversion_cmd
 
 
+def verify_with_sweep(sweep_config: Dict[str, Any], config_path: Optional[str]) -> Optional[str]:
+    """
+    Verify the sweep config and determine the final config path.
+
+    Args:
+        sweep_config: The loaded sweep configuration
+        config_path: Config path from command line (if any)
+
+    Returns:
+        str: The determined config path (can be None)
+    
+    Raises:
+        AssertionError: If inconsistencies are found between CLI and sweep config.
+    """
+    sweep_config_path = sweep_config.get("config_path")
+
+    # Determine config path
+    if config_path is None:
+        # Use config path from sweep if available
+        final_config_path = sweep_config_path 
+    else:
+        final_config_path = config_path
+        if sweep_config_path and final_config_path != sweep_config_path:
+            raise AssertionError(
+                f"Command line config '{final_config_path}' does not match "
+                f"sweep config config_path '{sweep_config_path}'. Please ensure consistency."
+            )
+    
+    return final_config_path
+
+
 def generate_parameter_combinations(sweep_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Generate all combinations of parameters from the sweep config."""
+    # Remove config_path from the parameters to sweep over (similar to script_path in original launcher)
+    sweep_params = {k: v for k, v in sweep_config.items() if k not in ["config_path"]}
+    
     # Extract parameter names and their values
-    param_names = list(sweep_config.keys())
-    param_values = [sweep_config[name] for name in param_names]
+    param_names = list(sweep_params.keys())
+    param_values = [sweep_params[name] for name in param_names]
     
     # Generate all combinations
     combinations = []
@@ -423,6 +457,15 @@ def main():
     """Main entry point."""
     args, extra_args = parse_args()
     
+    # Handle sweep config and verify consistency
+    config_path = args.config
+    param_combinations = [{}]  # Default to no parameters
+    
+    if args.sweep:
+        sweep_config = load_yaml(args.sweep)
+        config_path = verify_with_sweep(sweep_config, args.config)
+        param_combinations = generate_parameter_combinations(sweep_config)
+    
     # Handle checkpoint paths
     model_path = None
     conversion_cmd = None
@@ -470,21 +513,15 @@ def main():
     if not model_path:
         raise ValueError("Model path must be provided either through checkpoint conversion or generation.model_name parameter")
     
-    # Load sweep config if provided
-    param_combinations = [{}]  # Default to no parameters
-    if args.sweep:
-        sweep_config = load_yaml(args.sweep)
-        param_combinations = generate_parameter_combinations(sweep_config)
-    
-    # Determine the number of nodes
-    num_nodes = get_num_nodes(args.config, args.nodes)
-    
-    # Determine the number of GPUs per node
-    num_gpus = get_num_gpus(args.config, args.gpus)
+    # Determine the number of nodes and GPUs using the verified config path
+    num_nodes = get_num_nodes(config_path, args.nodes)
+    num_gpus = get_num_gpus(config_path, args.gpus)
     
     # Print header
     mode = "DRY RUN" if args.dry else "SUBMITTING"
     print(f"\n=== {mode} - Evaluation Experiments ===\n")
+    if config_path:
+        print(f"Config: {config_path}")
     if conversion_cmd:
         print(f"Model: Will be converted from DCP checkpoint")
         print(f"Target HF path: {hf_checkpoint_path}")
@@ -505,7 +542,7 @@ def main():
         
         # Launch experiment
         cmd, job_id = launch_eval_experiment(
-            config=args.config,
+            config=config_path,
             model_path=model_path,
             param_overrides=param_overrides,
             nodes=num_nodes,

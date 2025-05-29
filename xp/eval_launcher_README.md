@@ -93,9 +93,14 @@ python xp/eval_launcher.py \
 
 Create a sweep configuration file (e.g., `eval_sweep.yaml`):
 ```yaml
+# Optional: Specify the config file to use for all experiments
+config_path: examples/configs/eval.yaml
+
+# Parameters to sweep over
 generation.temperature: [0.6, 0.8, 1.0]
 generation.top_p: [0.9, 0.95]
 eval.num_tests_per_prompt: [8, 16]
+data.dataset_name: ["HuggingFaceH4/MATH-500", "openai/gsm8k"]
 ```
 
 Run the sweep:
@@ -105,6 +110,11 @@ python xp/eval_launcher.py \
     --dcp-ckpt-path results/grpo/step_170/policy/weights/ \
     --dcp-config results/grpo/step_170/config.yaml
 ```
+
+**Config Path Handling:**
+- If `config_path` is specified in the sweep file, it will be used for all experiments
+- If both `--config` CLI argument and `config_path` in sweep file are provided, they must match
+- If neither is provided, the script will use its default config handling
 
 When using sweeps with the same checkpoint, the conversion only happens once due to the caching system. Multiple jobs will coordinate through file locking to avoid race conditions.
 
@@ -249,4 +259,31 @@ If you launch multiple evaluation jobs with the same DCP checkpoint:
 If you suspect the cached checkpoint is corrupted or outdated:
 - Use `--force-conversion` to delete and re-convert
 - Check the conversion logs for any errors
-- Verify the checkpoint files exist and are readable 
+- Verify the checkpoint files exist and are readable
+
+### Config Path Conflicts
+If you get an assertion error about config path mismatch:
+- Either remove `--config` from command line and let sweep file specify it
+- Or remove `config_path` from sweep file and use `--config` CLI argument
+- Or ensure both specify the exact same path
+
+Example error and solutions:
+```
+AssertionError: Command line config 'configs/eval_custom.yaml' does not match sweep config config_path 'configs/eval.yaml'
+```
+
+**Solution 1:** Use sweep file config
+```bash
+python xp/eval_launcher.py --sweep my_sweep.yaml  # Remove --config
+```
+
+**Solution 2:** Use CLI config
+```yaml
+# Remove config_path from sweep file
+generation.temperature: [0.6, 0.8]
+```
+
+**Solution 3:** Make them match
+```bash
+python xp/eval_launcher.py --config configs/eval.yaml --sweep my_sweep.yaml
+``` 
