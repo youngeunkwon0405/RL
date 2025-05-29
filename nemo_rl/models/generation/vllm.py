@@ -1153,33 +1153,29 @@ class VllmGeneration(GenerationInterface):
         if not self.worker_group or not self.worker_group.workers:
             return False
 
+        # Choose the appropriate method based on async_engine setting
+        method_name = (
+            "update_weights_from_ipc_handles_async"
+            if self.cfg["vllm_cfg"]["async_engine"]
+            else "update_weights_from_ipc_handles"
+        )
+
+        # Only send the ipc handles required by the current worker
+        ipc_handles_list = []
+        for worker_device_uuids in self.device_uuids:
+            worker_ipc_handles = {
+                device_uuid: ipc_handles[device_uuid]
+                for device_uuid in worker_device_uuids
+            }
+            ipc_handles_list.append(worker_ipc_handles)
+
         try:
-            # Choose the appropriate method based on async_engine setting
-            method_name = (
-                "update_weights_from_ipc_handles_async"
-                if self.cfg["vllm_cfg"]["async_engine"]
-                else "update_weights_from_ipc_handles"
+            # Directly pass ipc_handles to the method
+            futures = self.worker_group.run_all_workers_multiple_data(
+                method_name,
+                data=ipc_handles_list,
+                run_rank_0_only_axes=["tensor_parallel"],
             )
-
-            futures = []
-            for worker_idx, worker in enumerate(self.worker_group.workers):
-                worker_coords = self.sharding_annotations.get_worker_coords(worker_idx)
-
-                # only leader worker should receive data
-                if worker_coords["tensor_parallel"] == 0:
-                    # only send the ipc handles required by the current worker
-                    group_idx = self.worker_group.worker_metadata[worker_idx][
-                        "tied_group_idx"
-                    ]
-                    worker_device_uuids = self.device_uuids[group_idx]
-                    worker_ipc_handles = {
-                        device_uuid: ipc_handles[device_uuid]
-                        for device_uuid in worker_device_uuids
-                    }
-
-                    method = getattr(worker, method_name)
-                    futures.append(method.remote(ipc_handles=worker_ipc_handles))
-
             # Wait for all futures to complete
             results = ray.get(futures)
             return all(result for result in results if result is not None)
