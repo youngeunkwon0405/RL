@@ -28,6 +28,7 @@ from nemo_rl.data import DataConfig
 from nemo_rl.data.interfaces import DatumSpec
 from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.environments.math_environment import MathEnvironment
+from nemo_rl.environments.llm_judge_async_environment import LLMJudgeAsyncEnvironment
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -88,6 +89,7 @@ class JsonlinesDataset:
         user_message = {"role": "user"}
 
         for m in single_message:
+            # it's actually taking only the last user message's metadata
             if m["role"] == "user":
                 # need to be deepcopy to avoid overwriting the original metadata
                 extra_env_info = deepcopy(m["metadata"])
@@ -140,16 +142,30 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
         max_seq_length=data_config["max_input_seq_length"],
         filter_long_samples=data_config["val"]["filter_long_samples"],
     )
-
-    math_env = MathEnvironment.options(
-        runtime_env={
-            "py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE,
-            "env_vars": dict(os.environ),  # Pass thru all user environment variables
-        }
-    ).remote(env_configs["math"])
-
+    
     task_to_env = {}
-    task_to_env["math"] = math_env
+    
+    if "math" in env_configs and env_configs["math"]["enable"]:
+        math_env = MathEnvironment.options(
+            runtime_env={
+                "py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE,
+                "env_vars": dict(os.environ),  # Pass thru all user environment variables
+            }
+        ).remote(env_configs["math"])
+        task_to_env["math"] = math_env
+
+    if "llm_judge_async" in env_configs and env_configs["llm_judge_async"]["enable"]:
+        # Extract max_concurrency from config, default to 16 if not specified
+        max_concurrency = env_configs["llm_judge_async"].get("max_concurrency", 16)
+        
+        llm_judge_async_env = LLMJudgeAsyncEnvironment.options(
+            max_concurrency=max_concurrency,
+            runtime_env={
+                "py_executable": LLMJudgeAsyncEnvironment.DEFAULT_PY_EXECUTABLE,
+                "env_vars": dict(os.environ),
+            }
+        ).remote(env_configs["llm_judge_async"])
+        task_to_env["llm_judge"] = llm_judge_async_env
 
     return train_ds, val_ds, task_to_env, task_to_env
 
@@ -161,7 +177,7 @@ def main():
 
     if not args.config:
         args.config = os.path.join(
-            os.path.dirname(__file__), "configs", "grpo_math_1B.yaml"
+            os.path.dirname(__file__), "configs", "grpo_1B.yaml"
         )
 
     config = load_config(args.config)
