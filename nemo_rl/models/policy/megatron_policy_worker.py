@@ -288,8 +288,9 @@ class MegatronPolicyWorker:
         model_cfg.parallel_output = True
         model_cfg.moe_router_dtype = 'fp64'
 
-        # from megatron.core.transformer.enums import AttnBackend
+        from megatron.core.transformer.enums import AttnBackend
         # model_cfg.attention_backend = AttnBackend.unfused
+        model_cfg.attention_backend = AttnBackend.flash
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
