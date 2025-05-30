@@ -19,7 +19,6 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
 import numpy as np
-import numpy as np
 import ray
 import torch
 from torch import nn
@@ -410,7 +409,6 @@ class DTensorPolicyWorker:
                         logits, mb, global_valid_seqs, global_valid_toks
                     )
 
-
                     num_valid_samples = loss_metrics["num_valid_samples"]
                     if num_valid_samples > 0:
                         for k, v in loss_metrics.items():
@@ -489,8 +487,6 @@ class DTensorPolicyWorker:
 
             synced_train_step_metrics = []
 
-            synced_train_step_metrics = []
-
             # Compute global loss across all ranks
             with torch.no_grad():
                 for metric in train_step_metrics:
@@ -515,7 +511,6 @@ class DTensorPolicyWorker:
                         metric["tokens_min_clipped"] / metric["global_valid_toks"]
                     )
 
-            return synced_train_step_metrics
             return synced_train_step_metrics
 
     def get_logprobs(
