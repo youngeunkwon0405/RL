@@ -69,6 +69,16 @@ def get_local_layer_num(s):
     return number
 
 
+## return none if not moe layer -- i.e. if expert not in name
+def get_local_expert_num(s):
+    """Assumes experts have 'experts.' in their name. Expert num succeeds '.weight'."""
+    segments = s.split(".")
+    if "experts" not in segments:
+        return None
+    number = int(segments[-1].strip("weight"))
+    return number
+
+
 def get_global_layer_num(s, cfg):
     """Assumes layer number is preceeded by 'layers.'.
 
@@ -84,6 +94,23 @@ def get_global_layer_num(s, cfg):
         + local_layer_num
     )
     return global_layer_num
+
+
+def get_global_expert_num(s, cfg):
+    """Assumes experts have 'experts.' in their name. Expert num succeeds '.weight'.
+
+    Assumes expert model parallel size is set.
+    In the state dict, the expert number is the local expert number (expert local).
+    This function converts the local expert number to the global expert number.
+    """
+    local_expert_num = get_local_expert_num(s)
+    global_expert_num = (
+        parallel_state.get_expert_model_parallel_rank()
+        * cfg.num_moe_experts
+        // parallel_state.get_expert_model_parallel_world_size()
+        + local_expert_num
+    )
+    return global_expert_num
 
 
 def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):

@@ -16,16 +16,16 @@ from typing import Dict, List, Tuple
 
 import torch
 from megatron.core import parallel_state
+from megatron.core.extensions.transformer_engine import (
+    TEColumnParallelGroupedLinear,
+    TEColumnParallelLinear,
+    TERowParallelGroupedLinear,
+    TERowParallelLinear,
+)
 from megatron.core.tensor_parallel.layers import (
-    VocabParallelEmbedding,
     ColumnParallelLinear,
     RowParallelLinear,
-)
-from megatron.core.extensions.transformer_engine import (
-    TEColumnParallelLinear,
-    TERowParallelLinear,
-    TEColumnParallelGroupedLinear,
-    TERowParallelGroupedLinear,
+    VocabParallelEmbedding,
 )
 from nemo.collections.llm.gpt.model.base import GPTConfig
 
@@ -108,6 +108,10 @@ def get_global_param_key_to_local_key_map(
     pp_world_size = torch.distributed.get_world_size(pp_group)
     pp_global_rank_ids = model_converters.get_all_rank_ids_in_group(pp_group)
 
+    ep_group = parallel_state.get_expert_model_parallel_group()
+    ep_world_size = parallel_state.get_expert_model_parallel_world_size()
+    ep_global_rank_ids = model_converters.get_all_rank_ids_in_group(ep_group)
+
     # Build a mapping on each PP rank from a computed global key to the raw state dict key.
     # The global key is computed by replacing the local layer number (after "layers.")
     # with its corresponding global layer number (if applicable).
@@ -125,11 +129,20 @@ def get_global_param_key_to_local_key_map(
             )
         else:
             global_key = local_key
+        local_expert = model_converters.get_local_expert_num(local_key)
+        if local_expert is not None:
+            global_expert = model_converters.get_global_expert_num(local_key, model_cfg)
+            # Replace the last occurrence of the digits after "weight" with the global expert number.
+            global_key = re.sub(r"(?<=weight)\d+", str(global_expert), local_key)
         local_map[global_key] = local_key
 
     # Gather the local maps from all PP ranks (only lightweight key info is gathered).
-    all_maps = [None] * pp_world_size
-    torch.distributed.all_gather_object(all_maps, local_map, group=pp_group)
+    all_maps_pp = [None] * pp_world_size
+    torch.distributed.all_gather_object(all_maps_pp, local_map, group=pp_group)
+
+    # then gather across EP Ranks
+    all_maps = [None] * ep_world_size
+    torch.distributed.all_gather_object(all_maps, all_maps_pp, group=ep_group)
 
     # Build the union over global keys and assign an owner (the rank with the smallest PP rank).
     union_global_map = {}
@@ -139,6 +152,8 @@ def get_global_param_key_to_local_key_map(
                 gk not in union_global_map
                 or pp_global_rank_ids[pp_rank] < union_global_map[gk][0]
             ):
+                ## I think this should be fine because pp global rank is unique
+                ## so no need to take EP into account here
                 union_global_map[gk] = (pp_global_rank_ids[pp_rank], raw_key)
             else:
                 print(
@@ -155,6 +170,7 @@ def gather_params(
     param_name_to_rank_and_key,
 ):
     import time
+
     st = time.time()
     # Process each parameter (by its unique global key) one at a time.
     gathered_params = {}
