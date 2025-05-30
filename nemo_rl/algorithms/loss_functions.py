@@ -299,15 +299,6 @@ class ClippedPGLossFn(LossFunction):
         kl_for_loss = self.reference_policy_kl_penalty * kl
         loss = actor_loss + kl_for_loss
 
-            log_probs_mean = masked_mean(
-                curr_logprobs.detach(),
-                mask,
-                global_normalization_factor=global_valid_toks,
-            )
-
-        kl_for_loss = self.reference_policy_kl_penalty * kl
-        loss = actor_loss + kl_for_loss
-
         with torch.no_grad():
             probs_ratio = masked_mean(
                 ratios.detach(),
