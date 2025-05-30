@@ -162,6 +162,7 @@ class ClippedPGLossFn(LossFunction):
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
 
+        # Calculate KL regularization.
         if self.use_on_policy_kl_approximation:
             # See: docs/guides/grpo.md#on-policy-kl-approximation
             kl_importance_weights = torch.exp(
