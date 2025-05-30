@@ -203,22 +203,8 @@ class ClippedPGLossFn(LossFunction):
             logprobs_reference=reference_policy_logprobs,
         )
 
-        if self.loss_type == LossType.TOKEN_LEVEL:
-            kl = masked_mean(kl, mask, global_normalization_factor=global_valid_toks)
-        else:
-            kl = masked_mean(
-                masked_mean(kl, token_mask, dim=-1),
-                sample_mask,
-                global_normalization_factor=global_valid_seqs,
-            )
-
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
-            if self.use_generation_logprobs_in_ppo_baseline:
-                ratios = (curr_logprobs - generation_logprobs).exp()
-            else:
-                ratios = (curr_logprobs - prev_logprobs).exp()
-
             if self.use_generation_logprobs_in_ppo_baseline:
                 ratios = (curr_logprobs - generation_logprobs).exp()
             else:
