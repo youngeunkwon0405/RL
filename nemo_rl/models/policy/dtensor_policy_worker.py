@@ -362,9 +362,7 @@ class DTensorPolicyWorker:
                     mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
                 else:
                     mb_iterator = batch.make_microbatch_iterator(microbatch_size=mbs)
-                    mb_iterator = batch.make_microbatch_iterator(microbatch_size=mbs)
 
-                mbs_sum_accumulator = defaultdict(list)
                 mbs_sum_accumulator = defaultdict(list)
                 for mb in mb_iterator:
                     input_ids = mb.get("input_ids").cuda()
@@ -413,9 +411,6 @@ class DTensorPolicyWorker:
                     if num_valid_samples > 0:
                         for k, v in loss_metrics.items():
                             mbs_sum_accumulator[k].append(v)
-                    if num_valid_samples > 0:
-                        for k, v in loss_metrics.items():
-                            mbs_sum_accumulator[k].append(v)
 
                     # Backward pass
                     if not eval_mode:
@@ -427,11 +422,6 @@ class DTensorPolicyWorker:
                         # but we want to sum them so we cancel out the average here
                         loss *= self.dp_size
                         loss.backward()
-
-                # accumulate here
-                train_step_metric = {
-                    k: np.sum(v) for k, v in mbs_sum_accumulator.items()
-                }
 
                 # accumulate here
                 train_step_metric = {
