@@ -114,6 +114,17 @@ pip install uv
 # Example: uv run python examples/run_grpo_math.py
 ```
 
+(Optional): `flash-attn`
+By default, `flash-attn` isn't installed by default since it's not necessary for the training
+backends. To install it:
+```sh
+# Install the base packages
+uv sync
+# Install flash-attn
+uv sync --extra fattn
+```
+See [instructions](docs/docker.md) to build the NeMo RL container which has `flash-attn` cached for models requiring it.
+
 **Important Notes:**
 
 - Use the `uv run <command>` to execute scripts within the managed environment. This helps maintain consistency across different shells and sessions.

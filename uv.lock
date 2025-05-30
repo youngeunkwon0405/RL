@@ -2831,7 +2831,6 @@ dependencies = [
     { name = "accelerate" },
     { name = "colored" },
     { name = "datasets" },
-    { name = "flash-attn" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "numpy" },
@@ -2847,7 +2846,11 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+fattn = [
+    { name = "flash-attn" },
+]
 mcore = [
+    { name = "flash-attn" },
     { name = "megatron-core" },
     { name = "nemo-tron" },
     { name = "transformer-engine", extra = ["pytorch"] },
@@ -2861,6 +2864,7 @@ build = [
     { name = "einops" },
     { name = "hatchling" },
     { name = "packaging" },
+    { name = "psutil" },
     { name = "pybind11" },
     { name = "setuptools", version = "79.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "setuptools", version = "80.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
@@ -2893,7 +2897,8 @@ requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets" },
-    { name = "flash-attn", specifier = "==2.7.3" },
+    { name = "flash-attn", marker = "extra == 'fattn'", specifier = "==2.7.3" },
+    { name = "flash-attn", marker = "extra == 'mcore'", specifier = "==2.7.3" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM-workspace" },
@@ -2911,13 +2916,14 @@ requires-dist = [
     { name = "vllm", marker = "extra == 'vllm'", specifier = "==0.9.0" },
     { name = "wandb" },
 ]
-provides-extras = ["vllm", "mcore"]
+provides-extras = ["fattn", "vllm", "mcore"]
 
 [package.metadata.requires-dev]
 build = [
     { name = "einops" },
     { name = "hatchling" },
     { name = "packaging" },
+    { name = "psutil" },
     { name = "pybind11" },
     { name = "setuptools" },
     { name = "torch", specifier = "==2.7.0" },
