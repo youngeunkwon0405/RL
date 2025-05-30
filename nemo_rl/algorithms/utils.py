@@ -331,6 +331,7 @@ def setup_dataloaders(
     algorithm_config: TypedDict,
     policy_config: PolicyConfig,
     last_checkpoint_path: Optional[str] = None,
+    shuffle: bool = True,
 ) -> Tuple[StatefulDataLoader, Optional[StatefulDataLoader]]:
     """Setup training and validation dataloaders.
 
@@ -341,6 +342,7 @@ def setup_dataloaders(
         algorithm_config (TypedDict): Algorithm configuration.
         policy_config (PolicyConfig): Policy configuration.
         last_checkpoint_path (Optional[str]): Path to latest checkpoint if one exists, None otherwise.
+        shuffle (bool): Whether to shuffle the training dataloader.
 
     Returns:
         tuple: A 2-tuple containing (train_dataloader, val_dataloader).
@@ -348,7 +350,7 @@ def setup_dataloaders(
     train_dataloader = StatefulDataLoader(
         train_dataset,
         batch_size=policy_config["train_global_batch_size"],
-        shuffle=True,
+        shuffle=shuffle,
         collate_fn=collate_fn,
         drop_last=True,
     )

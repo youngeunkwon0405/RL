@@ -165,6 +165,7 @@ def setup(
         grpo_config,
         policy_config,
         last_checkpoint_path,
+        shuffle=False,
     )
 
     # ==========================
