@@ -15,7 +15,7 @@ grpo:
 loss_fn:
   reference_policy_kl_penalty: 0.01
   ratio_clip_min: 0.2
-  ratio_clip_max: 0.2
+  ratio_clip_max: 0.28
   ratio_clip_c: null
   # (default off) loss formulation improvements (docs/guides/grpo.md#loss)
   use_on_policy_kl_approximation: false
@@ -72,7 +72,7 @@ policy:
   optimizer:
     name: "torch.optim.AdamW"
     kwargs:
-      lr: 5.0e-6
+      lr: 2.0e-6
       weight_decay: 0.01
       betas: [0.9, 0.999]
       eps: 1e-8
@@ -130,7 +130,19 @@ data:
 
 env:
   math:
+    enable: true
     num_workers: 8
+  llm_judge_async: # Configuration for the LlmJudgeAsyncEnvironment
+    enable: false
+    num_workers: 2 # Number of parallel judge workers
+    model_name: "Qwen/Qwen2.5-32B-Instruct" # Judge model
+    tensor_parallel_size: 4 # TP size for the judge model
+    gpu_memory_utilization: 0.85 # For judge model
+    max_model_len: 16384 # Max sequence length for the judge model
+    temperature: 0.0 # Judge temperature (usually lower for more deterministic judging)
+    max_tokens: 512  # Max tokens for the judge's evaluation
+    stop: null # Stop strings for the judge's evaluation
+    max_concurrency: 16 # Maximum concurrent step calls for the environment actor (default: 16)
 
 logger:
   log_dir: "logs"  # Base directory for all logs
@@ -147,5 +159,5 @@ logger:
     flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
 
 cluster:
-  gpus_per_node: 1
+  gpus_per_node: 8
   num_nodes: 1

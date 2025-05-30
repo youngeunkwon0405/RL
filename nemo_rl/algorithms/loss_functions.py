@@ -109,6 +109,10 @@ class ClippedPGLossFn(LossFunction):
             "use_generation_logprobs_in_ppo_baseline"
         ]
 
+        self.use_generation_logprobs_in_ppo_baseline = cfg[
+            "use_generation_logprobs_in_ppo_baseline"
+        ]
+
         self.loss_type = (
             LossType.TOKEN_LEVEL if cfg["token_level_loss"] else LossType.SEQUENCE_LEVEL
         )
@@ -183,9 +187,38 @@ class ClippedPGLossFn(LossFunction):
                 sample_mask,
                 global_normalization_factor=global_valid_seqs,
             )
+        if self.use_on_policy_kl_approximation:
+            # See: docs/guides/grpo.md#on-policy-kl-approximation
+            kl_importance_weights = torch.exp(
+                curr_logprobs - generation_logprobs
+            ).detach()
+            kl_importance_weights = torch.nan_to_num(
+                kl_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
+            )
+        else:
+            kl_importance_weights = torch.ones_like(curr_logprobs)
+
+        kl = kl_importance_weights * calculate_kl_penalty_joschu2020(
+            logprobs_policy=curr_logprobs,
+            logprobs_reference=reference_policy_logprobs,
+        )
+
+        if self.loss_type == LossType.TOKEN_LEVEL:
+            kl = masked_mean(kl, mask, global_normalization_factor=global_valid_toks)
+        else:
+            kl = masked_mean(
+                masked_mean(kl, token_mask, dim=-1),
+                sample_mask,
+                global_normalization_factor=global_valid_seqs,
+            )
 
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
+            if self.use_generation_logprobs_in_ppo_baseline:
+                ratios = (curr_logprobs - generation_logprobs).exp()
+            else:
+                ratios = (curr_logprobs - prev_logprobs).exp()
+
             if self.use_generation_logprobs_in_ppo_baseline:
                 ratios = (curr_logprobs - generation_logprobs).exp()
             else:
@@ -266,6 +299,15 @@ class ClippedPGLossFn(LossFunction):
         kl_for_loss = self.reference_policy_kl_penalty * kl
         loss = actor_loss + kl_for_loss
 
+            log_probs_mean = masked_mean(
+                curr_logprobs.detach(),
+                mask,
+                global_normalization_factor=global_valid_toks,
+            )
+
+        kl_for_loss = self.reference_policy_kl_penalty * kl
+        loss = actor_loss + kl_for_loss
+
         with torch.no_grad():
             probs_ratio = masked_mean(
                 ratios.detach(),
@@ -308,6 +350,8 @@ class ClippedPGLossFn(LossFunction):
                 "tokens_max_clipped": clipped_max,
                 "probs_ratio": probs_ratio,
                 "probs_ratio_clamped": probs_ratio_clamped,
+                "kl_penalty": kl.item(),
+                "kl_penalty_for_loss": kl_for_loss.item(),
                 "kl_penalty": kl.item(),
                 "kl_penalty_for_loss": kl_for_loss.item(),
                 "token_mult_prob_error": mult_prob_error,

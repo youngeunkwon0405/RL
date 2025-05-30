@@ -19,6 +19,7 @@ from contextlib import contextmanager, nullcontext
 from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
 import numpy as np
+import numpy as np
 import ray
 import torch
 from torch import nn
@@ -362,7 +363,9 @@ class DTensorPolicyWorker:
                     mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
                 else:
                     mb_iterator = batch.make_microbatch_iterator(microbatch_size=mbs)
+                    mb_iterator = batch.make_microbatch_iterator(microbatch_size=mbs)
 
+                mbs_sum_accumulator = defaultdict(list)
                 mbs_sum_accumulator = defaultdict(list)
                 for mb in mb_iterator:
                     input_ids = mb.get("input_ids").cuda()
@@ -407,7 +410,11 @@ class DTensorPolicyWorker:
                         logits, mb, global_valid_seqs, global_valid_toks
                     )
 
+
                     num_valid_samples = loss_metrics["num_valid_samples"]
+                    if num_valid_samples > 0:
+                        for k, v in loss_metrics.items():
+                            mbs_sum_accumulator[k].append(v)
                     if num_valid_samples > 0:
                         for k, v in loss_metrics.items():
                             mbs_sum_accumulator[k].append(v)
@@ -422,6 +429,11 @@ class DTensorPolicyWorker:
                         # but we want to sum them so we cancel out the average here
                         loss *= self.dp_size
                         loss.backward()
+
+                # accumulate here
+                train_step_metric = {
+                    k: np.sum(v) for k, v in mbs_sum_accumulator.items()
+                }
 
                 # accumulate here
                 train_step_metric = {
@@ -477,6 +489,8 @@ class DTensorPolicyWorker:
 
             synced_train_step_metrics = []
 
+            synced_train_step_metrics = []
+
             # Compute global loss across all ranks
             with torch.no_grad():
                 for metric in train_step_metrics:
@@ -501,6 +515,7 @@ class DTensorPolicyWorker:
                         metric["tokens_min_clipped"] / metric["global_valid_toks"]
                     )
 
+            return synced_train_step_metrics
             return synced_train_step_metrics
 
     def get_logprobs(
