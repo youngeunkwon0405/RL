@@ -162,14 +162,6 @@ class ClippedPGLossFn(LossFunction):
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
 
-        if self.loss_type == LossType.TOKEN_LEVEL:
-            kl = masked_mean(kl, mask, global_normalization_factor=global_valid_toks)
-        else:
-            kl = masked_mean(
-                masked_mean(kl, token_mask, dim=-1),
-                sample_mask,
-                global_normalization_factor=global_valid_seqs,
-            )
         if self.use_on_policy_kl_approximation:
             # See: docs/guides/grpo.md#on-policy-kl-approximation
             kl_importance_weights = torch.exp(
@@ -185,6 +177,15 @@ class ClippedPGLossFn(LossFunction):
             logprobs_policy=curr_logprobs,
             logprobs_reference=reference_policy_logprobs,
         )
+
+        if self.loss_type == LossType.TOKEN_LEVEL:
+            kl = masked_mean(kl, mask, global_normalization_factor=global_valid_toks)
+        else:
+            kl = masked_mean(
+                masked_mean(kl, token_mask, dim=-1),
+                sample_mask,
+                global_normalization_factor=global_valid_seqs,
+            )
 
         # Calculate clipped loss function if ppo ratio is enabled.
         if not self.disable_ppo_ratio:
