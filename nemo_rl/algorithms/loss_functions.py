@@ -162,23 +162,6 @@ class ClippedPGLossFn(LossFunction):
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
 
-        # Calculate KL regularization.
-        if self.use_on_policy_kl_approximation:
-            # See: docs/guides/grpo.md#on-policy-kl-approximation
-            kl_importance_weights = torch.exp(
-                curr_logprobs - generation_logprobs
-            ).detach()
-            kl_importance_weights = torch.nan_to_num(
-                kl_importance_weights, nan=0.0, posinf=0.0, neginf=0.0
-            )
-        else:
-            kl_importance_weights = torch.ones_like(curr_logprobs)
-
-        kl = kl_importance_weights * calculate_kl_penalty_joschu2020(
-            logprobs_policy=curr_logprobs,
-            logprobs_reference=reference_policy_logprobs,
-        )
-
         if self.loss_type == LossType.TOKEN_LEVEL:
             kl = masked_mean(kl, mask, global_normalization_factor=global_valid_toks)
         else:
