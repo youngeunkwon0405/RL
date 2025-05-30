@@ -13,7 +13,8 @@
 # limitations under the License.
 
 from nemo_rl.data.json_datasets.scp import SCPDataset
+from nemo_rl.data.json_datasets.so import SODataset
 
 __all__ = [
-    "SCPDataset",
+    "SCPDataset", "SODataset",
 ]

@@ -147,7 +147,6 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
             # bug: I feel this "\n" is redundant. Should be "".join(content)
             content = "\n".join(content)
             prompts.append(content)
-            print(f"prompt =\n{content}")
 
         # generate by vllm
         inputs = BatchedDataDict({"prompts": prompts})

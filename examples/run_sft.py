@@ -107,6 +107,10 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
         data = json_datasets.SCPDataset(
             data_config["data_path"]
         )
+    elif data_cls == "so":
+        data = json_datasets.SODataset(
+            data_config["data_path"]
+        )
     else:
         raise ValueError(f"Unknown dataset class: {data_cls}")
     print(

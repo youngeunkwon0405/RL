@@ -86,6 +86,8 @@ class HFVerifyWorker:
                     pred = parse(response[-100:])  # avoid looking at the whole string
                 rewards.append(float(verify(gold, pred)))
                 has_predictions.append(len(pred) > 0)
+                if len(pred) == 0:
+                    print(f"Can't detect prediction in\n{response[-100:]}")
             except Exception:
                 rewards.append(0)
                 has_predictions.append(False)
