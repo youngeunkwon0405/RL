@@ -212,7 +212,7 @@ def gather_params(
             if k is not None:
                 gathered_params[k] = p
         
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
-    print(f"Time taken to gather params: {time.time() - st}")
+    # torch.cuda.empty_cache()
+    # torch.cuda.synchronize()
+    # print(f"Time taken to gather params: {time.time() - st}")
     return gathered_params
