@@ -4,7 +4,7 @@
 #SBATCH --account=ACCOUNT
 #SBATCH --job-name=JOB_NAME
 #SBATCH --partition=PARTITION
-#SBATCH --time=1:0:0
+#SBATCH --time=4:0:0
 #SBATCH --dependency=singleton
 #SBATCH --gres=gpu:8
 #SBATCH -o ../slurm_logs/%j.log
@@ -161,14 +161,8 @@ count=0
 while [[ \$count -lt $num_retries ]]; do
   bash /launch-head.sh
   count=\$((count+1))
-<<<<<<< HEAD
-  echo "Head node failed \$count times, restarting..."
-#  cleanup
-#  sleep 2
-=======
   echo "Head node failed \$count/$num_retries times, restarting in 5 seconds..."
   sleep 5
->>>>>>> main
 done
 touch $LOG_DIR/ENDED
 exit 1
@@ -232,14 +226,8 @@ count=0
 while [[ \$count -lt $num_retries ]]; do
   bash /launch-worker.sh
   count=\$((count+1))
-<<<<<<< HEAD
-  echo "Worker failed \$count times, restarting..."
-#  cleanup
-#  sleep 2
-=======
   echo "Worker failed \$count/$num_retries times, restarting in 5 seconds..."
   sleep 5
->>>>>>> main
 done
 touch $LOG_DIR/ENDED
 exit 1

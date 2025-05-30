@@ -5,16 +5,16 @@ generation:
   temperature: 0.6
   top_p: 0.95 # was 1 but doesn't compare with ido's
   top_k: -1 # disable
-  num_prompts_per_step: 64 # -1 means pass all prompts at once
+  num_prompts_per_step: 128 #2048 #2048 # -1 means pass all prompts at once
   model_name: "nvidia/Llama-3.1-Nemotron-Nano-8B-v1"
   stop_token_ids: null
   stop_strings: null
   vllm_cfg:
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.9
-    max_model_len: 24000 #2048
-    max_num_batched_tokens: 2
-    seed: 9389
+    max_model_len: 20000 #2048
+    #max_num_batched_tokens: 16
+    seed: 9388
 tokenizer:
   name: ${generation.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   chat_template: "default"
@@ -24,22 +24,23 @@ data:
   prompt_file: "examples/prompts/cot_nano_user.txt"
   #prompt_file: null
   system_prompt_file: "examples/prompts/cot_nano_system.txt"
-  dataset_name: "HuggingFaceH4/aime_2024"
+  dataset_name: "agentica-org/DeepScaleR-Preview-Dataset"
   dataset_key: "train"
   problem_key: "problem"
   solution_key: "answer"
-  planted_thinking_prompt : none #"<think>" #none #"<th]ink>Thinking . . . . . . . . . . . . . . . . ."
-  shuffle: true
-  shuffle_seed: 9389
+  planted_thinking_prompt : none #"<think>" #none #"<think>Thinking . . . . . . . . . . . . . . . . ."
+  task_type: "math" # "math" or "mc"
   
 env:
   math:
     num_workers: 8
+  mc: # multiple choice questions
+    num_workers: 8
 
 cluster:
-  gpus_per_node: 5
+  gpus_per_node: 8
   num_nodes: 1
 
 debug:
-  outfile: none
+  outfile: nano_deepscaler_L1_data_context_20000.jsonl
   output_generation: false

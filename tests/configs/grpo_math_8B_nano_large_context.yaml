@@ -1,0 +1,114 @@
+# GRPO Algorithm Configuration
+defaults: "grpo_base.yaml"
+
+grpo:
+  num_prompts_per_step: 16 
+  num_generations_per_prompt: 16
+  val_period: 5
+  val_at_start: true 
+
+policy:
+  model_name: "nvidia/Llama-3.1-Nemotron-Nano-8B-v1" #"meta-llama/Llama-3.1-8B-Instruct"
+  tokenizer:
+    name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
+  train_global_batch_size: 256 
+  train_micro_batch_size: 1
+  generation_batch_size: 32 
+  logprob_batch_size: 1
+  max_total_sequence_length: 8192 
+  precision: "bfloat16"
+  fsdp_offload_enabled: true
+  activation_checkpointing_enabled: true
+  refit_buffer_size_gb: 4 # used for refitting inference engine, the unit is GB
+
+  dtensor_cfg:
+    enabled: True
+    cpu_offload: false
+    sequence_parallel: false
+    activation_checkpointing: false
+    tensor_parallel_size: 2
+
+  optimizer:
+    name: "torch.optim.AdamW"
+    kwargs:
+      lr: 3.0e-7
+      weight_decay: 0.01
+      betas: [0.9, 0.999]
+      eps: 1e-8
+
+  scheduler:
+    - name: "torch.optim.lr_scheduler.LinearLR"
+      kwargs:
+        start_factor: 0.1
+        end_factor: 1.0
+        total_iters: 50
+    - name: "torch.optim.lr_scheduler.ConstantLR"
+      kwargs:
+        factor: 1.0
+        total_iters: 10000000000
+    - milestones: [50]
+
+  generation:
+    backend: "vllm"
+    max_new_tokens: ${policy.max_total_sequence_length}
+    temperature: 1.0
+    top_p: 1.0
+    top_k: null
+    stop_token_ids: null
+    stop_strings: null
+    vllm_cfg:
+      tensor_parallel_size: 1
+      gpu_memory_utilization: 0.9 # was0.6
+      max_num_batched_tokens: 2 # was empty but fighting with OOM
+      max_model_len: ${policy.max_total_sequence_length}
+
+cluster:
+  gpus_per_node: 8
+  num_nodes: 1
+
+logger:
+  log_dir: "logs"  # Base directory for all logs
+  num_val_samples_to_print: 0 # Number of validation samples to pretty print on terminal
+  wandb_enabled: true
+  tensorboard_enabled: false
+  monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
+  wandb:
+    project: "nir_nemorl_tests"
+    name: "grpo-math_8b_nano_4096_16_16_L1_20k_"     # 20k means that benchmark measurements done with context 20k tokens
+    id: "grpo-math_8b_nano_debug_4096_16_16_L1_20k_" # 20k means that benchmark measurements done with context 20k tokens
+  tensorboard: {}
+  gpu_monitoring:
+    collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
+    flush_interval: 10  # How often to flush GPU usage metrics to the loggers (in seconds)
+
+checkpointing:
+  enabled: true
+  checkpoint_dir: "results/grpo_8b_nano_1node_4096_16_16_L1_20k"
+  metric_name: "val_reward"
+  higher_is_better: true
+  keep_top_k:   # None to keep everything
+  save_period: 25
+
+data:
+  max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
+  prompt_file: "examples/prompts/cot_nano_user.txt"
+  system_prompt_file: "examples/prompts/cot_nano_system.txt"
+  dataset_name: "agentica-org/DeepScaleR-Preview-Dataset"
+  dataset_key: "train"
+  problem_key: "problem"
+  solution_key: "answer"
+  val_dataset_name: "HuggingFaceH4/aime_2024"
+  val_dataset_key: "train"
+  val_problem_key: "problem"
+  val_solution_key: "answer"
+
+env:
+  math:
+    use_L1_loss: true
+    L1_loss:
+      enabled: true
+      baseline_answer_length_path: "nano_deepscaler_L1_data_context_20000.jsonl" # file containing baseline answer lengths
+      shrink_factor_for_incorrect_answer: 1.7 # shrink factor for answer length forincorrect answer.  empirically, incorrect answers take more tokens than correct answers.
+      lower_bound_factor: 0.75 # lower bound factor - multiplied be baseline answer length to get length lower bound
+      upper_bound_factor: 2 # upper bound factor - multiplied be baseline answer length to get length upper bound
+      penalty_factor: 0.5 # factor to multiply the penalty by before subtracting from reward

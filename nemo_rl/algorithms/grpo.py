@@ -598,7 +598,6 @@ def grpo_train(
             if any(value is None for value in values):
                 continue
             environment_metrics[key] = values
-        #import pdb; p=pdb.Pdb(); p.prompt='breakpoint-train-loop:)'; p.set_trace()
         
         print("\n📊 Training Results:")
         metrics = {
@@ -688,8 +687,6 @@ def validate(
 
             total_rewards.extend(rewards.tolist())
             total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
-
-            #import pdb; p = pdb.Pdb(); p.prompt='breakpoint-validate:)'; p.set_trace()
             
             # Collect message logs for later display
             to_env = get_keys_from_message_log(
