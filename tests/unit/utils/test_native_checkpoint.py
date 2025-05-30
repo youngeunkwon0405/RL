@@ -59,6 +59,10 @@ simple_policy_config = {
         "sequence_parallel": False,
         "activation_checkpointing": False,
         "tensor_parallel_size": 1,
+        "custom_parallel_plan": None,
+    },
+    "dynamic_batching": {
+        "enabled": False,
     },
     "max_grad_norm": 1.0,
     "generation": {
