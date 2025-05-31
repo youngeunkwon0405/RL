@@ -40,6 +40,7 @@ class ClippedPGLossConfig(TypedDict):
     use_on_policy_kl_approximation: bool
     use_importance_sampling_correction: bool
     token_level_loss: bool
+    use_generation_logprobs_in_ppo_baseline: bool
 
 
 class ClippedPGLossDataDict(TypedDict):
@@ -103,10 +104,6 @@ class ClippedPGLossFn(LossFunction):
         self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
         self.use_importance_sampling_correction = cfg[
             "use_importance_sampling_correction"
-        ]
-
-        self.use_generation_logprobs_in_ppo_baseline = cfg[
-            "use_generation_logprobs_in_ppo_baseline"
         ]
 
         self.use_generation_logprobs_in_ppo_baseline = cfg[
@@ -312,8 +309,6 @@ class ClippedPGLossFn(LossFunction):
                 "tokens_max_clipped": clipped_max,
                 "probs_ratio": probs_ratio,
                 "probs_ratio_clamped": probs_ratio_clamped,
-                "kl_penalty": kl.item(),
-                "kl_penalty_for_loss": kl_for_loss.item(),
                 "kl_penalty": kl.item(),
                 "kl_penalty_for_loss": kl_for_loss.item(),
                 "token_mult_prob_error": mult_prob_error,
