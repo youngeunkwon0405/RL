@@ -264,6 +264,15 @@ class ClippedPGLossFn(LossFunction):
                 global_normalization_factor=global_valid_toks,
             )
 
+            ratio_to_compare = (
+                generation_logprobs
+                if self.use_generation_logprobs_in_ppo_baseline
+                else prev_logprobs
+            ).detach()
+            sequence_level_ratios = (
+                ((curr_logprobs.detach() - ratio_to_compare) * mask).sum(-1).exp().sum()
+            )
+
         kl_for_loss = self.reference_policy_kl_penalty * kl
         loss = actor_loss + kl_for_loss
 
@@ -305,6 +314,7 @@ class ClippedPGLossFn(LossFunction):
             {
                 "loss": loss.item(),
                 "log_probs_mean": log_probs_mean.item(),
+                "sequence_level_ratios": sequence_level_ratios.item(),
                 "tokens_min_clipped": clipped_min,
                 "tokens_max_clipped": clipped_max,
                 "probs_ratio": probs_ratio,

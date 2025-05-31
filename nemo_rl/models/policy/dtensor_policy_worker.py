@@ -486,9 +486,13 @@ class DTensorPolicyWorker:
                     )
 
                     torch.distributed.all_reduce(values, group=self.dp_mesh.get_group())
-                    synced_train_step_metrics.append(
-                        {k: v.cpu().item() for k, v in zip(keys, values)}
+
+                    metric_dict = {k: v.cpu().item() for k, v in zip(keys, values)}
+                    metric_dict["sequence_level_ratios"] = (
+                        metric_dict["sequence_level_ratios"]
+                        / metric_dict["num_valid_samples"]
                     )
+                    synced_train_step_metrics.append(metric_dict)
 
                 for i, metric in enumerate(train_step_metrics_no_accumulation):
                     synced_train_step_metrics[i].update(metric)
