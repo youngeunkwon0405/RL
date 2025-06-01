@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 from typing import Any, Dict, List, Tuple, Union
 
 import torch
@@ -26,6 +27,7 @@ from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.utils.logger import log_json
 
 
 # TODO @sahilj handle too-long prompts and masking them out throughout the whole process and renormalizing on loss
@@ -105,6 +107,17 @@ class AllTaskProcessedDataset:
         datum_spec = task_data_processor(
             entry, task_data_spec, self.tokenizer, self.max_seq_length, idx
         )
+
+        logging.debug(
+            "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_"
+        )
+        logging.debug("AllTaskProcessedDataset, __getitem__")
+        logging.debug(f"{idx=}")
+        log_json("entry", entry)
+        log_json("datum_spec", datum_spec)
+        logging.debug(
+            "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_"
+        )
         return datum_spec
 
 
@@ -137,6 +150,17 @@ def rl_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
         batch_max_length=batch_max_length,
         stop_strings=stop_strings,
     )
+
+    logging.debug(
+        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+    )
+    logging.debug("rl_collate_fn")
+    log_json("data_batch", data_batch)
+    log_json("output", output)
+    logging.debug(
+        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+    )
+
     return output
 
 
@@ -180,6 +204,16 @@ def packed_rl_collate_fn(data_batch: List[Dict[str, Any]]) -> BatchedDataDict:
     # Add packed-specific information
     result["is_packed"] = True
     result["packed_lengths"] = [item["lengths"] for item in data_batch]
+
+    logging.debug(
+        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+    )
+    logging.debug("packed_rl_collate_fn")
+    log_json("data_batch", data_batch)
+    log_json("result", result)
+    logging.debug(
+        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
+    )
 
     return result
 

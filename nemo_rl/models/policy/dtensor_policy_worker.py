@@ -48,6 +48,7 @@ from nemo_rl.models.policy.utils import (
     import_class_from_path,
     sliding_window_overwrite,
 )
+from nemo_rl.utils.logger import log_json
 from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
@@ -348,9 +349,13 @@ class DTensorPolicyWorker:
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
     ) -> Dict[str, Any]:
-        logging.debug("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+        logging.debug(
+            "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
+        )
         logging.debug("DTensor worker train")
-        logging.debug("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+        logging.debug(
+            "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
+        )
 
         """Train the policy on a batch of data with a given loss function."""
         skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
@@ -424,7 +429,8 @@ class DTensorPolicyWorker:
                 num_microbatches = min(local_gbs, dataset_size - gb_start) // mbs
 
                 for mb in global_batch.make_microbatch_iterator(mbs):
-                    logging.debug(f"{mb=}")
+                    logging.debug("$$$$$")
+                    log_json("mb", mb.get_dict())
                     input_ids = mb.get("input_ids").cuda()
 
                     input_lengths = mb.get("input_lengths")
@@ -486,10 +492,10 @@ class DTensorPolicyWorker:
                             elif self.cfg["attention_mask_strategy"] == "default":
                                 pass
 
-                        logging.debug("model input")
-                        logging.debug(f"{input_ids=}")
-                        logging.debug(f"{attention_mask=}")
-                        logging.debug(f"{position_ids=}")
+                        logging.debug("model inputs")
+                        log_json("input_ids", input_ids)
+                        log_json("attention_mask", attention_mask)
+                        log_json("position_ids", position_ids)
 
                         outputs = self.model(
                             input_ids=input_ids,
@@ -533,6 +539,12 @@ class DTensorPolicyWorker:
                     if num_valid_samples > 0:
                         mb_losses.append(loss.item())
                         all_mb_metrics.append(loss_metrics)
+
+                    logging.debug("model outputs")
+                    logging.debug(f"{loss=}")
+                    logging.debug(f"{loss_metrics=}")
+                    logging.debug(f"{logits.shape=}")
+                    logging.debug(f"{torch.mean(logits)=}")
 
                 grad_norm = None
                 if not eval_mode:
@@ -579,7 +591,19 @@ class DTensorPolicyWorker:
                 "all_mb_metrics": dict(mb_metrics),
             }
 
-            logging.debug("$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$")
+            def get_model_weight_stats(model):
+                weights = torch.cat([p.data.flatten() for p in model.parameters()])
+                return {
+                    "mean": weights.mean().item(),
+                    "min": weights.min().item(),
+                    "max": weights.max().item(),
+                }
+
+            logging.debug(get_model_weight_stats(self.model))
+
+            logging.debug(
+                "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
+            )
             return metrics
 
     def get_logprobs(

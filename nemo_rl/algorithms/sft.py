@@ -44,7 +44,7 @@ from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_rl.utils.logger import Logger, LoggerConfig
+from nemo_rl.utils.logger import Logger, LoggerConfig, log_json
 from nemo_rl.utils.timer import Timer
 
 logging.basicConfig(level=logging.DEBUG)
@@ -463,12 +463,15 @@ def sft_train(
             with timer.time("total_step_time"):
                 # Prepare batch and generate responses
                 print("▶ Preparing batch...")
-                logging.debug("================================")
+                logging.debug(
+                    "================================================================"
+                )
                 logging.debug("Training batch")
-                logging.debug("================================")
+                logging.debug(
+                    "================================================================"
+                )
                 logging.debug(f"{type(batch)=}")
-                logging.debug("=====")
-                logging.debug(f"{batch=}")
+                log_json("batch", batch.get_dict())
                 with timer.time("data_processing"):
                     ## add loss mask based on role to every message
                     logging.debug("add loss mask based on role to every message")
@@ -522,10 +525,9 @@ def sft_train(
                         num_samples = len(train_data["input_ids"])
                         num_tokens = sum(train_data["input_lengths"])
 
-                logging.debug("=====")
-                logging.debug(f"{batch=}")
-                logging.debug("=====")
-                logging.debug(f"{train_data=}")
+                logging.debug("batch after processing:")
+                log_json("batch", batch.get_dict())
+                log_json("train_data", train_data.get_dict())
 
                 print("▶ Taking a training step...")
                 train_results = policy.train(train_data, loss_fn)
@@ -533,7 +535,9 @@ def sft_train(
                 consumed_samples += num_samples
                 consumed_tokens += num_tokens
 
-                logging.debug(f"{train_results=}")
+                log_json("train_results", train_results)
+
+                os.exit(1)
 
                 # Run validation if it's a validation step
                 if val_period > 0 and (total_steps + 1) % val_period == 0:
@@ -591,7 +595,9 @@ def sft_train(
                         )
                         checkpointer.finalize_checkpoint(checkpoint_path)
 
-                logging.debug("================================")
+                logging.debug(
+                    "================================================================"
+                )
 
             losses = train_results["loss"]
             metrics = {

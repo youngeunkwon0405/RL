@@ -34,6 +34,7 @@ from nemo_rl.models.interfaces import PolicyInterface
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from nemo_rl.models.policy.fsdp1_policy_worker import FSDP1PolicyWorker
+from nemo_rl.utils.logger import log_json
 
 logging.basicConfig(level=logging.DEBUG)
 torch.set_printoptions(profile="full")
@@ -169,9 +170,13 @@ class HfPolicy(PolicyInterface, GenerationInterface):
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
     ):
-        logging.debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+        logging.debug(
+            "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+        )
         logging.debug("HF Policy training")
-        logging.debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+        logging.debug(
+            "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+        )
 
         """Train the policy on a batch of data with a given loss function."""
         batch_size = gbs or self.cfg["train_global_batch_size"]
@@ -182,8 +187,8 @@ class HfPolicy(PolicyInterface, GenerationInterface):
 
         logging.debug(f"{batch_size=}")
         logging.debug(f"{micro_batch_size=}")
-        logging.debug(f"{shards=}")
-        logging.debug(f"{sharded_data=}")
+        log_json("shards", shards)
+        log_json("sharded_data", sharded_data)
 
         # Train each shard in parallel
         futures = self.worker_group.run_all_workers_multiple_data(
@@ -212,7 +217,9 @@ class HfPolicy(PolicyInterface, GenerationInterface):
                 all_mb_metrics[k].extend(v)
         aggregated_results["all_mb_metrics"] = dict(all_mb_metrics)
 
-        logging.debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@")
+        logging.debug(
+            "@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@"
+        )
 
         return aggregated_results
 
