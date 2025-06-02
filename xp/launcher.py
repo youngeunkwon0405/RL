@@ -97,10 +97,6 @@ def verify_with_sweep(sweep_config: Dict[str, Any], script_path: Optional[str], 
 
     # Determine script path
     if script_path is None:
-        if not sweep_script_name:
-            raise AssertionError(
-                "Script path must be provided either via command line or 'script_name' in the sweep config."
-            )
         final_script_path = sweep_script_name
     else:
         final_script_path = script_path
