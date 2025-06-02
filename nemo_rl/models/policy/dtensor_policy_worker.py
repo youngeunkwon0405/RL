@@ -638,10 +638,10 @@ class DTensorPolicyWorker:
 
                         elif self.cfg["packing_strategy"] == "vector":
                             input_ids = mb.get("input_ids").cuda()
-                            batch_size, seq_len = input_ids.shape
                             input_ids, position_ids, flash_attn_kwargs = (
                                 _pack_microbatch(mb)
                             )
+                            batch_size, seq_len = input_ids.shape
                             attention_mask = torch.ones(
                                 (batch_size, seq_len),
                                 dtype=torch.long,
