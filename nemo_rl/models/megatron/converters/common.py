@@ -243,7 +243,7 @@ class MegatronToHFConverter:
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )
-        elif "deepseek" in hf_model_name.lower():
+        elif "deepseek" in hf_model_name.lower() or hf_model_name == "ByteDance-Seed/academic-ds-9B":
             self.export_mapping = deepseek_converter.get_export_mapping(
                 source=global_keys_map,
                 source_config=megatron_model.config.__dict__,
@@ -458,19 +458,5 @@ class MegatronToHFConverter:
             for k, v in ctx.target_state.items():
                 if v is not None:
                     converted_state_dict[k] = v
-
-        # if torch.distributed.get_rank() == 0:
-        #     import pdb
-
-        #     pdb.set_trace()
-        # torch.distributed.barrier()
-        # [v for k, v in converted_state_dict.items() if v is None]
-        # len([v for k, v in converted_state_dict.items() if v is None])
-
-        # for i in range(torch.distributed.get_world_size()):
-        #     if torch.distributed.get_rank() == i:
-        #         import pdb
-        #         pdb.set_trace()
-        #     torch.distributed.barrier()
 
         return converted_state_dict
