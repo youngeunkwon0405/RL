@@ -148,7 +148,8 @@ def setup_megatron_model(
     # Tokenizer
     build_tokenizer(
         cfg.tokenizer_config,
-        make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by,
+        # TODO(yifu): should just pull the vocab size from HF config instead?
+        make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by // cfg.model_config.tensor_model_parallel_size,
         tensor_model_parallel_size=cfg.model_config.tensor_model_parallel_size,
     )
     if not cfg.model_config.vocab_size:
@@ -288,8 +289,6 @@ class MegatronPolicyWorker:
         model_cfg.parallel_output = True
         model_cfg.moe_router_dtype = 'fp64'
 
-        # from megatron.core.transformer.enums import AttnBackend
-        # model_cfg.attention_backend = AttnBackend.unfused
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
@@ -346,9 +345,9 @@ class MegatronPolicyWorker:
             self.checkpointing_context,
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
-        self.model = self.move_model(self.model, "cpu")
 
         if init_reference_model:
+            self.model = self.move_model(self.model, "cpu")
             ref_ckpt_context = _init_checkpointing_context(ref_checkpoint_config)
             reference_model = get_model_from_config(
                 self.megatron_cfg.model_config,
@@ -383,7 +382,7 @@ class MegatronPolicyWorker:
             else:
                 print("Reference model not loaded")
 
-        self.model = self.move_model(self.model, "cuda")
+            self.model = self.move_model(self.model, "cuda")
 
         _update_model_config_funcs(
             [self.model],
@@ -402,7 +401,7 @@ class MegatronPolicyWorker:
 
         self.megatron_tokenizer = build_tokenizer(
             tokenizer_config,
-            make_vocab_size_divisible_by=128,
+            make_vocab_size_divisible_by=self.megatron_cfg.model_config.make_vocab_size_divisible_by // self.cfg["megatron_cfg"]["tensor_model_parallel_size"],
             tensor_model_parallel_size=self.cfg["megatron_cfg"]["tensor_model_parallel_size"],
         )
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
