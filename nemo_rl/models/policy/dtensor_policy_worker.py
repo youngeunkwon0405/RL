@@ -264,48 +264,80 @@ def _unpack_tensor(tensor, mb):
 
 
 def pack_sequences(
-    input_ids: torch.Tensor, input_lengths: torch.Tensor, pad_token_id: int = 0
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    # """Packs a batch of variable-length sequences into a flat input for transformer models,
-    # producing packed input_ids, position_ids, and a block-diagonal boolean causal attention mask.
+    input_ids: torch.Tensor,
+    input_lengths: torch.Tensor,
+    return_attention_mask: bool = True,
+) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    """Packs variable-length sequences into a flat input for transformer models.
 
-    # Args:
-    #     input_ids (torch.Tensor): Tensor of shape [batch_size, max_seq_len]
-    #     input_lengths (torch.Tensor): Tensor of shape [batch_size] with actual lengths
-    #     pad_token_id (int): Token used for padding (default = 0)
+    Args:
+        input_ids (torch.Tensor): [batch_size, max_seq_len]
+        input_lengths (torch.Tensor): [batch_size] with actual lengths
+        return_attention_mask (bool): If True, returns block-diagonal causal attention mask
 
-    # Returns:
-    #     input_ids_packed (torch.Tensor): [1, total_seq_len]
-    #     position_ids_packed (torch.Tensor): [1, total_seq_len]
-    #     attention_mask (torch.Tensor): Boolean tensor [1, total_seq_len, total_seq_len]
-    #                                    True = visible, False = masked
-    # """
+    Returns:
+        Tuple:
+            input_ids_packed (torch.Tensor): [1, total_seq_len]
+            position_ids_packed (torch.Tensor): [1, total_seq_len]
+            attention_mask (Optional[torch.Tensor]): [1, total_seq_len, total_seq_len] (bool) or None
+    """
     flat_input_ids = []
     position_ids = []
     for i, length in enumerate(input_lengths):
         flat_input_ids.append(input_ids[i, :length])
         position_ids.append(torch.arange(length, dtype=torch.long))
 
-    flat_input_ids = torch.cat(flat_input_ids)  # [total_seq_len]
-    position_ids = torch.cat(position_ids)  # [total_seq_len]
+    flat_input_ids = torch.cat(flat_input_ids)
+    position_ids = torch.cat(position_ids)
     total_seq_len = flat_input_ids.size(0)
 
     input_ids_packed = flat_input_ids.unsqueeze(0)  # [1, total_seq_len]
     position_ids_packed = position_ids.unsqueeze(0)  # [1, total_seq_len]
 
-    # Create block-diagonal causal attention mask (bool)
-    attention_mask = torch.zeros((total_seq_len, total_seq_len), dtype=torch.bool)
-    start = 0
-    for length in input_lengths:
-        end = start + length.item()
-        attention_mask[start:end, start:end] = torch.tril(
-            torch.ones((length, length), dtype=torch.bool)
-        )
-        start = end
-
-    attention_mask = attention_mask.unsqueeze(0)  # [1, total_seq_len, total_seq_len]
+    attention_mask = None
+    if return_attention_mask:
+        attention_mask = torch.zeros((total_seq_len, total_seq_len), dtype=torch.bool)
+        start = 0
+        for length in input_lengths:
+            end = start + length.item()
+            attention_mask[start:end, start:end] = torch.tril(
+                torch.ones((length, length), dtype=torch.bool)
+            )
+            start = end
+        attention_mask = attention_mask.unsqueeze(
+            0
+        )  # [1, total_seq_len, total_seq_len]
 
     return input_ids_packed, position_ids_packed, attention_mask
+
+
+def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> dict:
+    """Returns kwargs required for FlashAttention v2 forward functions.
+
+    Args:
+        input_lengths (torch.Tensor): [batch_size] containing lengths of each sequence
+
+    Returns:
+        Dict[str, torch.Tensor | int]:
+            {
+                "cu_seqlens_q": Tensor[int32],
+                "cu_seqlens_k": Tensor[int32],
+                "max_seqlen_q": int,
+                "max_seqlen_k": int
+            }
+    """
+    input_lengths_int32 = input_lengths.to(torch.int32)
+    cu_seqlens = torch.nn.functional.pad(
+        input_lengths_int32.cumsum(dim=0), (1, 0)
+    )  # prepend 0
+    max_len = input_lengths.max().item()
+
+    return {
+        "cu_seqlens_q": cu_seqlens,
+        "cu_seqlens_k": cu_seqlens.clone(),  # same for self-attention
+        "max_seqlen_q": max_len,
+        "max_seqlen_k": max_len,
+    }
 
 
 def unpack_logits(
@@ -588,9 +620,20 @@ class DTensorPolicyWorker:
 
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         if self.cfg["packing_strategy"] == "flash_attention":
-                            input_ids, position_ids, flash_attn_kwargs = (
-                                _pack_microbatch(mb)
+                            # input_ids, position_ids, flash_attn_kwargs = (
+                            #     _pack_microbatch(mb)
+                            # )
+
+                            input_ids__ = mb.get("input_ids").cuda()
+                            input_ids, position_ids, _ = pack_sequences(
+                                input_ids=input_ids__,
+                                input_lengths=mb["input_lengths"],
+                                return_attention_mask=False,
                             )
+                            flash_attn_kwargs = get_flash_attention_kwargs(
+                                mb["input_lengths"]
+                            )
+
                             attention_mask = None
 
                         elif self.cfg["packing_strategy"] == "vector":
@@ -609,7 +652,9 @@ class DTensorPolicyWorker:
                         elif self.cfg["packing_strategy"] == "matrix":
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, attention_mask = pack_sequences(
-                                input_ids=input_ids, input_lengths=mb["input_lengths"]
+                                input_ids=input_ids,
+                                input_lengths=mb["input_lengths"],
+                                return_attention_mask=True,
                             )
                             flash_attn_kwargs = {}
 
