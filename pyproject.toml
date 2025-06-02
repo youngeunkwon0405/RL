@@ -17,7 +17,7 @@ dynamic = [
     "readme",
 ]
 description = "NeMo RL: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
     "torch==2.7.0",
