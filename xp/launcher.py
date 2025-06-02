@@ -31,9 +31,9 @@ MOUNTS = "/lustre:/lustre"
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Launch Slurm experiments with parameter sweeps")
-    parser.add_argument("--script", type=str, help="Path to the Python script to run")
-    parser.add_argument("--config", type=str, help="Path to the base YAML config file")
-    parser.add_argument("--sweep", type=str, help="Path to the sweep config YAML file")
+    parser.add_argument("--script", type=str, default=None, help="Path to the Python script to run")
+    parser.add_argument("--config", type=str, default=None, help="Path to the base YAML config file")
+    parser.add_argument("--sweep", type=str, default=None, help="Path to the sweep config YAML file")
     parser.add_argument("--nodes", type=int, default=None, help="Number of nodes to use")
     parser.add_argument("--time", type=str, default="4:0:0", help="Time limit for the job")
     parser.add_argument("--account", type=str, default=ACCOUNT, help="Slurm account to use")
