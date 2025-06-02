@@ -1342,19 +1342,6 @@ wheels = [
 ]
 
 [[package]]
-name = "flash-attn"
-version = "2.7.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "einops" },
-    { name = "psutil" },
-    { name = "setuptools", version = "79.0.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
-    { name = "setuptools", version = "80.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
-    { name = "torch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/81/f5/59b0727da8c041c0e5eb9feba068e27c88b2cead0e03083c5c6d444d004b/flash_attn-2.7.3.tar.gz", hash = "sha256:9078cf92355c4e3f77f01626ece8c71aad26bdbfa827c2af8c6ac5632cc1cc58", size = 3223463, upload-time = "2025-01-12T03:29:38.819Z" }
-
-[[package]]
 name = "flask"
 version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3010,7 +2997,6 @@ dependencies = [
     { name = "colored" },
     { name = "datasets", version = "2.14.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.11' and platform_machine == 'aarch64') or (python_full_version != '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.12.*' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'linux')" },
     { name = "datasets", version = "3.6.0", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.11' and sys_platform != 'linux') or (python_full_version == '3.11.*' and sys_platform == 'linux')" },
-    { name = "flash-attn" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "numpy" },
@@ -3072,7 +3058,6 @@ requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets" },
-    { name = "flash-attn", specifier = "==2.7.3" },
     { name = "hydra-core" },
     { name = "math-verify" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM-workspace" },

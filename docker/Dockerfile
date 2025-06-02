@@ -32,8 +32,8 @@ COPY --link 3rdparty/ ./3rdparty/
 
 # Variables to control the build of TE. If there are issues with parallelization, consider
 # setting these to 1.
-ARG MAX_JOBS
-ARG NVTE_BUILD_THREADS_PER_JOB
+ARG MAX_JOBS=4
+ARG NVTE_BUILD_THREADS_PER_JOB=1
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/nemo_rl_venv
 ENV UV_LINK_MODE=copy
@@ -48,12 +48,9 @@ uv venv ${UV_PROJECT_ENVIRONMENT}
 # Do everything in one layer to prevent large layers.
 
 # The venv is symlinked to avoid bloating the layer size
-# To get around UV_PROJECT_ENVIRONMENT not being respected for uv pip install, we set VIRTUAL_ENV, see:
-#    https://github.com/astral-sh/uv/issues/7380#issuecomment-2364145344
-VIRTUAL_ENV=${UV_PROJECT_ENVIRONMENT} uv pip install setuptools torch==2.7.0 psutil
-uv sync --link-mode symlink --locked --no-install-project --no-build-isolation
+uv sync --link-mode symlink --locked --no-install-project
 uv sync --link-mode symlink --locked --extra vllm --no-install-project
-uv sync --link-mode symlink --locked --extra mcore --no-install-project --no-build-isolation
+uv sync --link-mode symlink --locked --extra mcore --no-install-project
 uv sync --link-mode symlink --locked --all-groups --no-install-project
 EOF
 
