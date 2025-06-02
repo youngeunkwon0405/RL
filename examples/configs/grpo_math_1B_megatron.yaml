@@ -20,6 +20,7 @@ loss_fn:
   use_on_policy_kl_approximation: false
   use_importance_sampling_correction: false
   token_level_loss: true
+  ratio_clip_c: null
 
 checkpointing:
   enabled: false
