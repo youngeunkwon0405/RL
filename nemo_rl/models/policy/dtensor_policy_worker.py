@@ -520,28 +520,29 @@ class DTensorPolicyWorker:
                     log_json("mb", mb.get_dict())
                     input_ids = mb.get("input_ids").cuda()
 
-                    input_lengths = mb.get("input_lengths")
-                    batch_size, seq_len = input_ids.shape
-
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
-                        batch_size, seq_len = input_ids.shape
-
                         if self.cfg["packing_strategy"] == "flash_attention":
                             input_ids, position_ids, flash_attn_kwargs = (
                                 _pack_microbatch(mb)
                             )
                             attention_mask = None
                         elif self.cfg["packing_strategy"] == "vector":
+                            batch_size, seq_len = input_ids.shape
                             input_ids, position_ids, flash_attn_kwargs = (
                                 _pack_microbatch(mb)
                             )
                             attention_mask = torch.ones(
-                                (input_ids.shape, seq_len),
+                                (batch_size, seq_len),
                                 dtype=torch.long,
                                 device=input_ids.device,
                             )
                             flash_attn_kwargs = {}
-                        else:
+                        elif self.cfg["packing_strategy"] == "matrix":
+                            raise NotImplementedError(
+                                "matrix packing strategy is not implemented"
+                            )
+                        elif self.cfg["packing_strategy"] == "default":
+                            batch_size, seq_len = input_ids.shape
                             attention_mask = torch.ones(
                                 (batch_size, seq_len),
                                 dtype=torch.long,
@@ -551,6 +552,10 @@ class DTensorPolicyWorker:
                                 seq_len, device=input_ids.device
                             ).repeat(batch_size, 1)
                             flash_attn_kwargs = {}
+                        else:
+                            raise ValueError(
+                                f"Unknown packing strategy: {self.cfg['packing_strategy']}"
+                            )
 
                         # if "packed_lengths" in mb:
                         #     if self.cfg["attention_mask_strategy"] == "block_diagonal":
@@ -621,9 +626,17 @@ class DTensorPolicyWorker:
                     if self.cfg["packing_strategy"] == "flash_attention":
                         logits = _unpack_tensor(logits, mb)
                     elif self.cfg["packing_strategy"] == "vector":
+                        logits = _unpack_tensor(logits, mb)
+                    elif self.cfg["packing_strategy"] == "matrix":
+                        raise NotImplementedError(
+                            "vector packing strategy is not implemented"
+                        )
+                    elif self.cfg["packing_strategy"] == "default":
                         pass
                     else:
-                        pass
+                        raise ValueError(
+                            f"Unknown packing strategy: {self.cfg['packing_strategy']}"
+                        )
 
                     loss, loss_metrics = loss_fn(logits, mb, total_valid_tokens_or_seqs)
                     ## scale by the number of global batches so we get the correct
