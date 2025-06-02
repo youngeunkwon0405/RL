@@ -3,19 +3,19 @@
 # The launcher will generate all possible combinations
 
 # Required parameter that must match the target script name
-script_path: "examples/run_grpo_math.py"
+script_path: "examples/run_bppo_math.py"
 
 # Optional: Path to the base YAML config file
 # Can be overridden by the --config command-line argument
 # If null and --config is not provided, no base config will be used
-config_path: "examples/configs/grpo-deepscaler-1.5b-8K.yaml" 
+config_path: "examples/configs/bppo_math_1B.yaml" 
 
 
 # ------------------------------------------------------------
 # hyperparameters
 # ------------------------------------------------------------
-policy.model_name: ["deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"]
+policy.model_name: [""Qwen/Qwen2.5-1.5B"]
 
-grpo.num_generations_per_prompt: [8, 16, 32]
+bppo.bottom_percentile_to_keep: [0.2, 0.5, 1.0]
 
 # ------------------------------------------------------------

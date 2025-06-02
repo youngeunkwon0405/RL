@@ -173,19 +173,21 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
     def reorder_data(self, reorded_indices: List[int]):
         """Reorders the data along the batch dimension by the given indices."""
-        batch_sizes = set()
-        for val in self.data.values():
-            if isinstance(val, torch.Tensor):
-                batch_sizes.add(val.size(0))
-            else:
-                batch_sizes.add(len(val))
+        #batch_sizes = set()
+        #for val in self.data.values():
+        #    if isinstance(val, torch.Tensor):
+        #        batch_sizes.add(val.size(0))
+        #    else:
+        #        batch_sizes.add(len(val))
 
-        assert len(batch_sizes) == 1, (
-            "Batch sizes are not the same across the rollout batch"
-        )
-        total_batch_size = batch_sizes.pop()
+        #assert len(batch_sizes) == 1, (
+        #    "Batch sizes are not the same across the rollout batch"
+        #)
+        #total_batch_size = batch_sizes.pop()
 
-        indices = range(total_batch_size)
+        # indices = range(total_batch_size)
+
+        indices = range(len(reorded_indices))   # we slice here too if len(reorded_indices) < len(self.data)
         reordered = sorted(zip(reorded_indices, indices), key=lambda pair: pair[0])
         reordered_indices = [idx[1] for idx in reordered]
 

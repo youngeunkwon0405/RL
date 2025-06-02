@@ -110,6 +110,14 @@ def calculate_baseline_and_std_per_prompt(
     return baseline, std
 
 
+def get_bottom_percentile_indices(
+    baselines: torch.Tensor,
+    percentile: float,
+) -> list[int]:
+    """Get the indices of the bottom percentile responses."""
+    return baselines.argsort()[:int(len(baselines) * percentile)].tolist()
+
+
 def surpress_user_warnings(f):  # type: ignore
     @wraps(f)
     def wrapper(*args, **kwargs):  # type: ignore
