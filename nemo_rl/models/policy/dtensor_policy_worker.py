@@ -134,7 +134,7 @@ def get_attention_mask_for_packed_sequence(x, token_id, eos: bool = True):
     return mask, pos_ids
 
 
-# def _pack_microbatch(mb):
+# def _pack_microbatch_ref(mb):
 #     # Build list of 1D position tensors
 #     orig_seqlen = self.cfg["max_total_sequence_length"]
 #     max_seqlen = self.cfg["dynamic_batching"]["train_mb_tokens"]
@@ -174,6 +174,93 @@ def get_attention_mask_for_packed_sequence(x, token_id, eos: bool = True):
 #         "max_length_k": max(mb["input_lengths"]).item(),
 #     }
 #     return packed_input_ids, packed_position_ids, flash_attn_kwargs
+
+# def _unpack_tensor_ref(tensor, mb):
+#     packed_seqlen = tensor.shape[1]
+#     splitsizes = mb['input_lengths'].tolist()
+#     splitsizes.append(packed_seqlen - sum(splitsizes))
+#     tensor_split = torch.split(tensor, tuple(splitsizes), dim=1)
+
+#     tensor_stacked = []
+#     for t in tensor_split[0:-1]:
+#         padding_needed = orig_seqlen - t.shape[1]
+#         tensor_stacked.append(
+#             torch.nn.functional.pad(t, (0,0,0, padding_needed), mode='constant', value=0.0)
+#             )
+#     return torch.cat(tensor_stacked, dim=0)
+
+
+def _pack_microbatch(mb):
+    # Build list of 1D position tensors
+    max_seqlen = 2048
+
+    # mb = {
+    #     "input_lengths": torch.tensor([5, 3, 4], dtype=torch.int),
+    #     "input_ids": torch.tensor([[1, 2, 2, 1, 2], [1, 2, 1, 0, 0], [1, 1, 2, 2, 0]]),
+    # }
+    position_ids = torch.cat(
+        [torch.arange(l) for l in mb["input_lengths"]]
+    )  ## tensor([0, 1, 2, 3, 4, 0, 1, 2, 0, 1, 2, 3])
+    position_ids = torch.nn.functional.pad(
+        position_ids,
+        (0, max_seqlen - position_ids.shape[0]),
+        mode="constant",
+        value=0.0,
+    )  # tensor([0, 1, 2, 3, 4, 0, 1, 2, 0, 1, 2, 3, 0, 0, 0, 0, 0, ...]) # [1024]
+    position_ids = torch.unsqueeze(
+        position_ids, dim=0
+    )  # # tensor([[0, 1, 2, 3, 4, 0, 1, 2, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0 ...]] # [1, 1024]
+
+    input_ids_packed = []
+    for idx in range(mb["input_lengths"].shape[0]):
+        input_length = mb["input_lengths"][idx]
+        input_ids = mb["input_ids"][idx][:input_length]
+        input_ids_packed.append(input_ids)
+    # input_ids_packed == [tensor([1, 2, 2, 1, 2]), tensor([1, 2, 1]), tensor([1, 1, 2, 2])]
+    input_ids_packed = torch.cat(
+        input_ids_packed
+    )  # tensor([1, 2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2])
+    input_ids_packed = torch.nn.functional.pad(
+        input_ids_packed,
+        (0, max_seqlen - input_ids_packed.shape[0]),
+        mode="constant",
+        value=0.0,
+    )  # tensor([1, 2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...] # [1024]
+    input_ids_packed = torch.unsqueeze(
+        input_ids_packed, dim=0
+    )  # # tensor([[1, 2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...]] # [1, 1024]
+    input_ids = input_ids_packed
+
+    cu_seqlens = torch.cat(
+        (torch.tensor([0]).cuda(), mb["input_lengths"].cumsum(dim=0)), dim=0
+    )  # tensor([ 0,  5,  8, 12])
+
+    flash_attn_kwargs = {
+        "cu_seq_lens_q": cu_seqlens,
+        "cu_seq_lens_k": cu_seqlens,
+        "max_length_q": max(mb["input_lengths"]).item(),
+        "max_length_k": max(mb["input_lengths"]).item(),
+    }
+    return input_ids, position_ids, flash_attn_kwargs
+
+
+def _unpack_tensor(tensor, mb):
+    packed_seqlen = tensor.shape[1]
+    splitsizes = mb["input_lengths"].tolist()
+    splitsizes.append(packed_seqlen - sum(splitsizes))
+    tensor_split = torch.split(tensor, tuple(splitsizes), dim=1)
+
+    max_len = max(mb["input_lengths"].tolist())  # max sequence length in the batch
+
+    tensor_stacked = []
+    for t in tensor_split[0:-1]:
+        padding_needed = max_len - t.shape[1]
+        tensor_stacked.append(
+            torch.nn.functional.pad(
+                t, (0, 0, 0, padding_needed), mode="constant", value=0.0
+            )
+        )
+    return torch.cat(tensor_stacked, dim=0)
 
 
 @ray.remote
@@ -219,7 +306,7 @@ class DTensorPolicyWorker:
         print(f"[Rank {rank}] Loading model {model_name} on CPU...")
         attn_implementation = (
             "flash_attention_2"
-            if self.cfg["attention_mask_strategy"] == "flash_attention"
+            if self.cfg["packing_strategy"] == "flash_attention"
             else None
         )
         print(
@@ -228,7 +315,7 @@ class DTensorPolicyWorker:
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
-            torch_dtype=torch.float32,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
+            torch_dtype=self.dtype,  # use full precision in sft until https://github.com/NVIDIA/nemo-rl/issues/13 is fixed
             **sliding_window_overwrite(
                 model_name
             ),  # due to https://github.com/huggingface/transformers/issues/38002
@@ -439,58 +526,74 @@ class DTensorPolicyWorker:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         batch_size, seq_len = input_ids.shape
 
-                        attention_mask = torch.ones(
-                            (batch_size, seq_len),
-                            dtype=torch.long,
-                            device=input_ids.device,
-                        )
-                        position_ids = torch.arange(
-                            seq_len, device=input_ids.device
-                        ).repeat(batch_size, 1)
-                        flash_attn_kwargs = {}
+                        if self.cfg["packing_strategy"] == "flash_attention":
+                            input_ids, position_ids, flash_attn_kwargs = (
+                                _pack_microbatch(mb)
+                            )
+                            attention_mask = None
+                        elif self.cfg["packing_strategy"] == "vector":
+                            input_ids, position_ids, flash_attn_kwargs = (
+                                _pack_microbatch(mb)
+                            )
+                            attention_mask = torch.ones(
+                                (input_ids.shape, seq_len),
+                                dtype=torch.long,
+                                device=input_ids.device,
+                            )
+                            flash_attn_kwargs = {}
+                        else:
+                            attention_mask = torch.ones(
+                                (batch_size, seq_len),
+                                dtype=torch.long,
+                                device=input_ids.device,
+                            )
+                            position_ids = torch.arange(
+                                seq_len, device=input_ids.device
+                            ).repeat(batch_size, 1)
+                            flash_attn_kwargs = {}
 
-                        if "packed_lengths" in mb:
-                            if self.cfg["attention_mask_strategy"] == "block_diagonal":
-                                attention_mask, position_ids = (
-                                    get_attention_mask_for_packed_sequence(
-                                        input_ids, self.tokenizer.eos_token_id
-                                    )
-                                )
+                        # if "packed_lengths" in mb:
+                        #     if self.cfg["attention_mask_strategy"] == "block_diagonal":
+                        #         attention_mask, position_ids = (
+                        #             get_attention_mask_for_packed_sequence(
+                        #                 input_ids, self.tokenizer.eos_token_id
+                        #             )
+                        #         )
 
-                            elif self.cfg["attention_mask_strategy"] == "vector":
-                                # Build list of 1D position tensors
-                                position_id_rows = [
-                                    torch.cat([torch.arange(l) for l in lengths])
-                                    for lengths in mb["packed_lengths"]
-                                ]
+                        #     elif self.cfg["attention_mask_strategy"] == "vector":
+                        #         # Build list of 1D position tensors
+                        #         position_id_rows = [
+                        #             torch.cat([torch.arange(l) for l in lengths])
+                        #             for lengths in mb["packed_lengths"]
+                        #         ]
 
-                                # Pad each row to fixed seq_len
-                                position_ids = torch.stack(
-                                    [
-                                        torch.cat(
-                                            [
-                                                row,
-                                                torch.zeros(
-                                                    seq_len - len(row), dtype=torch.long
-                                                ),
-                                            ]
-                                        )
-                                        for row in position_id_rows
-                                    ]
-                                )
+                        #         # Pad each row to fixed seq_len
+                        #         position_ids = torch.stack(
+                        #             [
+                        #                 torch.cat(
+                        #                     [
+                        #                         row,
+                        #                         torch.zeros(
+                        #                             seq_len - len(row), dtype=torch.long
+                        #                         ),
+                        #                     ]
+                        #                 )
+                        #                 for row in position_id_rows
+                        #             ]
+                        #         )
 
-                            elif (
-                                self.cfg["attention_mask_strategy"] == "flash_attention"
-                            ):
-                                attention_mask = None
-                                flash_attn_kwargs = {
-                                    "cu_seq_lens_q": mb["packed_lengths"],
-                                    "cu_seq_lens_k": mb["packed_lengths"],
-                                    "max_length_q": seq_len,
-                                    "max_length_k": seq_len,
-                                }
-                            elif self.cfg["attention_mask_strategy"] == "default":
-                                pass
+                        #     elif (
+                        #         self.cfg["attention_mask_strategy"] == "flash_attention"
+                        #     ):
+                        #         attention_mask = None
+                        #         flash_attn_kwargs = {
+                        #             "cu_seq_lens_q": mb["packed_lengths"],
+                        #             "cu_seq_lens_k": mb["packed_lengths"],
+                        #             "max_length_q": seq_len,
+                        #             "max_length_k": seq_len,
+                        #         }
+                        #     elif self.cfg["attention_mask_strategy"] == "default":
+                        #         pass
 
                         logging.debug("model inputs")
                         log_json("input_ids", input_ids)
@@ -514,6 +617,13 @@ class DTensorPolicyWorker:
                     # Divide logits by temperature
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
+
+                    if self.cfg["packing_strategy"] == "flash_attention":
+                        logits = _unpack_tensor(logits, mb)
+                    elif self.cfg["packing_strategy"] == "vector":
+                        pass
+                    else:
+                        pass
 
                     loss, loss_metrics = loss_fn(logits, mb, total_valid_tokens_or_seqs)
                     ## scale by the number of global batches so we get the correct

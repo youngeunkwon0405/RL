@@ -45,3 +45,4 @@ class PolicyConfig(TypedDict):
     fsdp_offload_enabled: bool
     activation_checkpointing_enabled: bool
     refit_buffer_size_gb: int
+    packing_strategy: str

@@ -537,8 +537,6 @@ def sft_train(
 
                 log_json("train_results", train_results)
 
-                os.exit(1)
-
                 # Run validation if it's a validation step
                 if val_period > 0 and (total_steps + 1) % val_period == 0:
                     val_metrics, validation_timings = validate(
