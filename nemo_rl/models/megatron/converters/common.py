@@ -73,7 +73,7 @@ def get_local_layer_num(s):
 def get_local_expert_num(s):
     """Assumes experts have 'experts.' in their name. Expert num succeeds '.weight'."""
     segments = s.split(".")
-    if "experts" not in segments:
+    if "experts" not in segments or segments[-1] == "_extra_state":
         return None
     number = int(segments[-1].strip("weight"))
     return number
@@ -217,6 +217,7 @@ class MegatronToHFConverter:
         # don't need to load the model weights
         config = AutoConfig.from_pretrained(hf_model_name, trust_remote_code=True)
         with init_empty_weights():
+            #config.num_hidden_layers=2
             self.target_model = AutoModelForCausalLM.from_config(
                 config, trust_remote_code=True
             )

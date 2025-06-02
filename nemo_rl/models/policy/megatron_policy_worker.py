@@ -44,6 +44,7 @@ from megatron.core.parallel_state import (
 )
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.rerun_state_machine import get_rerun_state_machine
+from megatron.core.optimizer import ChainedOptimizer
 from megatron.inference.text_generation.mcore_engine_server import (
     run_mcore_engine,
 )
@@ -346,7 +347,6 @@ class MegatronPolicyWorker:
         )
         self.megatron_cfg.validate()
 
-        print(f"cfg: {self.megatron_cfg}")
         (
             self.mcore_state,
             self.model,
@@ -1055,7 +1055,11 @@ class MegatronPolicyWorker:
         # Move optimizer state to CUDA if it exists
         if hasattr(self, "optimizer") and self.optimizer is not None:
             # for state in self.optimizer.state.values():
-            for state in self.optimizer._get_state().values():
+            if isinstance(self.optimizer, ChainedOptimizer):
+                optimizer_state = self.optimizer.state
+            else:
+                optimizer_state = self.optimizer._get_state()
+            for _, state in optimizer_state.items():
                 for k, v in state.items():
                     if torch.is_tensor(v) and not v.is_cuda:
                         state[k] = v.to("cuda")
@@ -1074,7 +1078,11 @@ class MegatronPolicyWorker:
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
             # Iterate through the state dictionaries for each parameter group
-            for state in self.optimizer._get_state().values():
+            if isinstance(self.optimizer, ChainedOptimizer):
+                optimizer_state = self.optimizer.state
+            else:
+                optimizer_state = self.optimizer._get_state()
+            for _, state in optimizer_state.items():
                 # Iterate through the state items (e.g., momentum, variance) for a parameter
                 for k, v in state.items():
                     # Check if the item is a tensor and on the GPU
