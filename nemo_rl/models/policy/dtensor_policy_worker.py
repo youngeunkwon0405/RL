@@ -263,6 +263,73 @@ def _unpack_tensor(tensor, mb):
     return torch.cat(tensor_stacked, dim=0)
 
 
+def pack_sequences(
+    input_ids: torch.Tensor, input_lengths: torch.Tensor, pad_token_id: int = 0
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    # """Packs a batch of variable-length sequences into a flat input for transformer models,
+    # producing packed input_ids, position_ids, and a block-diagonal boolean causal attention mask.
+
+    # Args:
+    #     input_ids (torch.Tensor): Tensor of shape [batch_size, max_seq_len]
+    #     input_lengths (torch.Tensor): Tensor of shape [batch_size] with actual lengths
+    #     pad_token_id (int): Token used for padding (default = 0)
+
+    # Returns:
+    #     input_ids_packed (torch.Tensor): [1, total_seq_len]
+    #     position_ids_packed (torch.Tensor): [1, total_seq_len]
+    #     attention_mask (torch.Tensor): Boolean tensor [1, total_seq_len, total_seq_len]
+    #                                    True = visible, False = masked
+    # """
+    flat_input_ids = []
+    position_ids = []
+    for i, length in enumerate(input_lengths):
+        flat_input_ids.append(input_ids[i, :length])
+        position_ids.append(torch.arange(length, dtype=torch.long))
+
+    flat_input_ids = torch.cat(flat_input_ids)  # [total_seq_len]
+    position_ids = torch.cat(position_ids)  # [total_seq_len]
+    total_seq_len = flat_input_ids.size(0)
+
+    input_ids_packed = flat_input_ids.unsqueeze(0)  # [1, total_seq_len]
+    position_ids_packed = position_ids.unsqueeze(0)  # [1, total_seq_len]
+
+    # Create block-diagonal causal attention mask (bool)
+    attention_mask = torch.zeros((total_seq_len, total_seq_len), dtype=torch.bool)
+    start = 0
+    for length in input_lengths:
+        end = start + length.item()
+        attention_mask[start:end, start:end] = torch.tril(
+            torch.ones((length, length), dtype=torch.bool)
+        )
+        start = end
+
+    attention_mask = attention_mask.unsqueeze(0)  # [1, total_seq_len, total_seq_len]
+
+    return input_ids_packed, position_ids_packed, attention_mask
+
+
+def unpack_logits(
+    logits: torch.Tensor, input_lengths: torch.Tensor
+) -> list[torch.Tensor]:
+    """Unpacks packed logits into a list of tensors based on original input_lengths.
+
+    Args:
+        logits (torch.Tensor): Packed logits of shape [1, total_seq_len, vocab_size]
+        input_lengths (torch.Tensor): Tensor of shape [batch] containing original lengths
+
+    Returns:
+        List[torch.Tensor]: List of [seq_len_i, vocab_size] tensors
+    """
+    logits = logits.squeeze(0)  # [total_seq_len, vocab_size]
+    unpacked = []
+    start = 0
+    for length in input_lengths:
+        end = start + length.item()
+        unpacked.append(logits[start:end])
+        start = end
+    return unpacked
+
+
 @ray.remote
 class DTensorPolicyWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.BASE
@@ -518,7 +585,6 @@ class DTensorPolicyWorker:
                 for mb in global_batch.make_microbatch_iterator(mbs):
                     logging.debug("$$$$$")
                     log_json("mb", mb.get_dict())
-                    input_ids = mb.get("input_ids").cuda()
 
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         if self.cfg["packing_strategy"] == "flash_attention":
@@ -526,7 +592,9 @@ class DTensorPolicyWorker:
                                 _pack_microbatch(mb)
                             )
                             attention_mask = None
+
                         elif self.cfg["packing_strategy"] == "vector":
+                            input_ids = mb.get("input_ids").cuda()
                             batch_size, seq_len = input_ids.shape
                             input_ids, position_ids, flash_attn_kwargs = (
                                 _pack_microbatch(mb)
@@ -537,12 +605,18 @@ class DTensorPolicyWorker:
                                 device=input_ids.device,
                             )
                             flash_attn_kwargs = {}
+
                         elif self.cfg["packing_strategy"] == "matrix":
-                            raise NotImplementedError(
-                                "matrix packing strategy is not implemented"
+                            input_ids = mb.get("input_ids").cuda()
+                            input_ids, position_ids, attention_mask = pack_sequences(
+                                input_ids=input_ids, input_lengths=mb["input_lengths"]
                             )
+                            flash_attn_kwargs = {}
+
                         elif self.cfg["packing_strategy"] == "default":
+                            input_ids = mb.get("input_ids").cuda()
                             batch_size, seq_len = input_ids.shape
+
                             attention_mask = torch.ones(
                                 (batch_size, seq_len),
                                 dtype=torch.long,
@@ -601,9 +675,9 @@ class DTensorPolicyWorker:
                         #         pass
 
                         logging.debug("model inputs")
-                        log_json("input_ids", input_ids)
-                        log_json("attention_mask", attention_mask)
-                        log_json("position_ids", position_ids)
+                        # log_json("input_ids", input_ids)
+                        # log_json("attention_mask", attention_mask)
+                        # log_json("position_ids", position_ids)
 
                         outputs = self.model(
                             input_ids=input_ids,
@@ -628,9 +702,7 @@ class DTensorPolicyWorker:
                     elif self.cfg["packing_strategy"] == "vector":
                         logits = _unpack_tensor(logits, mb)
                     elif self.cfg["packing_strategy"] == "matrix":
-                        raise NotImplementedError(
-                            "vector packing strategy is not implemented"
-                        )
+                        logits = _unpack_tensor(logits, mb)  # FIXME(ahmadki)
                     elif self.cfg["packing_strategy"] == "default":
                         pass
                     else:
