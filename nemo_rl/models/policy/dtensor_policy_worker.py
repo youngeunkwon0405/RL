@@ -492,8 +492,21 @@ class DTensorPolicyWorker:
                         metric_dict["sequence_level_ratios"]
                         / metric_dict["num_valid_samples"]
                     )
-                    synced_train_step_metrics.append(metric_dict)
 
+                    metric_dict["clamped_min_ratios"] = (
+                        metric_dict["clamped_min_ratios"]
+                        / metric_dict["tokens_min_clipped"]
+                        if metric_dict["tokens_min_clipped"] > 0
+                        else 1
+                    )
+                    metric_dict["clamped_max_ratios"] = (
+                        metric_dict["clamped_max_ratios"]
+                        / metric_dict["tokens_max_clipped"]
+                        if metric_dict["tokens_max_clipped"] > 0
+                        else 1
+                    )
+
+                    synced_train_step_metrics.append(metric_dict)
                 for i, metric in enumerate(train_step_metrics_no_accumulation):
                     synced_train_step_metrics[i].update(metric)
 

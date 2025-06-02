@@ -295,16 +295,21 @@ class ClippedPGLossFn(LossFunction):
                 advantages_neg = advantages < 0
                 advantages_pos = advantages > 0
 
-                clipped_min = (
-                    ((ratios < 1 - self.ratio_clip_min) * advantages_neg * mask)
-                    .sum()
-                    .item()
+                clipped_min_mask = (
+                    (ratios < 1 - self.ratio_clip_min) * advantages_neg * mask
                 )
-                clipped_max = (
-                    ((ratios > 1 + self.ratio_clip_max) * advantages_pos * mask)
-                    .sum()
-                    .item()
+                clipped_max_mask = (
+                    (ratios > 1 + self.ratio_clip_max) * advantages_pos * mask
                 )
+
+                clipped_min = clipped_min_mask.sum().item()
+                clipped_max = clipped_max_mask.sum().item()
+
+                clamped_min_ratios, clamped_max_ratios = 0, 0
+                if clipped_min > 0:
+                    clamped_min_ratios = ratios[clipped_min_mask].sum().item()
+                if clipped_max > 0:
+                    clamped_max_ratios = ratios[clipped_max_mask].sum().item()
 
         # If you provided a global_valid_{seqs/toks}, all metrics here are globally normalized
         # by either sequence or token count, depending on particular metric.
@@ -317,6 +322,8 @@ class ClippedPGLossFn(LossFunction):
                 "sequence_level_ratios": sequence_level_ratios.item(),
                 "tokens_min_clipped": clipped_min,
                 "tokens_max_clipped": clipped_max,
+                "clamped_min_ratios": clamped_min_ratios,
+                "clamped_max_ratios": clamped_max_ratios,
                 "probs_ratio": probs_ratio,
                 "probs_ratio_clamped": probs_ratio_clamped,
                 "kl_penalty": kl.item(),
