@@ -307,9 +307,9 @@ class ClippedPGLossFn(LossFunction):
 
                 clamped_min_ratios, clamped_max_ratios = 0, 0
                 if clipped_min > 0:
-                    clamped_min_ratios = ratios[clipped_min_mask].sum().item()
+                    clamped_min_ratios = ratios[clipped_min_mask.bool()].sum().item()
                 if clipped_max > 0:
-                    clamped_max_ratios = ratios[clipped_max_mask].sum().item()
+                    clamped_max_ratios = ratios[clipped_max_mask.bool()].sum().item()
 
         # If you provided a global_valid_{seqs/toks}, all metrics here are globally normalized
         # by either sequence or token count, depending on particular metric.

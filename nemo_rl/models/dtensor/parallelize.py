@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Union
+from typing import List, Tuple, Union
 
 import torch
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -447,7 +447,10 @@ def clip_grad_by_total_norm_(
 
 
 def get_grad_sparsity(
-    parameters: Union[List[Union[torch.Tensor, DTensor]], Union[torch.Tensor, DTensor]],
+    named_parameters: Union[
+        List[Tuple[str, Union[torch.Tensor, DTensor]]],
+        Tuple[str, Union[torch.Tensor, DTensor]],
+    ],
     dp_group: torch.distributed.ProcessGroup,
     tp_group: torch.distributed.ProcessGroup,
 ) -> float:
@@ -466,25 +469,28 @@ def get_grad_sparsity(
     Returns:
         float: Total norm of the gradients (viewed as a single vector)
     """
-    if isinstance(parameters, (torch.Tensor, DTensor)):
-        parameters = [parameters]
+    grad_sparsity_dict = {}
+    grads_dict = {
+        name: to_local_if_dtensor(p.grad.detach())
+        for name, p in sorted(named_parameters)
+        if p.grad is not None
+    }
 
-    # Grads.
-    grads_for_norm = [
-        to_local_if_dtensor(p.grad.detach()) for p in parameters if p.grad is not None
-    ]
+    total_num_zeros, total_num_elements = 0, 0
+    for name, grad in grads_dict.items():
+        num_zeros = grad.numel() - grad.count_nonzero()
+        num_elements = grad.numel()
 
-    num_zeros = sum([grad.numel() - grad.count_nonzero() for grad in grads_for_norm])
-    total_num_elements = sum([grad.numel() for grad in grads_for_norm])
+        to_reduce = torch.tensor(
+            [num_zeros, num_elements], dtype=torch.float32, device="cuda"
+        )
+        torch.distributed.all_reduce(to_reduce, group=dp_group)
+        torch.distributed.all_reduce(to_reduce, group=tp_group)
+        grad_sparsity_dict[name] = (to_reduce[0] / to_reduce[1]).item()
+        total_num_zeros += to_reduce[0]
+        total_num_elements += to_reduce[1]
 
-    to_reduce = torch.tensor(
-        [num_zeros, total_num_elements], dtype=torch.float32, device="cuda"
-    )
-
-    # Take max across all data-parallel GPUs if using FSDP and then all model-parallel GPUs.
-    torch.distributed.all_reduce(to_reduce, group=dp_group)
-    torch.distributed.all_reduce(to_reduce, group=tp_group)
-    return (to_reduce[0] / to_reduce[1]).item()
+    return total_num_zeros / total_num_elements, grad_sparsity_dict
 
 
 def get_grad_norm(

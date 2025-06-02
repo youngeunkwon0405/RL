@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, TypedDict
@@ -579,6 +580,20 @@ def grpo_train(
             print("▶ Training policy...")
             with timer.time("policy_training"):
                 list_of_train_metrics = policy.train(train_data, loss_fn)
+
+            for i, m in enumerate(list_of_train_metrics):
+                to_log = optim_step + i
+
+                grad_sparsity_dict = m.pop("grad_sparsity_dict")
+                log_dir = master_config["logger"]["log_dir"]
+                sparsity_file_path = os.path.join(
+                    log_dir, f"optim_step_{to_log}_grad_sparsity.json"
+                )
+
+                with open(sparsity_file_path, "w") as f:
+                    json.dump(grad_sparsity_dict, f, indent=2)
+
+                print(f"Saved grad sparsity to {sparsity_file_path}")
 
             is_last_step = step + 1 == min(max_num_steps, len(dataloader))
 

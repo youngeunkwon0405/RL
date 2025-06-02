@@ -440,8 +440,8 @@ class DTensorPolicyWorker:
 
                         # TODO: I think this is actually synced DP wise already from the
                         # bprop hooks?
-                        grad_sparsity = get_grad_sparsity(
-                            self.model.parameters(),
+                        grad_sparsity, grad_sparsity_dict = get_grad_sparsity(
+                            self.model.named_parameters(),
                             dp_group=self.dp_mesh.get_group(),
                             tp_group=self.tp_mesh.get_group(),
                         )
@@ -466,6 +466,7 @@ class DTensorPolicyWorker:
                         "global_valid_toks": global_valid_toks.item(),
                         "grad_norm": grad_norm.item(),
                         "grad_sparsity": grad_sparsity,
+                        "grad_sparsity_dict": grad_sparsity_dict,
                     }
                 )
 
