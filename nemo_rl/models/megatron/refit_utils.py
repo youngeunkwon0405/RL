@@ -278,7 +278,6 @@ def gather_params(
             param_mapping = None  # Non-owner ranks will receive the tensors.
 
         # Broadcast the list of target parameter keys from the owner.
-        pp_group = parallel_state.get_pipeline_model_parallel_group()
         if torch.distributed.get_rank() == owner_global_rank:
             target_keys = [list(param_mapping.keys())]
         else:
@@ -294,8 +293,6 @@ def gather_params(
         )
 
         ## now do the ep broadcast
-        ep_group = parallel_state.get_expert_model_parallel_group()
-
         ## TODO: are there any cases where this will cause a hang?
         ## like times where we would try to broadcast from two different ranks
         ## in the same ep group?
@@ -340,6 +337,7 @@ def gather_params(
             else:
                 ## the current rank already has the param from the pp gather
                 rank_to_broadcast = torch.distributed.get_rank()
+
             torch.distributed.broadcast_object_list(
                 meta, src=rank_to_broadcast, group=ep_group
             )
@@ -356,7 +354,6 @@ def gather_params(
             else:
                 ## we are getting the param from the ep gather, so just do a dummy broadcast here
                 rank_to_broadcast = pp_global_rank_ids[0]
-
             torch.distributed.broadcast(
                 tensor_to_send, src=rank_to_broadcast, group=pp_group
             )
@@ -367,7 +364,8 @@ def gather_params(
             else:
                 ## the current rank already has the param from the pp gather
                 rank_to_broadcast = torch.distributed.get_rank()
-            torch.distributed.broadcast_object_list(
+
+            torch.distributed.broadcast(
                 tensor_to_send, src=rank_to_broadcast, group=ep_group
             )
 
