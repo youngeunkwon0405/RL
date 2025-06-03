@@ -92,10 +92,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             layout=np.arange(cluster.world_size()).reshape(
                 pp_size,  # PP
                 -1,  # DP
-                ep_size, # EP
                 tp_size,  # TP
             ),
-            names=["pipeline_parallel", "data_parallel", "expert_parallel", "tensor_parallel"],
+            names=["pipeline_parallel", "data_parallel", "tensor_parallel"],
         )
 
         # A queue for worker communication before torch dist init
@@ -122,10 +121,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         if config["dynamic_batching"]["enabled"]:
             assert (
-                config["dtensor_cfg"]["enabled"] or config["training_backend"] == "megatron"
-            ), (
-                "Dynamic batch is only supported for DTensor policy or Megatron policy."
-            )
+                config["dtensor_cfg"]["enabled"]
+                or config["training_backend"] == "megatron"
+            ), "Dynamic batch is only supported for DTensor policy or Megatron policy."
             self.use_dynamic_batches = True
             self.dynamic_batching_args: DynamicBatchingArgs = {
                 "input_key": "input_ids",
@@ -172,8 +170,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "get_logprobs",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
-            output_is_replicated=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
         )
         logprobs: BatchedDataDict[LogprobOutputSpec] = BatchedDataDict.from_batches(
             self.worker_group.get_all_worker_results(futures)
@@ -217,8 +215,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "get_reference_policy_logprobs",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
-            output_is_replicated=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={"micro_batch_size": micro_batch_size},
         )
         logprobs: BatchedDataDict[ReferenceLogprobOutputSpec] = (
@@ -267,8 +265,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "train",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
-            output_is_replicated=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
@@ -311,8 +309,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "generate",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
-            output_is_replicated=["tensor_parallel", "expert_parallel", "pipeline_parallel"],
+            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
+            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={"greedy": greedy},
         )
         assert self.cfg["generation"] is not None, "Generation config is not set"
