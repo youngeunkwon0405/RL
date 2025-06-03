@@ -291,7 +291,7 @@ class MegatronPolicyWorker:
         ]  # not supported right now
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
-        model_cfg.params_dtype = torch.float32  # amp
+        model_cfg.params_dtype = dtype_map[self.cfg["megatron_cfg"]["optimizer"]["params_dtype"]]  # FP32 for amp
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
 
@@ -1108,12 +1108,12 @@ class MegatronPolicyWorker:
             # Ordinary offload case
             if move_params:
                 for name, param in model.state_dict().items():
-                    if device == "cpu":
-                        param.data = param.data.to("cpu")
-                    elif device == "cuda":
-                        param.data = param.data.to("cuda")
-                    else:
-                        raise ValueError(f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported.")
+                    new_state_dict = {}
+                    for name, item in model.state_dict().items():
+                        if isinstance(item, torch.Tensor):
+                            item = item.detach().to(device=device, non_blocking=True, copy=True)
+                        new_state_dict[name] = item
+                    model.load_state_dict(new_state_dict)
 
     def save_checkpoint(
         self,
