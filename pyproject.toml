@@ -35,6 +35,7 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "flash-attn",
 ]
 
 [project.optional-dependencies]

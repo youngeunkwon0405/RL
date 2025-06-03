@@ -23,7 +23,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo"
+  checkpoint_dir: "/results/reinforcer/grpo_math_1b/checkpoints"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 3
@@ -119,7 +119,7 @@ env:
     num_workers: 8
 
 logger:
-  log_dir: "logs"  # Base directory for all logs
+  log_dir: "/results/reinforcer/grpo_math_1b/logs"  # Base directory for all logs
   num_val_samples_to_print: 0 # Number of validation samples to pretty print on terminal
   wandb_enabled: false
   tensorboard_enabled: false

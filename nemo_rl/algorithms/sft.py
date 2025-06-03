@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import logging
 import os
 import warnings
 from pathlib import Path
@@ -26,20 +27,29 @@ from nemo_rl.algorithms.loss_functions import (
 )
 from nemo_rl.algorithms.utils import set_seed
 from nemo_rl.data import DataConfig
-from nemo_rl.data.datasets import AllTaskProcessedDataset, rl_collate_fn
+from nemo_rl.data.datasets import (
+    AllTaskProcessedDataset,
+    PackableBatchedData,
+    packed_rl_collate_fn,
+    rl_collate_fn,
+)
 from nemo_rl.data.interfaces import TaskDataSpec
 from nemo_rl.data.llm_message_utils import (
     add_loss_mask_to_message_log,
     batched_message_log_to_flat_message,
 )
+from nemo_rl.data.packing import PackedDataset, get_packer
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.models.policy.interfaces import PolicyInterface
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_rl.utils.logger import Logger, LoggerConfig
+from nemo_rl.utils.logger import Logger, LoggerConfig, log_json
 from nemo_rl.utils.timer import Timer
+
+logging.basicConfig(level=logging.DEBUG)
+torch.set_printoptions(profile="full")
 
 
 class SFTSaveState(TypedDict):
@@ -111,6 +121,7 @@ def setup(
     logger_config = master_config["logger"]
     cluster_config = master_config["cluster"]
     sft_config = master_config["sft"]
+    seq_packing_config = master_config.get("seq_pack", None)
 
     # ==========================
     #         Logger
@@ -142,11 +153,64 @@ def setup(
     # ==========================
     #           Data
     # ==========================
+    train_collate_fn = rl_collate_fn
+    val_collate_fn = rl_collate_fn
+
+    # Apply sequence packing to training dataset if enabled
+    if seq_packing_config and seq_packing_config.get("train", {}).get("enabled", False):
+        train_pack_config = seq_packing_config.get("train", {})
+        print("  ✓ Applying sequence packing to training dataset")
+
+        # Create bin-packer
+        train_packer = get_packer(
+            algorithm=train_pack_config.get("algorithm", "concatenative"),
+            bin_capacity=data_config["max_input_seq_length"],
+            collect_metrics=train_pack_config.get("collect_metrics", False),
+        )
+
+        # Wrap training dataset with PackedDataset
+        train_dataset = PackedDataset(
+            dataset=train_dataset,
+            packer=train_packer,
+            prefetch_samples=train_pack_config.get(
+                "prefetch_samples", policy_config["train_global_batch_size"] * 10
+            ),
+        )
+
+        # Update the collate function to handle the packed format
+        train_collate_fn = packed_rl_collate_fn
+
+    # Apply sequence packing to validation dataset if enabled
+    if seq_packing_config and seq_packing_config.get("validation", {}).get(
+        "enabled", False
+    ):
+        val_pack_config = seq_packing_config.get("validation", {})
+        print("  ✓ Applying sequence packing to validation dataset")
+
+        # Create bin-packer
+        val_packer = get_packer(
+            algorithm=val_pack_config.get("algorithm", "concatenative"),
+            bin_capacity=data_config["max_input_seq_length"],
+            collect_metrics=val_pack_config.get("collect_metrics", False),
+        )
+
+        # Wrap validation dataset with PackedDataset
+        val_dataset = PackedDataset(
+            dataset=val_dataset,
+            packer=val_packer,
+            prefetch_samples=val_pack_config.get(
+                "prefetch_samples", sft_config["val_global_batch_size"] * 10
+            ),
+        )
+
+        # Update the collate function to handle the packed format
+        val_collate_fn = packed_rl_collate_fn
+
     train_dataloader = StatefulDataLoader(
         train_dataset,
         batch_size=policy_config["train_global_batch_size"],
-        shuffle=True,
-        collate_fn=rl_collate_fn,
+        shuffle=False,  # TODO(ahmadki): set to True for training
+        collate_fn=train_collate_fn,
         drop_last=True,
     )
 
@@ -160,7 +224,7 @@ def setup(
         val_dataset,
         batch_size=sft_config["val_global_batch_size"],
         shuffle=False,
-        collate_fn=rl_collate_fn,
+        collate_fn=val_collate_fn,
         drop_last=True,
     )
 
@@ -262,14 +326,20 @@ def validate(
                 ],
             )
 
-            val_data: BatchedDataDict = BatchedDataDict(
-                {
-                    "input_ids": cat_and_padded["token_ids"],
-                    "input_lengths": input_lengths,
-                    "token_mask": cat_and_padded["token_loss_mask"],
-                    "sample_mask": val_batch["loss_multiplier"],
-                }
-            )
+            # Create the base validation data dictionary
+            val_data_dict = {
+                "input_ids": cat_and_padded["token_ids"],
+                "input_lengths": input_lengths,
+                "token_mask": cat_and_padded["token_loss_mask"],
+                "sample_mask": val_batch["loss_multiplier"],
+            }
+
+            # Add packed_lengths if packed sequence
+            if val_batch.get("is_packed", False):
+                val_data_dict["packed_lengths"] = val_batch["packed_lengths"]
+
+            # Create the BatchedDataDict
+            val_data: BatchedDataDict = BatchedDataDict(val_data_dict)
 
             ## just run model fwd
             val_results = policy.train(
@@ -343,10 +413,14 @@ def sft_train(
         current_epoch = 0
         current_step = 0
         total_steps = 0
+        consumed_samples = 0
+        consumed_tokens = 0
     else:
         current_epoch = sft_save_state["epoch"]
         current_step = sft_save_state["step"]
         total_steps = sft_save_state["total_steps"]
+        consumed_samples = sft_save_state["consumed_samples"]
+        consumed_tokens = sft_save_state["consumed_tokens"]
 
     sft_config = master_config["sft"]
     # Validation configuration
@@ -382,40 +456,92 @@ def sft_train(
         print(f"\n{'=' * 25} Epoch {current_epoch + 1}/{max_num_epochs} {'=' * 25}")
 
         for batch in train_dataloader:
-            print(
-                f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['sft']['max_num_steps'])} {'=' * 25}"
-            )
+            # print(
+            #     f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['sft']['max_num_steps'])} {'=' * 25}"
+            # )
             val_metrics, validation_timings = None, None
+            data = batch.data if isinstance(batch, PackableBatchedData) else batch
 
             with timer.time("total_step_time"):
                 # Prepare batch and generate responses
                 print("▶ Preparing batch...")
+                logging.debug(
+                    "================================================================"
+                )
+                logging.debug("Training batch")
+                logging.debug(
+                    "================================================================"
+                )
+                log_json("batch", data.get_dict())
+
                 with timer.time("data_processing"):
                     ## add loss mask based on role to every message
+                    logging.debug("add loss mask based on role to every message")
                     add_loss_mask_to_message_log(
-                        batch["message_log"],
+                        data["message_log"],
                         roles_to_train_on=["assistant"],
                     )
 
+                    logging.debug("batch message to flat")
                     cat_and_padded, input_lengths = batched_message_log_to_flat_message(
-                        batch["message_log"],
+                        data["message_log"],
                         pad_value_dict={"token_ids": tokenizer.pad_token_id},
                         make_sequence_length_divisible_by=master_config["policy"][
                             "make_sequence_length_divisible_by"
                         ],
                     )
 
-                    train_data: BatchedDataDict = BatchedDataDict(
-                        {
-                            "input_ids": cat_and_padded["token_ids"],
-                            "input_lengths": input_lengths,
-                            "token_mask": cat_and_padded["token_loss_mask"],
-                            "sample_mask": batch["loss_multiplier"],
-                        }
-                    )
+                    logging.debug("creating train data dict")
+                    # # TODO(ahmadki): del me:
+                    # train_data: BatchedDataDict = BatchedDataDict(
+                    #     {
+                    #         "input_ids": cat_and_padded["token_ids"],
+                    #         "input_lengths": input_lengths,
+                    #         "token_mask": cat_and_padded["token_loss_mask"],
+                    #         "sample_mask": batch["loss_multiplier"],
+                    #     }
+                    # )
+
+                    # Create the base train data dictionary
+                    train_data_dict = {
+                        "input_ids": cat_and_padded["token_ids"],
+                        "input_lengths": input_lengths,
+                        "token_mask": cat_and_padded["token_loss_mask"],
+                        "sample_mask": data["loss_multiplier"],
+                    }
+
+                    # Add packed_lengths if packed sequence
+                    if isinstance(batch, PackableBatchedData):
+                        train_data_dict["sizes"] = batch.pack_sizes
+
+                    # Create the BatchedDataDict
+                    train_data: BatchedDataDict = BatchedDataDict(train_data_dict)
+
+                    if isinstance(batch, PackableBatchedData):
+                        # FIXME(ahmadki)
+                        num_samples = 10
+                        num_tokens = 1000
+                        # num_samples = sum(
+                        #     len(x) for x in train_data_dict["packed_lengths"]
+                        # )
+                        # num_tokens = sum(
+                        #     sum(x) for x in train_data_dict["packed_lengths"]
+                        # )
+                    else:
+                        num_samples = len(train_data["input_ids"])
+                        num_tokens = sum(train_data["input_lengths"])
+
+                logging.debug("batch after processing:")
+                log_json("batch", data.get_dict())
+                log_json("train_data", train_data.get_dict())
 
                 print("▶ Taking a training step...")
                 train_results = policy.train(train_data, loss_fn)
+
+                # consumed_samples += num_samples
+                # consumed_tokens += num_tokens
+
+                log_json("train_results", train_results)
 
                 is_last_step = total_steps + 1 >= master_config["sft"][
                     "max_num_steps"
@@ -446,7 +572,6 @@ def sft_train(
                     logger.log_metrics(
                         val_metrics, total_steps + 1, prefix="validation"
                     )
-
                 ## Checkpointing
                 sft_save_state["consumed_samples"] += master_config["policy"][
                     "train_global_batch_size"
@@ -459,6 +584,8 @@ def sft_train(
                     sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     sft_save_state["total_steps"] = total_steps + 1
                     sft_save_state["epoch"] = current_epoch
+                    sft_save_state["consumed_samples"] = consumed_samples
+                    sft_save_state["consumed_tokens"] = consumed_tokens
                     sft_save_state["val_loss"] = val_metrics["val_loss"]
                     with timer.time("checkpointing"):
                         print(f"Saving checkpoint for step {total_steps + 1}...")
@@ -483,6 +610,10 @@ def sft_train(
                         )
                         checkpointer.finalize_checkpoint(checkpoint_path)
 
+                logging.debug(
+                    "================================================================"
+                )
+
             losses = train_results["loss"]
             metrics = {
                 "loss": train_results["loss"].numpy(),
@@ -503,6 +634,24 @@ def sft_train(
             total_time = timing_metrics.get("total_step_time", 0)
             print(f"  • Total step time: {total_time:.2f}s")
 
+            # Number of samples processed
+            print(f"  • Number of samples processed: {num_samples}")
+            # Time per sample
+            time_per_sample = (
+                total_time / num_samples if num_samples > 0 else float("inf")
+            )
+            print(f"  • Time per sample: {time_per_sample:.2f}s")
+
+            # Number of tokens processed
+            print(f"  • Number of tokens processed: {num_tokens}")
+            # Time per token (in microseconds for better readability)
+            time_per_token_us = (
+                (total_time / num_tokens) * 1_000_000
+                if num_tokens > 0
+                else float("inf")
+            )
+            print(f"  • Time per token: {time_per_token_us:.2f}μs")
+
             # Display all other timing metrics (if any)
             for k, v in sorted(
                 timing_metrics.items(), key=lambda item: item[1], reverse=True
@@ -511,7 +660,16 @@ def sft_train(
                     percent = (v / total_time * 100) if total_time > 0 else 0
                     print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
+            # Group all training metrics into a single dictionary
             logger.log_metrics(metrics, total_steps + 1, prefix="train")
+            perf_metrics = {
+                "num_samples": int(num_samples),  # num_valid_samples
+                "consumed_samples": int(consumed_samples),
+                "num_tokens": int(num_tokens),  # num unmasked samples
+                "consumed_tokens": int(consumed_tokens),
+            }
+            logger.log_metrics(perf_metrics, total_steps + 1, prefix="train")
+
             logger.log_metrics(timing_metrics, total_steps + 1, prefix="timing/train")
 
             timer.reset()
