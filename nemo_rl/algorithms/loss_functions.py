@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, TypedDict, TypeVar
 
 import torch
 
@@ -26,7 +26,7 @@ from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
 )
 
-Tensor = torch.Tensor
+Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
 
 class ClippedPGLossConfig(TypedDict):

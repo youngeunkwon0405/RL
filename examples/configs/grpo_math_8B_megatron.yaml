@@ -12,7 +12,7 @@ policy:
   train_global_batch_size: 512
   train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
-  logprob_batch_size: 2
+  logprob_batch_size: 4
   max_total_sequence_length: 4096
   precision: "bfloat16"
   fsdp_offload_enabled: false
@@ -22,10 +22,6 @@ policy:
   dtensor_cfg:
     enabled: false
 
-  dynamic_batching:
-    train_mb_tokens: 4096
-    logprob_mb_tokens: 8192
-
   optimizer: null # remove default FSDP optimizer
 
   scheduler: null # remove default FSDP scheduler
@@ -34,7 +30,7 @@ policy:
     enabled: true
     empty_unused_memory_level: 1
     converter_type: "LlamaForCausalLM"
-    tensor_model_parallel_size: 1
+    tensor_model_parallel_size: 2
     pipeline_model_parallel_size: 1
     context_parallel_size: 1
     pipeline_dtype: ${policy.precision}
