@@ -598,7 +598,11 @@ class MegatronPolicyWorker:
                 mb_metrics[k].append(v)
 
         with torch.no_grad():
-            loss = torch.tensor(loss_metrics["loss"], device="cuda")
+            loss = torch.tensor(
+                sum([gb_loss_metrics[i]["loss"] for i in range(len(gb_loss_metrics))])
+                / len(gb_loss_metrics),
+                device="cuda",
+            )
             torch.distributed.all_reduce(loss, op=torch.distributed.ReduceOp.AVG)
 
         metrics = {
