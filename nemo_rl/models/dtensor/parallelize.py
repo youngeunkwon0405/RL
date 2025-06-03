@@ -490,7 +490,7 @@ def get_grad_sparsity(
         total_num_zeros += to_reduce[0]
         total_num_elements += to_reduce[1]
 
-    return total_num_zeros / total_num_elements, grad_sparsity_dict
+    return (total_num_zeros / total_num_elements).item(), grad_sparsity_dict
 
 
 def get_grad_norm(
