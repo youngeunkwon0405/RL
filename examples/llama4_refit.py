@@ -1,4 +1,4 @@
-# python /lustre/fsw/portfolios/coreai/users/yuya/nemo-rl/examples/llama4_refit.py
+# uv run python3 /opt/nemo-rl/examples/llama4_refit.py
 
 import ray
 import torch
@@ -7,16 +7,15 @@ from transformers import AutoTokenizer
 
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.models.megatron.converters import REGISTRY, ModelType
-from nemo_rl.models.policy.megatron_policy import MegatronPolicy
-from nemo_rl.models.generation.interfaces import GenerationOutputSpec, configure_generation_config
+from nemo_rl.models.megatron.converters import ModelType
+from nemo_rl.models.policy.lm_policy import Policy
+from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.generation.vllm import VllmGeneration
+from nemo_rl.algorithms.grpo import refit_policy_generation
 
 ray.init()
 
 model_name = "/root/checkpoints/llama4-scout-custom-init"
-# model_name = "meta-llama/Llama-3.1-8B-Instruct"
-# model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 
 converter_type = ModelType.LLAMA4
 tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -25,29 +24,30 @@ tokenizer = AutoTokenizer.from_pretrained(model_name)
 MEGATRON_TP = 2
 VLLM_TP = 2
 
-# --- Megatron Config (Restored) ---
+# --- Megatron Config (Updated from grpo_math_llama4_toy.yaml) ---
 config = {
     "model_name": model_name,
+    "training_backend": "megatron",
     "train_global_batch_size": 1,
     "train_micro_batch_size": 1,
     "generation_batch_size": 2,
     "learning_rate": 0.0001,
     "logprob_batch_size": 1,
     "generation": {
-        "max_total_sequence_length": 1024,
-        "max_new_tokens": 52,
+        "max_total_sequence_length": 256,
+        "max_new_tokens": 256,
         "do_sample": False,
         "pad_token_id": tokenizer.eos_token_id,
     },
     "precision": "bfloat16",
-    "tensor_model_parallel_size": MEGATRON_TP,
-    "expert_tensor_parallel_size": MEGATRON_TP,
-    "pipeline_model_parallel_size": 1,
-    "context_parallel_size": 1,
+    "pipeline_dtype": "bfloat16",
     "parallel_output": True,
-    "max_total_sequence_length": 1024,
+    "max_total_sequence_length": 256,
     "activation_checkpointing_enabled": False,
     "fsdp_offload_enabled": False,
+    "max_grad_norm": 1.0,
+    "refit_buffer_size_gb": 4,
+    "make_sequence_length_divisible_by": MEGATRON_TP,
     "optimizer": {
         "type": "adam",
         "kwargs": {
@@ -59,11 +59,23 @@ config = {
     "dtensor_cfg": {
         "enabled": False,
     },
+    "dynamic_batching": {
+        "enabled": False,
+        "train_mb_tokens": 256,
+        "logprob_mb_tokens": 256,
+        "sequence_length_round": 64,
+    },
     "megatron_cfg": {
-        "converter_type": converter_type,
+        "converter_type": "Llama4ForCausalLM",
         "enabled": True,
         "empty_unused_memory_level": 1,
-        "converter_class": "Llama4ForCausalLM",
+        "tensor_model_parallel_size": MEGATRON_TP,
+        "sequence_parallel": False,
+        "expert_tensor_parallel_size": MEGATRON_TP,
+        "expert_model_parallel_size": 1,
+        "pipeline_model_parallel_size": 1,
+        "context_parallel_size": 1,
+        "pipeline_dtype": "bfloat16",
         "optimizer": {
             "optimizer": "adam",
             "lr": 5.0e-6,
@@ -107,20 +119,18 @@ vllm_config = {
         "name": model_name,
     },
     "dtype": "bfloat16", # Match precision
-    "max_new_tokens": 512, # Match generation config
+    "max_new_tokens": 256, # Match generation config
     "temperature": 1.0,
     "top_p": 1.0,
     "top_k": None,
     "stop_token_ids": None,
     "stop_strings": None,
-    "pad_token_id": tokenizer.eos_token_id, # Match generation config
     "vllm_cfg": {
         "tensor_parallel_size": VLLM_TP,
         "gpu_memory_utilization": 0.6, # Default in vLLM, adjust if needed
-        "max_model_len": 512, # Match generation config
+        "max_model_len": 256, # Match generation config
+        "precision": "bfloat16", # Required for vllm_cfg
     },
-    # Needed by configure_generation_config
-    "max_total_sequence_length": 512,
 }
 if tokenizer.pad_token_id is None:
     tokenizer.pad_token_id = tokenizer.eos_token_id
@@ -138,22 +148,8 @@ megatron_cluster = RayVirtualCluster(
 )
 
 # --- Instantiate Policies ---
-print("Instantiating MegatronPolicy...")
-policy = MegatronPolicy(cluster=megatron_cluster, config=config, tokenizer=tokenizer, init_reference_model=False, init_optimizer=False)
-
-# prompt = r"Think step-by-step to solve the following problem. Output your answer inside of \\boxed{} tags.:\\nAn octahedron has eight equilateral triangular faces, each with side length 1. Let $P$ be a point inside the octahedron, and let $d_1, d_2, \\ldots, d_8$ be the distances from $P$ to the centroids of the eight faces of the octahedron. Find the largest possible value of the sum $d_1 + d_2 + \\cdots + d_8.\\n\\nLet's think step-by-step"
-# prompt2 = "Count from one to one hundred while laughing"
-# if not tokenizer.pad_token:
-#     tokenizer.pad_token = tokenizer.eos_token
-#
-# prompt = tokenizer.apply_chat_template(
-#     [{"role": "user", "content": prompt}],
-#     tokenize=False,
-# )
-# prompt2 = tokenizer.apply_chat_template(
-#     [{"role": "user", "content": prompt2}],
-#     tokenize=False,
-# )
+print("Instantiating Policy with Megatron backend...")
+policy = Policy(cluster=megatron_cluster, config=config, tokenizer=tokenizer, init_reference_model=False, init_optimizer=False)
 
 prompt = "The following are multiple choice questions (with answers) about world religions.\n\nWhen was the first Buddhist temple constructed in Japan?\nA. 325 CE\nB. 119 CE\nC. 451 CE\nD. 596 CE\nAnswer:"
 # Tokenize the prompt
@@ -178,106 +174,128 @@ generation_data: BatchedDataDict = BatchedDataDict(
 )
 
 # --- Megatron Policy Workflow (Restored) ---
-# print("\n--- Running Megatron Policy Workflow ---")
-# megatron_generated_data: BatchedDataDict[GenerationOutputSpec] = policy.generate(generation_data)
-#
-# print("Megatron Generated Data:", megatron_generated_data)
-# print([tokenizer.decode(megatron_generated_data["output_ids"][i]) for i in range(len(megatron_generated_data["output_ids"]))])
+print("\n--- Getting Megatron Policy Logprobs ---")
+policy.prepare_for_lp_inference()
+megatron_logprobs_data = policy.get_logprobs(generation_data)
+print("Megatron Logprobs shape:", megatron_logprobs_data["logprobs"].shape)
+print("Megatron Logprobs sample:", megatron_logprobs_data["logprobs"][0, :10])  # First 10 tokens
 
-print("Instantiating VllmGeneration...")
-vllm_policy = VllmGeneration(cluster=megatron_cluster, config=vllm_config)
+# --- COMMENTED OUT: First vLLM Policy (Generation Mode) ---
+# print("Instantiating VllmGeneration...")
+# vllm_policy = VllmGeneration(cluster=megatron_cluster, config=vllm_config)
 
-# from transformers import AutoModelForCausalLM
-# hf_model = AutoModelForCausalLM.from_pretrained(model_name, device_map="cpu")
-# state_dict = hf_model.state_dict()
-# shapes = {}
-# for key, tensor in state_dict.items():
-#     shapes[key] = tensor.shape
-# print(f"hf shapes: {shapes}")
-#
-#
-refit_buffer_size_gb = 2
+# refit_buffer_size_gb = 4
+# sd_info = policy.prepare_weights_for_ipc()
+# print(sd_info)
+# vllm_policy.prepare_for_generation(tags=["weights"])
+# # Streaming update weights to save memory
+# state_dict_info = policy.prepare_weights_for_ipc()
+# # group keys to save time
+# available_bytes = refit_buffer_size_gb * (1024**3)
+# split_keys, keys = [], []
+# for key, size_in_bytes in state_dict_info:
+#     if size_in_bytes > available_bytes:
+#         if keys:
+#             split_keys.append(keys)
+#             keys = []
+#         available_bytes = refit_buffer_size_gb * (1024**3)
+# 
+#     keys.append(key)
+#     available_bytes -= size_in_bytes
+# 
+# if len(keys) > 0:
+#     split_keys.append(keys)
+# # do update
+# for keys in split_keys:
+#     ipc_handles = policy.get_weights_ipc_handles(keys)
+#     vllm_policy.update_weights(ipc_handles)
+# print("Done updating weights")
+# policy.offload_after_refit()
+# vllm_policy.prepare_for_generation(tags=["kv_cache"])
+# 
+# print("\n--- Getting vLLM Policy Logprobs via Generation ---")
+# # First use vLLM to generate and get logprobs during generation
+# vllm_generated_data = vllm_policy.generate(generation_data)
+# print("vLLM Generated Data shape:", vllm_generated_data["output_ids"].shape)
+# print("vLLM Logprobs shape:", vllm_generated_data["logprobs"].shape)
+# print("vLLM Logprobs sample:", vllm_generated_data["logprobs"][0, :10])  # First 10 tokens
+# 
+# # For a more fair comparison, create a special vLLM config with max_new_tokens=0 to get logprobs for input only
+# print("\n--- Getting vLLM Logprobs for Input Only (Inference Mode) ---")
+# 
+# # Shutdown the first vLLM policy to avoid naming conflicts
+# print("Shutting down first vLLM policy...")
+# vllm_policy.shutdown()
+
+# --- vLLM Policy (Inference-Only Mode) ---
+print("\n--- Getting vLLM Logprobs for Input Only (Inference Mode) ---")
+
+refit_buffer_size_gb = 4
 sd_info = policy.prepare_weights_for_ipc()
 print(sd_info)
-vllm_policy.prepare_for_generation(tags=["weights"])
-# Streaming update weights to save memory
-state_dict_info = policy.prepare_weights_for_ipc()
-# group keys to save time
-available_bytes = refit_buffer_size_gb * (1024**3)
-split_keys, keys = [], []
-for key, size_in_bytes in state_dict_info:
-    if size_in_bytes > available_bytes:
-        if keys:
-            split_keys.append(keys)
-            keys = []
-        available_bytes = refit_buffer_size_gb * (1024**3)
 
-    keys.append(key)
-    available_bytes -= size_in_bytes
+vllm_inference_config = vllm_config.copy()
+vllm_inference_config["max_new_tokens"] = 1  # Only get logprobs for input tokens
+vllm_inference_config = configure_generation_config(vllm_inference_config, tokenizer)
 
-if len(keys) > 0:
-    split_keys.append(keys)
-# do update
-for keys in split_keys:
-    ipc_handles = policy.get_weights_ipc_handles(keys)
-    vllm_policy.update_weights(ipc_handles)
-print("Done updating weights")
-policy.offload_after_refit()
-vllm_policy.prepare_for_generation(tags=["kv_cache"])
+# Create a temporary vLLM policy for inference-only logprobs
+vllm_inference_policy = VllmGeneration(cluster=megatron_cluster, config=vllm_inference_config)
 
-# #compare shapes
-# all_match = True
-# for key in megatron_shapes.keys():
-    # if key not in state_dict.keys():
-        # print(f"m key {key} not in hf state_dict")
-        # all_match = False
-    # else:
-        # if megatron_shapes[key] != state_dict[key].shape:
-            # print(f"m key {key} shape mismatch: {megatron_shapes[key]} != {state_dict[key].shape}")
-            # all_match = False
-# for key in state_dict.keys():
-    # if key not in megatron_shapes.keys():
-        # print(f"h key {key} not in megatron shapes")
-#         all_match = False
+refit_policy_generation(policy, vllm_inference_policy, refit_buffer_size_gb)
 
-# if all_match:
-    # print("All shapes match")
-# else:
-  #   print("Shapes do not match")
-#
-#
-#
-# from nemo_reinforcer.algorithms.loss_functions import ClippedPGLossFn, ClippedPGLossConfig, ClippedPGLossDataDict
-#
-# loss_cfg = ClippedPGLossConfig(
-#     reference_policy_kl_penalty=0.1,
-#     ratio_eps_min=0.1,
-#     ratio_eps_max=0.1,
-#     use_on_policy_kl_approximation=False,
-#     use_importance_sampling_correction=False,
-# )
-# loss_fn = ClippedPGLossFn(loss_cfg)
-#
-# print("\n--- Running VLLM Policy Workflow ---")
-# print("Preparing VLLM for generation...")
-# vllm_policy.prepare_for_generation()
-# print("Running VLLM generation...")
-# vllm_generated_data: BatchedDataDict[GenerationOutputSpec] = vllm_policy.generate(generation_data) # Use same input data
-# print("Finishing VLLM generation...")
-# vllm_policy.finish_generation()
-#
-# print("VLLM Generated Data:", vllm_generated_data)
-# print("VLLM Decoded:")
-# print([tokenizer.decode(vllm_generated_data["output_ids"][i]) for i in range(len(vllm_generated_data["output_ids"]))])
-#
-#
-# # --- Shutdown ---
-# print("Shutting down VLLM policy...")
-# vllm_policy.shutdown() # This should handle vllm_cluster shutdown via worker group
-#
-# # Explicitly shutdown the megatron cluster as well
-# print("Shutting down Megatron cluster...")
-# megatron_cluster.shutdown()
-#
-# print("Script finished.")
-# MegatronPolicy might not require explicit shutdown via a method call
+# Get logprobs for input only
+vllm_input_logprobs = vllm_inference_policy.generate(generation_data)
+print(megatron_logprobs_data)
+print(vllm_input_logprobs)
+exit(0)
+print("vLLM Input-only Logprobs shape:", vllm_input_logprobs["logprobs"].shape)
+print("vLLM Input-only Logprobs sample:", vllm_input_logprobs["logprobs"][0, :10])
+
+# Now compare the logprobs on the same input sequence
+print("\n--- Comparing Logprobs ---")
+print("Input prompt:", prompt)
+print("Input tokens:", generation_data["input_ids"][0, :generation_data["input_lengths"][0]])
+
+# Compare logprobs for the input tokens (should be similar)
+input_length = generation_data["input_lengths"][0].item()
+print(f"\nComparing first {input_length} tokens:")
+print("Megatron logprobs:", megatron_logprobs_data["logprobs"][0, :input_length])
+print("vLLM input logprobs:", vllm_input_logprobs["logprobs"][0, :input_length])
+
+# Calculate absolute difference
+abs_diff = torch.abs(megatron_logprobs_data["logprobs"][0, :input_length] - vllm_input_logprobs["logprobs"][0, :input_length])
+print("Absolute difference:", abs_diff)
+print("Mean absolute difference:", torch.mean(abs_diff))
+print("Max absolute difference:", torch.max(abs_diff))
+
+# COMMENTED OUT: Generated token comparison (no longer available)
+# Also compare generated logprobs if available
+# if vllm_generated_data["generation_lengths"][0] > 0:
+#     print(f"\n--- Comparing Generated Token Logprobs ---")
+#     gen_start = input_length
+#     gen_end = input_length + vllm_generated_data["generation_lengths"][0]
+#     print("vLLM generated logprobs:", vllm_generated_data["logprobs"][0, gen_start:gen_end])
+#     print("Generated tokens:", vllm_generated_data["output_ids"][0, gen_start:gen_end])
+#     print("Decoded generated text:", tokenizer.decode(vllm_generated_data["output_ids"][0, gen_start:gen_end]))
+
+# Detailed token-by-token comparison
+print("\n--- Token-by-Token Comparison ---")
+input_length = generation_data["input_lengths"][0].item()
+input_tokens = generation_data["input_ids"][0, :input_length]
+megatron_logprobs = megatron_logprobs_data["logprobs"][0, :input_length]
+vllm_logprobs = vllm_input_logprobs["logprobs"][0, :input_length]
+
+print(f"{'Token':<15} {'Token ID':<10} {'Megatron':<12} {'vLLM':<12} {'Diff':<12}")
+print("-" * 65)
+for i in range(min(input_length, 10)):  # Show first 10 tokens
+    token_id = input_tokens[i].item()
+    token_text = tokenizer.decode([token_id])
+    megatron_lp = megatron_logprobs[i].item()
+    vllm_lp = vllm_logprobs[i].item()
+    diff = abs(megatron_lp - vllm_lp)
+    print(f"{token_text:<15} {token_id:<10} {megatron_lp:<12.6f} {vllm_lp:<12.6f} {diff:<12.6f}")
+
+# Final cleanup
+print("\n--- Cleaning up ---")
+vllm_inference_policy.shutdown()
+print("Script completed successfully!")
