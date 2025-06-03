@@ -381,10 +381,13 @@ class MegatronPolicyWorker:
                 self.reference_state_dict = {}
                 for name, item in reference_model.state_dict().items():
                     if isinstance(item, torch.Tensor):
-                        item = item.detach().to(
+                        cpu_item = item.detach().to(
                             device="cpu", non_blocking=True, copy=True
                         )
-                    self.reference_state_dict[name] = item
+                        del item
+                    else:
+                        cpu_item = item
+                    self.reference_state_dict[name] = cpu_item
                 print("Reference model loaded")
             else:
                 print("Reference model not loaded")
@@ -1025,13 +1028,13 @@ class MegatronPolicyWorker:
         return {device_uuid: all_handles}
 
     def prepare_for_lp_inference(self):
-        self.model.to("cuda")
+        self.model = self.move_model(self.model, "cuda", move_grads=False)
         self.model.eval()
         self.offload_before_refit()
 
     def prepare_for_training(self, *args, **kwargs):
         # onload models and optimizer state to cuda
-        self.model.to("cuda")
+        self.model = self.move_model(self.model, "cuda", move_grads=True, move_params=True)
         self.model.train()
 
         # Move optimizer state to CUDA if it exists
@@ -1053,6 +1056,7 @@ class MegatronPolicyWorker:
         print(
             f"GPU Memory before optimizer offload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
+        self.model = self.move_model(self.model, "cpu", move_params=False, move_grads=True) # get rid of grad buffers
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
             # Iterate through the state dictionaries for each parameter group
@@ -1098,12 +1102,29 @@ class MegatronPolicyWorker:
         )
         no_grad.__exit__(None, None, None)
 
-    def move_model(self, model, device):
-        for name, item in model.state_dict().items():
-            if isinstance(item, torch.Tensor):
-                item = item.detach().to(device=device, non_blocking=True, copy=True)
-            model.state_dict()[name] = item
-        return model
+    @torch.no_grad()
+    def move_model(self, model, device: str, move_params=True, move_grads=True):
+        # move all param and grad buffers to the device
+        if hasattr(model, "buffers"):
+            # DDP case
+            for buffer_idx in range(len(model.buffers)):
+                if device == "cpu":
+                    model.buffers[buffer_idx].offload_to_cpu(move_params=move_params, move_grads=move_grads)
+                elif device == "cuda":
+                    model.buffers[buffer_idx].reload_from_cpu(move_params=move_params, move_grads=move_grads)
+                else:
+                    raise ValueError(f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported.")
+            return model
+        else:
+            # Ordinary offload case
+            if move_params:
+                for name, param in model.state_dict().items():
+                    if device == "cpu":
+                        param.data = param.data.to("cpu")
+                    elif device == "cuda":
+                        param.data = param.data.to("cuda")
+                    else:
+                        raise ValueError(f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported.")
 
     def save_checkpoint(
         self,

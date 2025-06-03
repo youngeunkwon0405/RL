@@ -40,6 +40,7 @@ dependencies = [
     "hydra-core",
     "tiktoken",
     "blobfile",
+    "debugpy",
 ]
 
 [project.optional-dependencies]
