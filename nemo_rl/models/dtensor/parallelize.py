@@ -229,9 +229,15 @@ def _parallelize_llama(
             layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
         )
 
-    return fully_shard(
-        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+    model = fully_shard(
+        model,
+        mesh=dp_mesh,
+        mp_policy=mp_policy,
+        offload_policy=offload_policy,
+        reshard_after_forward=False,
     )
+
+    return torch.compile(model)
 
 
 def _parallelize_qwen(
@@ -330,9 +336,15 @@ def _parallelize_qwen(
             layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
         )
 
-    return fully_shard(
-        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+    model = fully_shard(
+        model,
+        mesh=dp_mesh,
+        mp_policy=mp_policy,
+        offload_policy=offload_policy,
+        reshard_after_forward=False,
     )
+
+    return torch.compile(model)
 
 
 PARALLIZE_FUNCTIONS = {

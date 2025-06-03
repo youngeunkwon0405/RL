@@ -12,7 +12,7 @@ description = "Nemo-RL: A Scalable and Efficient Post-Training Library for Model
 requires-python = ">=3.10"
 license = {text = "Apache 2.0"}
 dependencies = [
-    "torch==2.6.0",
+    "torch==2.7.0",
     "colored==2.2.3",
     "ray[default]==2.43.0",
     "transformers>=4.51.0",
@@ -40,12 +40,12 @@ readme = {file = "README.md", content-type = "text/markdown"}
 
 [project.optional-dependencies]
 vllm = [
-    "vllm==0.8.4",
+    "vllm>=0.9.0",
 ]
 
 [dependency-groups]
 build = [
-    "torch==2.6.0",
+    "torch==2.7.0",
     "setuptools",
     "packaging",
     "einops"

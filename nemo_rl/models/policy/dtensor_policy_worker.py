@@ -753,6 +753,9 @@ class DTensorPolicyWorker:
         # Create handles for the tensors
         all_handles = []
         for key, p in converted_params.items():
+            if key.startswith("_orig_mod."):
+                key = key.removeprefix("_orig_mod.")
+
             handle = reduce_tensor(p.detach())
             all_handles.append((key, handle))
 
