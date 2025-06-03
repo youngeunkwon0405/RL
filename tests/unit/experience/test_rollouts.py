@@ -30,7 +30,7 @@ from nemo_rl.environments.games.sliding_puzzle import (
     SlidingPuzzleMetadata,
 )
 from nemo_rl.experience.rollouts import run_multi_turn_rollout
-from nemo_rl.models.generation.interfaces import configure_generation_config
+from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
@@ -205,6 +205,7 @@ base_hf_test_config: PolicyConfig = {
         },
     },
     "dtensor_cfg": {"enabled": False},
+    "dynamic_batching": {"enabled": False},
 }
 
 base_vllm_test_config: VllmConfig = {
@@ -220,7 +221,10 @@ base_vllm_test_config: VllmConfig = {
     "stop_token_ids": None,
     "stop_strings": None,
     "vllm_cfg": {
+        "async_engine": False,
+        "precision": "bfloat16",
         "tensor_parallel_size": 1,
+        "pipeline_parallel_size": 1,
         "max_model_len": 2048,
         "disable_log_stats": True,
         "disable_log_requests": True,
