@@ -232,7 +232,7 @@ def setup(
     backend = generation_config["backend"]
     generation_config["model_name"] = policy_config["model_name"]  # Needed for vLLM
 
-    if backend == "hf":
+    if backend in ["hf", "megatron"]:
         policy_generation = None
         print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
     elif backend == "vllm":
