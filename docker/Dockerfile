@@ -4,15 +4,32 @@ FROM ${BASE_IMAGE} AS base
 # It is more convenient for users to run as root
 USER root
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN <<"EOF" bash -exu -o pipefail
+export DEBIAN_FRONTEND=noninteractive
+export TZ=America/Los_Angeles
+
+apt-get update
+apt-get install -y --no-install-recommends \
     jq \
     curl \
     git \
     rsync \
     less \
     vim \
-    && rm -rf /var/lib/apt/lists/* && \
-    apt-get clean
+
+
+# Repo for newer nsight versions
+UBUNTU_ARCH=$(dpkg --print-architecture)
+UBUNTU_VERSION=$(. /etc/os-release && echo ${ID}${VERSION_ID/./}) # e.g. ubuntu2204
+DEVTOOLS_URL=https://developer.download.nvidia.com/devtools/repos/${UBUNTU_VERSION}/${UBUNTU_ARCH}
+curl -o /usr/share/keyrings/nvidia.pub "${DEVTOOLS_URL}/nvidia.pub"
+echo "deb [signed-by=/usr/share/keyrings/nvidia.pub] ${DEVTOOLS_URL}/ /" > /etc/apt/sources.list.d/devtools-${UBUNTU_VERSION}-${UBUNTU_ARCH}.list
+
+apt-get install -y nsight-compute nsight-systems-cli-2024.6.1
+
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+EOF
 
 # Install uv and python
 ARG UV_VERSION=0.7.2
