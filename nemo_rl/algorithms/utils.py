@@ -113,9 +113,43 @@ def calculate_baseline_and_std_per_prompt(
 def get_bottom_percentile_indices(
     baselines: torch.Tensor,
     percentile: float,
+    exclude_zeros: bool = False,
 ) -> list[int]:
-    """Get the indices of the bottom percentile responses."""
-    return baselines.argsort()[:int(len(baselines) * percentile)].tolist()
+    """Get the indices of the bottom percentile responses.
+    
+    Args:
+        baselines: Tensor of baseline values
+        percentile: Fraction of lowest values to select (0.0 to 1.0)
+        exclude_zeros: If True, exclude zero baselines from consideration
+    
+    Returns:
+        List of indices corresponding to the bottom percentile responses
+    """
+    if exclude_zeros:
+        # Filter out zero baselines
+        non_zero_mask = baselines != 0.0
+        non_zero_indices = torch.where(non_zero_mask)[0]
+        
+        if len(non_zero_indices) == 0:
+            # If all baselines are zero, return empty list
+            return []
+        
+        # Get non-zero baselines and their corresponding indices
+        filtered_baselines = baselines[non_zero_indices]
+        
+        # Sort non-zero baselines and get bottom percentile
+        num_bottom = int(len(filtered_baselines) * percentile)
+        if num_bottom == 0:
+            return []
+        
+        # Get indices of bottom percentile from non-zero baselines
+        sorted_indices = filtered_baselines.argsort()[:num_bottom]
+        
+        # Map back to original indices
+        return non_zero_indices[sorted_indices].tolist()
+    else:
+        # Original behavior: include all baselines
+        return baselines.argsort()[:int(len(baselines) * percentile)].tolist()
 
 
 def surpress_user_warnings(f):  # type: ignore
