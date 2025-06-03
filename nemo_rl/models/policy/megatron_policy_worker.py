@@ -297,6 +297,12 @@ class MegatronPolicyWorker:
         model_cfg.parallel_output = True
         model_cfg.moe_router_dtype = 'fp64'
 
+        model_cfg.apply_rope_fusion = False
+        model_cfg.bias_activation_fusion = False
+        model_cfg.bias_dropout_fusion = False
+        model_cfg.masked_softmax_fusion = False
+        model_cfg.gradient_accumulation_fusion = False
+
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,

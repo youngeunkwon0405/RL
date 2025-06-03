@@ -23,7 +23,7 @@ dependencies = [
     "setuptools",
     "torch==2.7.0",
     "psutil",
-    "flash-attn==2.7.3",
+    # "flash-attn==2.7.3",
     "colored==2.2.3",
     "ray[default]==2.46.0",
     "transformers>=4.51.0",
@@ -38,6 +38,8 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "tiktoken",
+    "blobfile",
 ]
 
 [project.optional-dependencies]
@@ -119,10 +121,10 @@ default-groups = ["dev", "build"]
 #  --link-mode=symlink (fastest option when uv cache and venv on different file-system; caveat: venv is brittle since it depends on the environment/container)
 link-mode = "copy"
 
-[[tool.uv.dependency-metadata]]
-name = "flash-attn"
-version = "2.7.3"
-requires-dist = ["torch", "einops", "setuptools", "psutil"]
+# [[tool.uv.dependency-metadata]]
+# name = "flash-attn"
+# version = "2.7.3"
+# requires-dist = ["torch", "einops", "setuptools", "psutil"]
 
 [tool.black]
 line-length = 120
