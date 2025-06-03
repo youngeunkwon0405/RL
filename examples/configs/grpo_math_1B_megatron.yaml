@@ -76,6 +76,7 @@ policy:
     num_layers_in_last_pipeline_stage: null
     context_parallel_size: 1
     pipeline_dtype: ${policy.precision}
+    expert_model_parallel_size: 1
     expert_tensor_parallel_size: 1
     sequence_parallel: false
     moe_router_load_balancing_type: "none" # "seq_aux_loss" causes logprob error divergence
