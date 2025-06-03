@@ -2,6 +2,7 @@
 
 import ray
 import torch
+import copy
 
 from transformers import AutoTokenizer
 
@@ -173,69 +174,15 @@ generation_data: BatchedDataDict = BatchedDataDict(
     }
 )
 
-# --- Megatron Policy Workflow (Restored) ---
-print("\n--- Getting Megatron Policy Logprobs ---")
-policy.prepare_for_lp_inference()
-megatron_logprobs_data = policy.get_logprobs(generation_data)
-print("Megatron Logprobs shape:", megatron_logprobs_data["logprobs"].shape)
-print("Megatron Logprobs sample:", megatron_logprobs_data["logprobs"][0, :10])  # First 10 tokens
-
-# --- COMMENTED OUT: First vLLM Policy (Generation Mode) ---
-# print("Instantiating VllmGeneration...")
-# vllm_policy = VllmGeneration(cluster=megatron_cluster, config=vllm_config)
-
-# refit_buffer_size_gb = 4
-# sd_info = policy.prepare_weights_for_ipc()
-# print(sd_info)
-# vllm_policy.prepare_for_generation(tags=["weights"])
-# # Streaming update weights to save memory
-# state_dict_info = policy.prepare_weights_for_ipc()
-# # group keys to save time
-# available_bytes = refit_buffer_size_gb * (1024**3)
-# split_keys, keys = [], []
-# for key, size_in_bytes in state_dict_info:
-#     if size_in_bytes > available_bytes:
-#         if keys:
-#             split_keys.append(keys)
-#             keys = []
-#         available_bytes = refit_buffer_size_gb * (1024**3)
-# 
-#     keys.append(key)
-#     available_bytes -= size_in_bytes
-# 
-# if len(keys) > 0:
-#     split_keys.append(keys)
-# # do update
-# for keys in split_keys:
-#     ipc_handles = policy.get_weights_ipc_handles(keys)
-#     vllm_policy.update_weights(ipc_handles)
-# print("Done updating weights")
-# policy.offload_after_refit()
-# vllm_policy.prepare_for_generation(tags=["kv_cache"])
-# 
-# print("\n--- Getting vLLM Policy Logprobs via Generation ---")
-# # First use vLLM to generate and get logprobs during generation
-# vllm_generated_data = vllm_policy.generate(generation_data)
-# print("vLLM Generated Data shape:", vllm_generated_data["output_ids"].shape)
-# print("vLLM Logprobs shape:", vllm_generated_data["logprobs"].shape)
-# print("vLLM Logprobs sample:", vllm_generated_data["logprobs"][0, :10])  # First 10 tokens
-# 
-# # For a more fair comparison, create a special vLLM config with max_new_tokens=0 to get logprobs for input only
-# print("\n--- Getting vLLM Logprobs for Input Only (Inference Mode) ---")
-# 
-# # Shutdown the first vLLM policy to avoid naming conflicts
-# print("Shutting down first vLLM policy...")
-# vllm_policy.shutdown()
-
-# --- vLLM Policy (Inference-Only Mode) ---
-print("\n--- Getting vLLM Logprobs for Input Only (Inference Mode) ---")
+# --- Megatron Policy Workflow (Updated to use generation) ---
+print("\n--- Getting vLLM Policy Logprobs ---")
 
 refit_buffer_size_gb = 4
 sd_info = policy.prepare_weights_for_ipc()
 print(sd_info)
 
 vllm_inference_config = vllm_config.copy()
-vllm_inference_config["max_new_tokens"] = 1  # Only get logprobs for input tokens
+vllm_inference_config["max_new_tokens"] = 10
 vllm_inference_config = configure_generation_config(vllm_inference_config, tokenizer)
 
 # Create a temporary vLLM policy for inference-only logprobs
@@ -243,57 +190,80 @@ vllm_inference_policy = VllmGeneration(cluster=megatron_cluster, config=vllm_inf
 
 refit_policy_generation(policy, vllm_inference_policy, refit_buffer_size_gb)
 
-# Get logprobs for input only
-vllm_input_logprobs = vllm_inference_policy.generate(generation_data)
-print(megatron_logprobs_data)
-print(vllm_input_logprobs)
-exit(0)
-print("vLLM Input-only Logprobs shape:", vllm_input_logprobs["logprobs"].shape)
-print("vLLM Input-only Logprobs sample:", vllm_input_logprobs["logprobs"][0, :10])
+# Get logprobs from vLLM for input only
+vllm_logprobs_data = vllm_inference_policy.generate(generation_data, greedy=True)
+print("vLLM Logprobs shape:", vllm_logprobs_data["logprobs"].shape)
+print("vLLM Logprobs sample:", vllm_logprobs_data["logprobs"][0, -10:])
+print(vllm_logprobs_data, generation_data)
+# --- Megatron Policy (Generation Mode) ---
+print("\n--- Getting Megatron Generation ---")
+
+# Prepare policy for generation
+policy.prepare_for_generation()
+megatron_input_data = copy.deepcopy(generation_data)
+megatron_input_data["input_ids"] = vllm_logprobs_data["output_ids"]
+megatron_input_data["input_lengths"] = vllm_logprobs_data["unpadded_sequence_lengths"]
+megatron_generation_data = policy.get_logprobs(megatron_input_data,)
+
+print("Megatron Generation shape:", megatron_generation_data["logprobs"].shape)
+print("Megatron Generation sample:", megatron_generation_data["logprobs"][0, -10:])
 
 # Now compare the logprobs on the same input sequence
 print("\n--- Comparing Logprobs ---")
 print("Input prompt:", prompt)
 print("Input tokens:", generation_data["input_ids"][0, :generation_data["input_lengths"][0]])
 
-# Compare logprobs for the input tokens (should be similar)
+# Compare logprobs for the generated tokens only (skip input tokens)
 input_length = generation_data["input_lengths"][0].item()
-print(f"\nComparing first {input_length} tokens:")
-print("Megatron logprobs:", megatron_logprobs_data["logprobs"][0, :input_length])
-print("vLLM input logprobs:", vllm_input_logprobs["logprobs"][0, :input_length])
+total_length = min(vllm_logprobs_data["logprobs"].shape[1], megatron_generation_data["logprobs"].shape[1])
+generated_length = vllm_logprobs_data["generation_lengths"][0].item()
 
-# Calculate absolute difference
-abs_diff = torch.abs(megatron_logprobs_data["logprobs"][0, :input_length] - vllm_input_logprobs["logprobs"][0, :input_length])
-print("Absolute difference:", abs_diff)
-print("Mean absolute difference:", torch.mean(abs_diff))
-print("Max absolute difference:", torch.max(abs_diff))
+if generated_length > 0:
+    print(f"\nComparing {generated_length} generated tokens (from position {input_length} to {total_length-1}):")
+    print("vLLM generated logprobs:", vllm_logprobs_data["logprobs"][0, input_length:total_length])
+    print("Megatron generated logprobs:", megatron_generation_data["logprobs"][0, input_length:total_length])
 
-# COMMENTED OUT: Generated token comparison (no longer available)
-# Also compare generated logprobs if available
-# if vllm_generated_data["generation_lengths"][0] > 0:
-#     print(f"\n--- Comparing Generated Token Logprobs ---")
-#     gen_start = input_length
-#     gen_end = input_length + vllm_generated_data["generation_lengths"][0]
-#     print("vLLM generated logprobs:", vllm_generated_data["logprobs"][0, gen_start:gen_end])
-#     print("Generated tokens:", vllm_generated_data["output_ids"][0, gen_start:gen_end])
-#     print("Decoded generated text:", tokenizer.decode(vllm_generated_data["output_ids"][0, gen_start:gen_end]))
+    # Calculate absolute difference for generated tokens only
+    abs_diff = torch.abs(vllm_logprobs_data["logprobs"][0, input_length:total_length] - megatron_generation_data["logprobs"][0, input_length:total_length])
+    print("Absolute difference:", abs_diff)
+    print("Mean absolute difference:", torch.mean(abs_diff))
+    print("Max absolute difference:", torch.max(abs_diff))
+else:
+    print(f"No generated tokens to compare (input_length: {input_length}, total_length: {total_length})")
 
-# Detailed token-by-token comparison
-print("\n--- Token-by-Token Comparison ---")
+
+# Detailed token-by-token comparison for generated tokens only
+print("\n--- Token-by-Token Comparison (Generated Tokens Only) ---")
 input_length = generation_data["input_lengths"][0].item()
-input_tokens = generation_data["input_ids"][0, :input_length]
-megatron_logprobs = megatron_logprobs_data["logprobs"][0, :input_length]
-vllm_logprobs = vllm_input_logprobs["logprobs"][0, :input_length]
+total_length = min(vllm_logprobs_data["logprobs"].shape[1], megatron_generation_data["logprobs"].shape[1])
 
-print(f"{'Token':<15} {'Token ID':<10} {'Megatron':<12} {'vLLM':<12} {'Diff':<12}")
-print("-" * 65)
-for i in range(min(input_length, 10)):  # Show first 10 tokens
-    token_id = input_tokens[i].item()
-    token_text = tokenizer.decode([token_id])
-    megatron_lp = megatron_logprobs[i].item()
-    vllm_lp = vllm_logprobs[i].item()
-    diff = abs(megatron_lp - vllm_lp)
-    print(f"{token_text:<15} {token_id:<10} {megatron_lp:<12.6f} {vllm_lp:<12.6f} {diff:<12.6f}")
+if total_length > input_length:
+    # Get generated tokens and logprobs
+    if "input_ids" in megatron_generation_data:
+        generated_tokens = megatron_generation_data["input_ids"][0, input_length:total_length]
+    else:
+        generated_tokens = torch.arange(input_length, total_length)  # Fallback if no input_ids
+    
+    vllm_generated_logprobs = vllm_logprobs_data["logprobs"][0, input_length:total_length]
+    megatron_generated_logprobs = megatron_generation_data["logprobs"][0, input_length:total_length]
+
+    print(f"{'Token':<15} {'Token ID':<10} {'Position':<10} {'vLLM':<12} {'Megatron':<12} {'Diff':<12}")
+    print("-" * 75)
+    
+    for i, pos in enumerate(range(input_length, total_length)):
+        if "input_ids" in megatron_generation_data:
+            token_id = generated_tokens[i].item()
+            token_text = tokenizer.decode([token_id])
+        else:
+            token_id = f"pos_{pos}"
+            token_text = f"tok_{pos}"
+            
+        vllm_lp = vllm_generated_logprobs[i].item()
+        megatron_lp = megatron_generated_logprobs[i].item()
+        diff = abs(vllm_lp - megatron_lp)
+        print(f"{token_text:<15} {token_id:<10} {pos:<10} {vllm_lp:<12.6f} {megatron_lp:<12.6f} {diff:<12.6f}")
+else:
+    print("No generated tokens to compare in detail.")
 
 # Final cleanup
 print("\n--- Cleaning up ---")
