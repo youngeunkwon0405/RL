@@ -92,18 +92,18 @@ def verify_with_sweep(sweep_config: Dict[str, Any], script_path: Optional[str], 
     Raises:
         AssertionError: If inconsistencies are found or required paths are missing.
     """
-    sweep_script_name = sweep_config.get("script_path")
+    sweep_script_path = sweep_config.get("script_path")
     sweep_config_path = sweep_config.get("config_path")
 
     # Determine script path
     if script_path is None:
-        final_script_path = sweep_script_name
+        final_script_path = sweep_script_path
     else:
         final_script_path = script_path
-        if sweep_script_name and final_script_path != sweep_script_name:
+        if sweep_script_path and final_script_path != sweep_script_path:
             raise AssertionError(
                f"Command line script '{os.path.basename(final_script_path)}' does not match "
-               f"sweep config script_name '{sweep_script_name}'. Please ensure consistency."
+               f"sweep config script_name '{sweep_script_path}'. Please ensure consistency."
             )
 
     # Determine config path
