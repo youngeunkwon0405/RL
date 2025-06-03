@@ -54,10 +54,17 @@ MIN_WORKER_PORT=${MIN_WORKER_PORT:-54001}
 MAX_WORKER_PORT=${MAX_WORKER_PORT:-54257}
 ########################################################
 
-# Defaults to placing uv cache inside the SLURM_SUBMIT_DIR
-# This directory is mounted into the container at /home/ray/.cache/uv so it is shared between the head and worker nodes
-UV_CACHE_DIR="${UV_CACHE_DIR:-$SLURM_SUBMIT_DIR/uv_cache}"
-mkdir -p $UV_CACHE_DIR
+# Unset UV_CACHE_DIR to avoid local cache directory interferring with the container cache
+unset UV_CACHE_DIR
+
+if [[ -n "${UV_CACHE_DIR_OVERRIDE:-}" ]]; then
+  mkdir -p "$UV_CACHE_DIR_OVERRIDE"
+  if [[ -n $MOUNTS ]]; then
+    MOUNTS+=",$UV_CACHE_DIR_OVERRIDE:/root/.cache/uv"
+  else
+    MOUNTS="$UV_CACHE_DIR_OVERRIDE:/root/.cache/uv"
+  fi
+fi
 
 # Create logs directory
 BASE_LOG_DIR=${BASE_LOG_DIR:-$SLURM_SUBMIT_DIR}
@@ -67,7 +74,7 @@ mkdir -p $LOG_DIR
 COMMON_SRUN_ARGS=""
 COMMON_SRUN_ARGS+=" --no-container-mount-home"
 COMMON_SRUN_ARGS+=" --mpi=pmix"
-COMMON_SRUN_ARGS+=" --container-mounts=$MOUNTS,$UV_CACHE_DIR:/home/ray/.cache/uv"
+COMMON_SRUN_ARGS+=" --container-mounts=$MOUNTS"
 COMMON_SRUN_ARGS+=" --container-image=$CONTAINER"
 COMMON_SRUN_ARGS+=" --container-workdir=$SLURM_SUBMIT_DIR"
 # TODO: delete these (just for debugging)
@@ -75,8 +82,10 @@ COMMON_SRUN_ARGS+=" -p $SLURM_JOB_PARTITION"
 COMMON_SRUN_ARGS+=" -A $SLURM_JOB_ACCOUNT"
 COMMON_SRUN_ARGS+=" --gres=gpu:8"
 
-# Number of GPUs per node
-gpus_per_node=8
+# Number of GPUs per worker node
+GPUS_PER_NODE=${GPUS_PER_NODE:-8}
+# Number of CPUs per worker node
+CPUS_PER_WORKER=${CPUS_PER_WORKER:-$((GPUS_PER_NODE * 16))}
 
 num_retries=3
 
@@ -162,7 +171,7 @@ EOF
 )
 srun $COMMON_SRUN_ARGS --container-name=ray-head --nodes=1 --ntasks=1 -w "$head_node" -o $LOG_DIR/ray-head.log bash -x -c "$head_cmd" &
 
-NUM_ACTORS=$((gpus_per_node * SLURM_JOB_NUM_NODES))
+NUM_ACTORS=$((GPUS_PER_NODE * SLURM_JOB_NUM_NODES))
 
 # Start Ray worker nodes
 # We want 1 Ray worker node per physical node
@@ -197,7 +206,7 @@ monitor-sidecar &
 cat <<EOFINNER | tee /launch-worker.sh
 ray start --address "$ip_head" \
           --disable-usage-stats \
-          --resources="{\"worker_units\": $gpus_per_node, \"slurm_managed_ray_cluster\": 1}" \
+          --resources="{\"worker_units\": $GPUS_PER_NODE, \"slurm_managed_ray_cluster\": 1}" \
           --min-worker-port=${MIN_WORKER_PORT} \
           --max-worker-port=${MAX_WORKER_PORT} \
           \
@@ -225,7 +234,7 @@ EOF
   if [[ $i -eq 0 ]]; then
     OVERLAP_HEAD_AND_WORKER_ARG="--overlap"
   fi
-  srun $COMMON_SRUN_ARGS ${OVERLAP_HEAD_AND_WORKER_ARG:-} --container-name=ray-worker-$i --exact --nodes=1 --ntasks=1 --cpus-per-task=$((16 * gpus_per_node)) -w "$node_i" -o $LOG_DIR/ray-worker-$i.log bash -x -c "$worker_cmd" &
+  srun $COMMON_SRUN_ARGS ${OVERLAP_HEAD_AND_WORKER_ARG:-} --container-name=ray-worker-$i --exact --nodes=1 --ntasks=1 --cpus-per-task=$CPUS_PER_WORKER -w "$node_i" -o $LOG_DIR/ray-worker-$i.log bash -x -c "$worker_cmd" &
   sleep 3
 done
 

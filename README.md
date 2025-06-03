@@ -51,11 +51,12 @@ What you can expect:
 - ✅ **Advanced Parallelism** - PyTorch native FSDP2, TP, and SP for efficient training.
 - ✅ **Worker Isolation** - Process isolation between RL Actors (no worries about global state).
 - ✅ **Environment Isolation** - Dependency isolation between components.
+- ✅ **(even) Larger Model Support with Long(er) Sequence** - Support advanced parallelism in training with Megatron Core.
+- ✅ **Megatron Inference** - (static) Megatron Inference for day-0 support for new megatron models.
 
 - 🔜 **Improved Native Performance** - Improve training time for Native Pytorch Models.
-- 🔜 **(even) Larger Model Support with Long(er) Sequence** - Support advanced parallelism in training with Megatron Core.
 - 🔜 **MoE Models** - Support DeepseekV3 and Llama4.
-- 🔜 **Megatron Inference** - Support Megatron Inference for day-0 support for new megatron models.
+- 🔜 **Megatron Inference** - (dynamic) Megatron Inference for fast day-0 support for new megatron models.
 
 ## Prerequisites
 
@@ -81,6 +82,20 @@ cd nemo-rl
 
 # **NOTE**: this setting will not download **new** or remove **old** submodules with the branch's changes.
 # You will have to run the full `git submodule update --init --recursive` command in these situations.
+```
+
+If you are using the Megatron backend on bare-metal (outside of a container), you may
+need to install the cudnn headers as well. Here is how you can check as well as install them:
+```sh
+# Check if you have libcudnn installed
+dpkg -l | grep cudnn.*cuda
+
+# Find the version you need here: https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network
+# As an example, these are the "Linux Ubuntu 20.04 x86_64" instructions
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+sudo apt-get install cudnn-cuda-12
 ```
 -->
 

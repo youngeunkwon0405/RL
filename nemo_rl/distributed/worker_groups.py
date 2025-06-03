@@ -13,7 +13,6 @@
 # limitations under the License.
 import importlib
 import os
-import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional, Union
@@ -49,13 +48,36 @@ class MultiWorkerFuture:
         worker group each worker belongs to, then selects only the first result from each group.
 
         Args:
-            worker_group: The RayWorkerGroup that created this bundle
+            worker_group: The RayWorkerGroup that spawned the futures.  The
+                mapping contained in worker_group.worker_to_tied_group_index
+                is required for the deduplication path.
 
         Returns:
             List of results, deduplicated by tied workers if respect_tied_workers is True
         """
-        # Basic case: Get all results
-        all_results = ray.get(self.futures)
+        from ray._raylet import ObjectRef, ObjectRefGenerator
+
+        # Flatten futures into a list of ObjectRefs
+        object_refs: list[ObjectRef] = []
+
+        has_generator = False
+
+        for idx, fut in enumerate(self.futures):
+            if isinstance(fut, ObjectRefGenerator):
+                # ray.get cannot be called directly on the generator object – it must be iterated to obtain the individual ObjectRef instances first.
+                for generated_ref in fut:
+                    object_refs.append(generated_ref)
+                    has_generator = True
+            else:
+                object_refs.append(fut)
+
+        # Retrieve the concrete results.
+        all_results = ray.get(object_refs)
+
+        # If expanded generator was present we are in streaming mode.
+        # Every ObjectRef now corresponds to a unique, ordered chunk of data
+        if has_generator:
+            return all_results
 
         if self.return_from_workers is not None:
             if self.called_workers is not None:
@@ -345,36 +367,50 @@ class RayWorkerGroup:
             # In this case, each worker is its own group (no tied workers)
             bundle_indices_list = []
 
-            # Determine how many workers per node
+            # Get placement groups
+            placement_groups = self.cluster.get_placement_groups()
+            if len(placement_groups) == 1:
+                # Single unified placement group
+                pg = placement_groups[0]
+                workers_per_group = [pg.bundle_count]
+            else:
+                # Multiple per-node placement groups
+                workers_per_group = [pg.bundle_count for pg in placement_groups]
+
+            # Determine how many workers per node/placement group
             if workers_per_node is None:
-                workers_per_node = [
-                    pg.bundle_count for pg in self.cluster.get_placement_groups()
-                ]
+                workers_per_group = [pg.bundle_count for pg in placement_groups]
             elif isinstance(workers_per_node, int):
-                workers_per_node = [workers_per_node] * self.cluster.node_count()
-            elif not isinstance(workers_per_node, list):
+                workers_per_group = [workers_per_node] * len(placement_groups)
+            elif isinstance(workers_per_node, list):
+                if len(workers_per_node) == 1 and len(placement_groups) == 1:
+                    workers_per_group = workers_per_node
+                elif len(workers_per_node) != len(placement_groups):
+                    raise ValueError(
+                        f"workers_per_node list length ({len(workers_per_node)}) must match "
+                        f"number of placement groups ({len(placement_groups)})"
+                    )
+                else:
+                    workers_per_group = workers_per_node
+            else:
                 raise ValueError(
-                    "workers_per_node must be None(for default node distribution), an int, or a list"
+                    "workers_per_node must be None (for default distribution), an int, or a list"
                 )
 
-            # Validate workers_per_node
-            assert len(workers_per_node) == self.cluster.node_count(), (
-                "workers_per_node_list must be the same length as the number of nodes in the virtual cluster"
-            )
-            assert all(
-                [
-                    workers_per_node[i] <= pg.bundle_count
-                    for i, pg in enumerate(self.cluster.get_placement_groups())
-                ]
-            ), (
-                "workers_per_node must be less than or equal to the number of bundles in the placement groups"
-            )
+            # Validate workers_per_group
+            for i, (pg, worker_count) in enumerate(
+                zip(placement_groups, workers_per_group)
+            ):
+                if worker_count > pg.bundle_count:
+                    raise ValueError(
+                        f"Placement group {i} has {pg.bundle_count} bundles, "
+                        f"but {worker_count} workers were requested"
+                    )
 
-            # Create bundle_indices_list where each worker is its own group
-            for node_idx, worker_count in enumerate(workers_per_node):
-                for local_idx in range(worker_count):
+                for bundle_idx in range(worker_count):
                     # Each worker is its own single-element group
-                    bundle_indices_list.append((node_idx, [local_idx]))
+                    # The first element is the PG index (node_idx in the context of tied workers)
+                    bundle_indices_list.append((i, [bundle_idx]))
 
         # Create workers based on the bundle_indices_list
         self._create_workers_from_bundle_indices(
@@ -390,8 +426,10 @@ class RayWorkerGroup:
 
         Args:
             remote_worker_builder: Builder function for Ray actors
+
             bundle_indices_list: List of (node_idx, local_bundle_indices) tuples, where each tuple
-                               specifies a tied group with its node and local bundle indices.
+                                specifies a tied group with its node and local bundle indices. If the local_bundle_indices
+                                spans multiple nodes, the node_idx will be the first node's index in the tied group.
         """
         self.master_address, self.master_port = (
             self.cluster.get_master_address_and_port()
@@ -405,14 +443,14 @@ class RayWorkerGroup:
         worker_futures = []
         worker_info = []  # Store metadata for each worker
 
-        for group_idx, (node_idx, local_bundle_indices) in enumerate(
-            bundle_indices_list
-        ):
+        # Get all placement groups
+        placement_groups = self.cluster.get_placement_groups()
+
+        for group_idx, (pg_idx, local_bundle_indices) in enumerate(bundle_indices_list):
             current_group = []
 
-            # Get the placement group for this node
-            pg = self.cluster.get_placement_groups()[node_idx]
-            is_tp_group = len(local_bundle_indices) > 1
+            pg = placement_groups[pg_idx]
+            is_parallel_group = len(local_bundle_indices) > 1
 
             for local_rank, bundle_idx in enumerate(local_bundle_indices):
                 # Set up basic distributed environment variables
@@ -426,20 +464,21 @@ class RayWorkerGroup:
                         "WORLD_SIZE": str(self.world_size),
                         "MASTER_ADDR": self.master_address,
                         "MASTER_PORT": str(self.master_port),
-                        "NODE_RANK": str(node_idx),
+                        "NODE_RANK": str(pg_idx),
                     }
                 )
 
-                # For tensor parallel groups, only the first worker gets bundle_indices
-                worker_bundle_indices = (
-                    (node_idx, local_bundle_indices) if local_rank == 0 else None
-                )
+                # Only the first worker in each group gets bundle_indices
+                # This ensures only one worker per group is the model owner
+                worker_bundle_indices = None
+                if local_rank == 0:
+                    worker_bundle_indices = (pg_idx, local_bundle_indices)
 
                 # Create a descriptive name based on group structure
                 name = (
                     f"{self.name_prefix}-grp{group_idx}-{local_rank}"
-                    if is_tp_group
-                    else f"{self.name_prefix}-{node_idx}-{bundle_idx}"
+                    if is_parallel_group
+                    else f"{self.name_prefix}-{pg_idx}-{bundle_idx}"
                 )
 
                 # Calculate GPU resources
@@ -469,7 +508,7 @@ class RayWorkerGroup:
                     {
                         "group_idx": group_idx,
                         "worker_idx": worker_idx,
-                        "node_idx": node_idx,
+                        "node_idx": pg_idx,
                         "local_rank": local_rank,
                         "global_rank": global_rank,
                         "name": name,
@@ -530,43 +569,58 @@ class RayWorkerGroup:
     def run_all_workers_multiple_data(
         self,
         method_name: str,
-        data: list[SlicedDataDict],
+        data: list[Any],
+        run_rank_0_only_axes: list[str] | None = None,
         common_kwargs: Optional[dict[str, Any]] = None,
-    ) -> MultiWorkerFuture:
+    ) -> list[ray.ObjectRef]:
         """Run a method on all workers in parallel with different data.
 
         Args:
             method_name: Name of the method to call on each worker
-            data: List of data slices to pass to workers/groups
+            data: List of data to pass to workers/groups
+            run_rank_0_only_axes: List of named axes for which only rank 0 should run the method.
             common_kwargs: Additional keyword arguments to pass to all workers
 
         Returns:
-            MultiWorkerFuture: Object containing futures and their associated worker information
+            list[ray.ObjectRef]: A list of ray futures
         """
-        # Verify that the data is a list of SlicedDataDict objects
-        if not all(isinstance(d, SlicedDataDict) for d in data):
-            warnings.warn(
-                f"Expected all elements in 'data' to be of type SlicedDataDict, but got "
-                f"{[type(d).__name__ for d in data]}. This may cause unexpected behavior. "
-                f"Please use make sure you're passing in Sharded Data to this function (and not replicated data)",
-                UserWarning,
+        if run_rank_0_only_axes is None:
+            assert len(data) == len(self.workers), (
+                "data length should be equal to the number of workers: "
+                f"data length = {len(data)}, number of workers = {len(self.workers)}"
             )
 
+        futures = []
+
+        if run_rank_0_only_axes is None:
+            run_rank_0_only_axes = []
         if common_kwargs is None:
             common_kwargs = {}
 
-        futures = []
-        for worker_id, worker in enumerate(self.workers):
-            if worker_id >= len(data):
-                break
-            method = getattr(worker, method_name)
-            futures.append(method.remote(data[worker_id], **common_kwargs))
+        data_idx = 0
+        for worker_idx, worker in enumerate(self.workers):
+            worker_coords = self.sharding_annotations.get_worker_coords(worker_idx)
 
-        # Return a MultiWorkerFuture containing both futures and worker information
-        return MultiWorkerFuture(
-            futures=futures,
-            return_from_workers=list(range(len(futures))),
+            # Determine if this worker should receive data
+            should_run = True
+            for axis in self.sharding_annotations.names:
+                if axis not in worker_coords:
+                    continue
+                if axis in run_rank_0_only_axes and worker_coords[axis] != 0:
+                    should_run = False
+                    break
+
+            if should_run:
+                method = getattr(worker, method_name)
+                futures.append(method.remote(data[data_idx], **common_kwargs))
+                data_idx += 1
+
+        assert data_idx == len(data), (
+            "data length should be equal to the number of workers started: "
+            f"data length = {len(data)}, number of workers started = {data_idx}"
         )
+
+        return futures
 
     def run_all_workers_single_data(
         self,

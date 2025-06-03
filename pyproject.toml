@@ -16,7 +16,7 @@ dynamic = [
     "version",
     "readme",
 ]
-description = "Nemo RL: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
+description = "NeMo RL: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
 requires-python = ">=3.10"
 license = {text = "Apache 2.0"}
 dependencies = [
@@ -35,7 +35,6 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
-    "debugpy",
 ]
 
 [project.optional-dependencies]
@@ -82,11 +81,13 @@ dev = [
     "mypy",
     "types-PyYAML",
     "types-requests",
+    "debugpy",
 ]
 test = [
     "pytest>=7.0.0",
     "pytest-timeout",
     "pytest-cov",
+    "pytest-asyncio",
 ]
 
 [tool.uv.sources]

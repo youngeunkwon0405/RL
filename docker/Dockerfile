@@ -32,21 +32,27 @@ WORKDIR /opt/nemo-rl
 COPY pyproject.toml uv.lock ./
 COPY --link 3rdparty/ ./3rdparty/
 
+# Variables to control the build of TE. If there are issues with parallelization, consider
+# setting these to 1.
+ARG MAX_JOBS
+ARG NVTE_BUILD_THREADS_PER_JOB
+
 ENV UV_PROJECT_ENVIRONMENT=/opt/nemo_rl_venv
 ENV UV_LINK_MODE=copy
 
 # Create and activate virtual environment
 RUN <<"EOF" bash -exu
-uv venv /opt/nemo_rl_venv
+uv venv ${UV_PROJECT_ENVIRONMENT}
 # uv sync has a more reliable resolver than simple uv pip install which can fail
 
 # Sync each training + inference backend one at a time (since they may conflict)
 # to warm the uv cache, then at the end just sync the default dependencies.
 # Do everything in one layer to prevent large layers.
 
-uv sync --locked --extra vllm --no-install-project
-uv sync --locked --extra mcore --no-install-project --no-build-isolation 
-uv sync --locked --all-groups --no-install-project
+# The venv is symlinked to avoid bloating the layer size
+uv sync --link-mode symlink --locked --extra vllm --no-install-project
+uv sync --link-mode symlink --locked --extra mcore --no-install-project --no-build-isolation
+uv sync --link-mode symlink --locked --all-groups --no-install-project
 EOF
 
 ENV PATH="/opt/nemo_rl_venv/bin:$PATH"
