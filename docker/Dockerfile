@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     git \
+    rsync \
+    less \
+    vim \
     && rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
