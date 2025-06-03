@@ -26,7 +26,7 @@ import yaml
 
 
 # Environment variables
-LOG_DIR = os.environ.get("LOG", "/tmp") + "/nemo-rl"
+LOG_DIR = os.environ.get("LOG", "/tmp") + "/nemo-rl-bppo"
 ACCOUNT = os.environ.get("ACCOUNT", "default")
 CONTAINER = os.environ.get("CON", "/containers") + "/nemo_rl_base.sqsh"
 MOUNTS = "/lustre:/lustre"
