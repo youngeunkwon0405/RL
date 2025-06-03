@@ -211,6 +211,7 @@ def setup_megatron_model(
 class MegatronPolicyWorker:
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
+
         This makes it easier to identify which worker is producing specific log messages.
         """
         if torch.distributed.is_initialized():
@@ -291,7 +292,9 @@ class MegatronPolicyWorker:
         ]  # not supported right now
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
-        model_cfg.params_dtype = dtype_map[self.cfg["megatron_cfg"]["optimizer"]["params_dtype"]]  # FP32 for amp
+        model_cfg.params_dtype = dtype_map[
+            self.cfg["megatron_cfg"]["optimizer"]["params_dtype"]
+        ]  # FP32 for amp
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
 
@@ -620,6 +623,7 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict[Any] = None, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[Any]:
         """Get the logprobs of the model for a batch of data.
+
         Uses the configured logprob_batch_size to do microbatching.
         Input data is assumed to be right-padded. The method internally converts to
         left-padded format for computation, and returns outputs in right-padded format.
@@ -701,6 +705,7 @@ class MegatronPolicyWorker:
     @contextmanager
     def use_reference_model(self):
         """Context manager that temporarily swaps the reference model and active model.
+
         On entry: Moves model to CPU, moves reference_model to CUDA. Swaps the references
         On exit: Restores original references and re-flips cuda/cpu
         """
@@ -742,7 +747,8 @@ class MegatronPolicyWorker:
     def get_reference_policy_logprobs(
         self, data: BatchedDataDict[Any] = None, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[Any]:
-        """Get the logprobs from the reference policy for a batch of data.
+        """Get the logprobs from thereference policy for a batch of data.
+
         If micro_batch_size is provided, it will be used instead of the configured
         logprob_batch_size.
 
@@ -902,6 +908,7 @@ class MegatronPolicyWorker:
 
     def prepare_weights_for_ipc(self):
         """Prepare Megatron model weights for IPC transfer to vLLM.
+
         Collects information about weight tensors (names and sizes).
         Returns a list of (parameter_name, size_in_bytes) tuples.
         """
@@ -1027,7 +1034,9 @@ class MegatronPolicyWorker:
 
     def prepare_for_training(self, *args, **kwargs):
         # onload models and optimizer state to cuda
-        self.model = self.move_model(self.model, "cuda", move_grads=True, move_params=True)
+        self.model = self.move_model(
+            self.model, "cuda", move_grads=True, move_params=True
+        )
         self.model.train()
 
         # Move optimizer state to CUDA if it exists
@@ -1049,7 +1058,9 @@ class MegatronPolicyWorker:
         print(
             f"GPU Memory before optimizer offload: {allocated:.2f}GB allocated, {reserved:.2f}GB reserved"
         )
-        self.model = self.move_model(self.model, "cpu", move_params=False, move_grads=True) # get rid of grad buffers
+        self.model = self.move_model(
+            self.model, "cpu", move_params=False, move_grads=True
+        )  # get rid of grad buffers
         torch.randn(1).cuda()  # wake up torch allocator
         if hasattr(self, "optimizer") and self.optimizer is not None:
             # Iterate through the state dictionaries for each parameter group
@@ -1102,11 +1113,17 @@ class MegatronPolicyWorker:
             # DDP case
             for buffer_idx in range(len(model.buffers)):
                 if device == "cpu":
-                    model.buffers[buffer_idx].offload_to_cpu(move_params=move_params, move_grads=move_grads)
+                    model.buffers[buffer_idx].offload_to_cpu(
+                        move_params=move_params, move_grads=move_grads
+                    )
                 elif device == "cuda":
-                    model.buffers[buffer_idx].reload_from_cpu(move_params=move_params, move_grads=move_grads)
+                    model.buffers[buffer_idx].reload_from_cpu(
+                        move_params=move_params, move_grads=move_grads
+                    )
                 else:
-                    raise ValueError(f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported.")
+                    raise ValueError(
+                        f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported."
+                    )
             return model
         else:
             # Ordinary offload case
@@ -1115,7 +1132,9 @@ class MegatronPolicyWorker:
                     new_state_dict = {}
                     for name, item in model.state_dict().items():
                         if isinstance(item, torch.Tensor):
-                            item = item.detach().to(device=device, non_blocking=True, copy=True)
+                            item = item.detach().to(
+                                device=device, non_blocking=True, copy=True
+                            )
                         new_state_dict[name] = item
                     model.load_state_dict(new_state_dict)
 

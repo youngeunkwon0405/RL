@@ -69,6 +69,7 @@ def broadcast_tensor(
     tensor: torch.Tensor | None, src_rank: int, group: dist.ProcessGroup
 ):
     """Broadcasts a tensor from src_rank to all ranks in the group using broadcast_object_list for metadata.
+
     Handles the case where the input tensor might be None on non-source ranks.
     If the input tensor is provided on non-source ranks, it must have the
     correct shape and dtype matching the tensor on the source rank.
