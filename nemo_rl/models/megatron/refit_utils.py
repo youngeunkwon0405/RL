@@ -45,10 +45,12 @@ def get_global_param_key_to_local_key_map(
     model, model_cfg: GPTConfig, keys: List[Tuple[str, str]]
 ) -> Dict[str, Tuple[int, str]]:
     """Get a mapping from global parameter keys to local parameter keys.
+
     Args:
         model: The model to get the mapping for.
         model_cfg: The model configuration.
         keys: The keys to get the mapping for. Tuple of (local_key, global_hf_key)
+
     Returns:
         A dictionary mapping global parameter keys to a tuple of (rank, local parameter key).
     """
@@ -61,8 +63,9 @@ def get_global_param_key_to_local_key_map(
     # The global key is computed by replacing the local layer number (after "layers.")
     # with its corresponding global layer number (if applicable).
     local_map = {}
+    state_dict = model.state_dict()
     for local_key, _ in keys:
-        if local_key not in model.state_dict():
+        if local_key not in state_dict:
             continue
         local_layer = model_converters.get_local_layer_num(local_key)
         if local_layer is not None:
@@ -207,6 +210,7 @@ def gather_and_convert_params(
     param_name_to_rank_and_key,
 ):
     import time
+
     st = time.time()
     # Process each parameter (by its unique global key) one at a time.
     gathered_params = {}
@@ -312,5 +316,5 @@ def gather_and_convert_params(
 
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
-    print(f'Time taken to gather and convert params: {time.time() - st}')
+    print(f"Time taken to gather and convert params: {time.time() - st}")
     return gathered_params
