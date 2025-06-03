@@ -25,7 +25,7 @@ DEVTOOLS_URL=https://developer.download.nvidia.com/devtools/repos/${UBUNTU_VERSI
 curl -o /usr/share/keyrings/nvidia.pub "${DEVTOOLS_URL}/nvidia.pub"
 echo "deb [signed-by=/usr/share/keyrings/nvidia.pub] ${DEVTOOLS_URL}/ /" > /etc/apt/sources.list.d/devtools-${UBUNTU_VERSION}-${UBUNTU_ARCH}.list
 
-apt-get install -y nsight-compute nsight-systems-cli-2024.6.1
+apt-get install -y nsight-compute nsight-systems-cli
 
 apt-get clean
 rm -rf /var/lib/apt/lists/*
