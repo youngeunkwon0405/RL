@@ -88,13 +88,7 @@ class PackedDataset(IterableDataset):
                     if not group:
                         continue
 
-                    # Create a dictionary with the samples and their lengths
-                    result = {
-                        "samples": [samples[i] for i in group],
-                        "lengths": [lengths[i] for i in group],
-                    }
-
-                    yield result
+                    yield [samples[i] for i in group]
 
             except StopIteration:
                 break

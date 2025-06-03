@@ -630,11 +630,10 @@ class DTensorPolicyWorker:
                                 input_lengths=mb["input_lengths"],
                                 return_attention_mask=False,
                             )
+                            attention_mask = None
                             flash_attn_kwargs = get_flash_attention_kwargs(
                                 mb["input_lengths"]
                             )
-
-                            attention_mask = None
 
                         elif self.cfg["packing_strategy"] == "vector":
                             input_ids = mb.get("input_ids").cuda()

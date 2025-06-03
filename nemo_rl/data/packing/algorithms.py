@@ -199,6 +199,10 @@ class ConcatenativePacker(SequencePacker):
     ... {"bins": [ [0, 1, 2], [3, 4, 5], [6], [7] ]}
     """
 
+    # Global class variable to limit the number of sequences packed in a unit
+    # -1 disables this limit
+    max_sequences_per_bin = -1  # TODO(ahmadki): debug option, del me
+
     def _pack_implementation(self, sequence_lengths: List[int]) -> List[List[int]]:
         """Pack sequences using the Concatenative algorithm.
 
@@ -217,8 +221,15 @@ class ConcatenativePacker(SequencePacker):
         current_length = 0  # Current length of sequences in the bin
 
         for i, length in enumerate(sequence_lengths):
-            # If adding this sequence would exceed bin capacity, start a new bin
-            if current_length + length > self.bin_capacity:
+            # Check if adding this sequence would exceed bin capacity or sequence limit
+            exceeds_capacity = current_length + length > self.bin_capacity
+            exceeds_sequence_limit = (
+                self.max_sequences_per_bin != -1
+                and len(current_bin) >= self.max_sequences_per_bin
+            )
+
+            # If adding this sequence would exceed constraints, start a new bin
+            if exceeds_capacity or exceeds_sequence_limit:
                 if current_bin:  # Only add the bin if it's not empty
                     bins.append(current_bin)
                 current_bin = [i]
