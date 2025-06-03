@@ -71,6 +71,7 @@ def generate_responses(
     for output_ids, input_length, total_length in zip(
         generation_outputs["output_ids"], input_lengths, unpadded_sequence_lengths
     ):
+        # total_length = min(total_length, input_length + 20)
         generated_ids.append(output_ids[input_length:total_length])
 
     generated_texts = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
@@ -79,6 +80,7 @@ def generate_responses(
     for i, (text, input_length, total_length) in enumerate(
         zip(generated_texts, input_lengths, unpadded_sequence_lengths)
     ):
+        # total_length = min(total_length, input_length + 20)
         message = {
             "role": "assistant",
             "content": text,

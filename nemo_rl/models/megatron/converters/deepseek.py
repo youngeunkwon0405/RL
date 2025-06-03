@@ -70,6 +70,7 @@ def get_export_mapping(source, source_config):
         mapping.update(
             {
                 "decoder.layers.*.mlp.router.expert_bias": "model.layers.*.mlp.gate.e_score_correction_bias",
+                # "decoder.layers.*.mlp.router.expert_bias": "model.layers.*.mlp.experts.e_score_correction_bias",
             }
         )
     return mapping

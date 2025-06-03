@@ -23,7 +23,7 @@ dependencies = [
     "setuptools",
     "torch==2.7.0",
     "psutil",
-    "flash-attn==2.7.3",
+    # "flash-attn==2.7.3",
     "colored==2.2.3",
     "ray[default]==2.46.0",
     "transformers>=4.51.0",
@@ -38,6 +38,8 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "tiktoken",
+    "blobfile",
 ]
 
 [project.optional-dependencies]
@@ -105,7 +107,8 @@ members = [
 
 [tool.uv]
 # Currently, TE, flash-attn must be built with no build-isolation b/c it requires torch
-no-build-isolation-package = ["transformer-engine", "flash-attn"]
+# no-build-isolation-package = ["transformer-engine", "flash-attn"]
+no-build-isolation-package = ["transformer-engine"]
 # Always apply the build group since dependencies like TE/mcore/nemo-run require build dependencies
 # and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
 # avoid including these in the default dependency set, but for now it's required.
@@ -116,10 +119,10 @@ default-groups = ["dev", "build"]
 #  --link-mode=symlink (fastest option when uv cache and venv on different file-system; caveat: venv is brittle since it depends on the environment/container)
 link-mode = "copy"
 
-[[tool.uv.dependency-metadata]]
-name = "flash-attn"
-version = "2.7.3"
-requires-dist = ["torch", "einops", "setuptools", "psutil"]
+# [[tool.uv.dependency-metadata]]
+# name = "flash-attn"
+# version = "2.7.3"
+# requires-dist = ["torch", "einops", "setuptools", "psutil"]
 
 [tool.black]
 line-length = 120
