@@ -485,8 +485,14 @@ def _parallelize_model(
             layer, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
         )
 
+    # do not reshard after forward for root model
+    # because its parameters will be used in backward immediately
     return fully_shard(
-        model, mesh=dp_mesh, mp_policy=mp_policy, offload_policy=offload_policy
+        model,
+        mesh=dp_mesh,
+        mp_policy=mp_policy,
+        offload_policy=offload_policy,
+        reshard_after_forward=False,
     )
 
 
