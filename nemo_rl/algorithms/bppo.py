@@ -459,6 +459,7 @@ def bppo_train(
                 repeated_batch = repeated_batch.select_indices(bottom_percentile_indices)
                 baseline = baseline[bottom_percentile_indices]
                 std = std[bottom_percentile_indices]
+                rewards_log = rewards.clone()
                 rewards = rewards[bottom_percentile_indices]
 
                 advantages = (rewards - baseline).unsqueeze(-1)
@@ -598,7 +599,7 @@ def bppo_train(
         # Logging
         # Log training data
         log_data = {"content": flat_messages["content"]}
-        log_data["rewards"] = rewards.tolist()
+        log_data["rewards"] = rewards_log.tolist()
         log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
