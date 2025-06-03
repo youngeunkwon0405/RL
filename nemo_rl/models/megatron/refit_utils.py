@@ -89,7 +89,7 @@ def get_tp_dim(model, param_name, named_modules_dict):
         return None
 
 
-def get_global_rank_helper(
+def find_global_rank_that_has_param(
     ep_rank,
     pp_rank,
     ep_group, ## ep group that this rank belongs to
@@ -127,7 +127,6 @@ def get_global_rank_helper(
             return s, "ep"
 
     ## final case is that we need to get the param by first doing a pp gather, then an ep gather
-    global_ranks_that_have_param_after_ep_gather = set()
     for ep_id in ep_group:
         if ep_id == current_rank:
             continue
@@ -137,7 +136,7 @@ def get_global_rank_helper(
             ## will have the param after pp gather
             ## so the current rank will get the param after doing an ep gather
             ## following the pp gather
-            if ep_id in pp_ids and len(pp_intersection) > 0:
+            if len(pp_intersection) > 0 and ep_id in pp_ids:
                 return ep_id, "ep"
 
 
@@ -212,7 +211,7 @@ def get_global_param_key_to_local_key_map(
                 #    or pp_global_rank_ids[pp_rank] < union_global_map[gk][0]
                 #):
                 if gk not in union_global_map:
-                    global_rank, pp_or_ep_gather = get_global_rank_helper(
+                    global_rank, pp_or_ep_gather = find_global_rank_that_has_param(
                         ep_rank,
                         pp_rank,
                         ep_global_rank_ids,
