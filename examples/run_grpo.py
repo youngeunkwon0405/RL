@@ -48,6 +48,7 @@ def parse_args():
 
 def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     print("\n▶ Setting up data...")
+    val_ds = None
 
     train_ds = JsonlinesDataset(
         data_config["train"]["jsonl_path"],
@@ -56,13 +57,15 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
         max_seq_length=data_config["max_input_seq_length"],
         filter_long_samples=data_config["train"]["filter_long_samples"],
     )
-    val_ds = JsonlinesDataset(
-        data_config["val"]["jsonl_path"],
-        data_config["val"]["seed"],
-        tokenizer,
-        max_seq_length=data_config["max_input_seq_length"],
-        filter_long_samples=data_config["val"]["filter_long_samples"],
-    )
+
+    if "val" in data_config:
+        val_ds = JsonlinesDataset(
+            data_config["val"]["jsonl_path"],
+            data_config["val"]["seed"],
+            tokenizer,
+            max_seq_length=data_config["max_input_seq_length"],
+            filter_long_samples=data_config["val"]["filter_long_samples"],
+        )
 
     task_to_env = {}
 

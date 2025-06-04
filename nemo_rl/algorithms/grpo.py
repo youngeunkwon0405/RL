@@ -409,7 +409,7 @@ def grpo_train(
             POLICY_GENERATION_STALE = False
         else:
             policy_generation.prepare_for_generation()
-        val_metrics, validation_timings = validate(
+        val_metrics, validation_timings, _ = validate(
             policy_generation,
             val_dataloader,
             tokenizer,
@@ -646,7 +646,7 @@ def grpo_train(
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
-                val_metrics, validation_timings = validate(
+                val_metrics, validation_timings, _ = validate(
                     policy_generation,
                     val_dataloader,
                     tokenizer,
@@ -748,7 +748,9 @@ def grpo_train(
             break
 
         if time_limit_reached:
-            print(f"Time limit reached of {master_config['grpo']['time_limit']}, stopping training")
+            print(
+                f"Time limit reached of {master_config['grpo']['time_limit']}, stopping training"
+            )
             break
 
 
@@ -759,7 +761,9 @@ def validate(
     val_task_to_env: Dict[str, EnvironmentInterface],
     step: int,
     master_config: MasterConfig,
-    logger: Logger,
+    logger: Optional[Logger] = None,
+    num_repeats: int = 1,
+    return_data_for_saving: bool = False,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -778,44 +782,72 @@ def validate(
             master_config["grpo"]["max_val_samples"]
             // master_config["grpo"]["val_batch_size"]
         )
-        for batch_idx, val_batch in enumerate(val_dataloader):
-            if batch_idx >= max_batches:
-                break
+        data_for_saving = []
 
-            # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
-            val_batch, gen_metrics = run_multi_turn_rollout(
-                policy_generation,
-                val_batch,
-                tokenizer,
-                val_task_to_env,
-                max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
-                greedy=False,
-            )
-            rewards = val_batch["total_reward"]
+        for repeat_idx in range(num_repeats):
+            for batch_idx, val_batch in enumerate(val_dataloader):
+                if batch_idx >= max_batches:
+                    break
 
-            total_rewards.extend(rewards.tolist())
-            total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
-
-            # Collect message logs for later display
-            to_env = get_keys_from_message_log(
-                val_batch["message_log"], ["role", "content"]
-            )
-            all_message_logs.extend(to_env)
-
-            if batch_idx == 0:
-                for interaction in val_batch["message_log"][0]:
-                    if interaction["role"] == "user":
-                        prompt = interaction["content"]
-                    elif interaction["role"] == "assistant":
-                        response = interaction["content"]
-                    else:
-                        environment = interaction["content"]
-
-                reward = val_batch["total_reward"][0].item()
-                table = logger.log_table_contents(
-                    step, prompt, response, environment, reward, "validation"
+                # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
+                val_batch, gen_metrics = run_multi_turn_rollout(
+                    policy_generation,
+                    val_batch,
+                    tokenizer,
+                    val_task_to_env,
+                    max_seq_len=master_config["policy"]["max_total_sequence_length"],
+                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                    greedy=False,
                 )
+
+                rewards = val_batch["total_reward"]
+
+                total_rewards.extend(rewards.tolist())
+                total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
+
+                # Collect message logs for later display
+                to_env = [
+                    get_keys_from_message_log(
+                        val_batch["message_log"][i], ["role", "content"]
+                    )
+                    for i in range(len(val_batch["message_log"]))
+                ]
+                all_message_logs.extend(to_env)
+
+                if return_data_for_saving:
+                    # Transpose val_batch from batch-first to sample-first
+                    batch_size = val_batch.size
+                    for i in range(batch_size):
+                        sample_dict = {}
+                        for k, v in val_batch.items():
+                            # hack to use the env stuff
+                            if k == "message_log":
+                                v = to_env
+
+                            val = v[i]
+                            if torch.is_tensor(val):
+                                val = val.item()
+                            sample_dict[k] = val
+
+                        sample_dict["eval_idx"] = f"{sample_dict['idx']}_{repeat_idx}"
+                        data_for_saving.append(sample_dict)
+
+                if batch_idx == 0:
+                    for interaction in val_batch["message_log"][0]:
+                        if interaction["role"] == "user":
+                            prompt = interaction["content"]
+                        elif interaction["role"] == "assistant":
+                            response = interaction["content"]
+                        else:
+                            environment = interaction["content"]
+
+                    reward = val_batch["total_reward"][0].item()
+
+                    table = None
+                    if logger is not None:
+                        table = logger.log_table_contents(
+                            step, prompt, response, environment, reward, "validation"
+                        )
 
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
@@ -860,4 +892,4 @@ def validate(
     # Make sure to reset the timer after validation
     timer.reset()
 
-    return val_metrics, timing_metrics
+    return val_metrics, timing_metrics, data_for_saving
