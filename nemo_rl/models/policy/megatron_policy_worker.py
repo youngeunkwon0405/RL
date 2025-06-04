@@ -327,11 +327,11 @@ class MegatronPolicyWorker:
             ),
             ddp_config=DistributedDataParallelConfig(
                 check_for_nan_in_grad=True,
-                grad_reduce_in_fp32=True,
-                overlap_grad_reduce=True,
-                overlap_param_gather=True,
-                average_in_collective=True,
-                use_distributed_optimizer=True,
+                grad_reduce_in_fp32=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["grad_reduce_in_fp32"],
+                overlap_grad_reduce=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_grad_reduce"],
+                overlap_param_gather=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_param_gather"],
+                average_in_collective=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["average_in_collective"],
+                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"]["use_distributed_optimizer"],
             ),
             scheduler_config=SchedulerConfig(
                 **self.cfg["megatron_cfg"]["scheduler"],
@@ -413,6 +413,12 @@ class MegatronPolicyWorker:
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
         self._held_gather_buffer = None
+    
+    def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
+        if self.cfg["megatron_cfg"]["use_torch_cuda_expandable_segments"]:
+            return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
+        else:
+            return None, None, None
 
     def is_alive(self):
         return True
@@ -459,9 +465,18 @@ class MegatronPolicyWorker:
             self.model.train()
 
         with ctx:
+            # dim 1 is always assumed to be the sequence dim, sanity check this here
+            sequence_dim = 1
+            seq_dim_size = data.get("input_ids").shape[sequence_dim]
+            for k, v in data.items():
+                if torch.is_tensor(v) and len(v.shape) > 1:
+                    assert v.shape[sequence_dim] == seq_dim_size, (
+                        f"Dim 1 must be the sequence dim, expected dim 1={seq_dim_size} but got shape {v.shape}"
+                    )
+
             forward_step = partial(forward_step_arbitrary_loss, loss_fn=loss_fn)
             all_mb_metrics = []
-            for gb_start in range(0, dataset_size, local_gbs):
+            for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
                 num_microbatches = local_gbs // mbs
                 global_batch = data.slice(gb_start, gb_start + local_gbs)
 
@@ -495,7 +510,13 @@ class MegatronPolicyWorker:
                         "token_mask must be present in the data when using token-level loss"
                     )
 
-                data_iterator = global_batch.make_microbatch_iterator(mbs)
+                batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
+                if self.cfg["dynamic_batching"]["enabled"]:
+                    data_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
+                    data_iterator_len = batch.get_microbatch_iterator_dynamic_shapes_len()
+                else:
+                    data_iterator = batch.make_microbatch_iterator(mbs)
+                    data_iterator_len = num_microbatches
 
                 rerun_state_machine = get_rerun_state_machine()
                 while rerun_state_machine.should_run_forward_backward(data_iterator):
@@ -514,14 +535,10 @@ class MegatronPolicyWorker:
                         ),
                         data_iterator=data_iterator,
                         model=self.model,
-                        num_microbatches=num_microbatches,
-                        seq_length=self.cfg[
-                            "max_total_sequence_length"
-                        ],  # model_config.seq_length,
+                        num_microbatches=data_iterator_len,
+                        seq_length=seq_dim_size,
                         micro_batch_size=self.cfg["train_micro_batch_size"],
-                        decoder_seq_length=self.cfg[
-                            "max_total_sequence_length"
-                        ],  # model_config.seq_length,
+                        decoder_seq_length=seq_dim_size,
                         forward_only=False,
                     )
 
@@ -642,7 +659,16 @@ class MegatronPolicyWorker:
             if micro_batch_size is not None
             else self.cfg["logprob_batch_size"]
         )
-        all_log_probs = []
+
+        # dim 1 is always assumed to be the sequence dim, sanity check this here
+        sequence_dim = 1
+        seq_dim_size = data.get("input_ids").shape[sequence_dim]
+        for k, v in data.items():
+            if torch.is_tensor(v) and len(v.shape) > 1:
+                assert v.shape[sequence_dim] == seq_dim_size, (
+                    f"Dim 1 must be the sequence dim, expected dim 1={seq_dim_size} but got shape {v.shape}"
+                )
+
         self.model.eval()
 
         pp_rank = get_pipeline_model_parallel_rank()
@@ -678,20 +704,37 @@ class MegatronPolicyWorker:
 
             return output_tensor, collection_fn
 
+        if self.cfg["dynamic_batching"]["enabled"]:
+            mb_iterator = data.make_microbatch_iterator_with_dynamic_shapes()
+            data_iterator_len = data.get_microbatch_iterator_dynamic_shapes_len()
+        else:
+            mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
+            data_iterator_len = max(1, data.size // logprob_batch_size)
+
+
         forward_backward_func = get_forward_backward_func()
         list_of_logprobs = forward_backward_func(
             forward_step_func=forward_step_fn,
-            data_iterator=data.make_microbatch_iterator(logprob_batch_size),
+            data_iterator=mb_iterator,
             model=self.model,
-            num_microbatches=max(1, data.size // logprob_batch_size),
-            seq_length=self.cfg["max_total_sequence_length"],
+            num_microbatches=data_iterator_len,
+            seq_length=seq_dim_size,
             micro_batch_size=logprob_batch_size,
-            decoder_seq_length=self.cfg["max_total_sequence_length"],
+            decoder_seq_length=seq_dim_size,
             forward_only=True,
         )
         if is_pipeline_last_stage(ignore_virtual=True):
+            all_log_probs_padded = []
             all_logprobs = [l["logprobs"] for l in list_of_logprobs]
-            logprobs = torch.cat(all_logprobs, dim=0)
+            for lp in all_logprobs:
+                padding_needed = seq_dim_size - lp.shape[1]
+                if padding_needed > 0:
+                    lp = torch.nn.functional.pad(
+                        lp, (0, padding_needed), mode="constant", value=0.0
+                    )
+                all_log_probs_padded.append(lp)
+
+            logprobs = torch.cat(all_log_probs_padded, dim=0)
             # broadcast logprobs to first pp rank
             broadcast_tensor(logprobs, torch.distributed.get_rank(), pp_grp)
         else:

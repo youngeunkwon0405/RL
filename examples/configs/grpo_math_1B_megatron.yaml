@@ -63,6 +63,7 @@ policy:
 
   megatron_cfg:
     enabled: true
+    use_torch_cuda_expandable_segments: true
     empty_unused_memory_level: 1
     converter_type: "Qwen2ForCausalLM"
     tensor_model_parallel_size: 1
@@ -101,6 +102,12 @@ policy:
       lr_decay_iters: null
       lr_warmup_iters: 50
       lr_warmup_init: 5.0e-7
+    
+    distributed_data_parallel_config:
+      grad_reduce_in_fp32: false
+      overlap_grad_reduce: true
+      overlap_param_gather: true
+      average_in_collective: true
 
   generation:
     backend: "vllm"

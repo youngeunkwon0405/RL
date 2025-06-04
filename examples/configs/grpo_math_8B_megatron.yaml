@@ -30,7 +30,7 @@ policy:
     enabled: true
     empty_unused_memory_level: 1
     converter_type: "LlamaForCausalLM"
-    tensor_model_parallel_size: 2
+    tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
     context_parallel_size: 1
     pipeline_dtype: ${policy.precision}
