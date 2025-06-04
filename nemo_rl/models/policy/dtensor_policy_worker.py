@@ -103,7 +103,14 @@ def get_cpu_state_dict(
 
 
 @ray.remote(
-    runtime_env={"env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}}
+    runtime_env={
+        "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"},
+        "nsight": {
+            "t": "cuda,cudnn,cublas,nvtx",
+            "o": "'dtensor_process_%p'",
+            "stop-on-exit": "true",
+        },
+    }
 )
 class DTensorPolicyWorker:
     def __repr__(self) -> str:

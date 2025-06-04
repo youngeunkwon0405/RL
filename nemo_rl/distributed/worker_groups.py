@@ -143,6 +143,23 @@ class RayWorkerBuilder:
             worker_class = getattr(module, class_name)
             worker_kwargs = dict(self.init_kwargs)
             options: dict[str, Any] = deepcopy(extra_options)
+            # Maps it to _nsight
+            if worker_class._default_options.get("runtime_env", {}).get(
+                "_nsight", None
+            ):
+                options["runtime_env"]["nsight"] = worker_class._default_options[
+                    "runtime_env"
+                ]["_nsight"]
+                print(f"DEBUG options: {options['runtime_env']['nsight']=}")
+            # Make sure we propagate env vars
+            if worker_class._default_options.get("runtime_env", {}).get(
+                "env_vars", None
+            ):
+                for k, v in worker_class._default_options["runtime_env"][
+                    "env_vars"
+                ].items():
+                    options["runtime_env"]["env_vars"][k] = v
+            # TODO: deal with the other default_options
 
             # Use the worker's configuration interface if available
             if hasattr(worker_class, "configure_worker"):
