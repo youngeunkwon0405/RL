@@ -20,6 +20,7 @@ import subprocess
 from typing import Any, Dict, List, Tuple, Optional
 import time
 import yaml
+import sys # Added for countdown timer
 
 
 # Environment variables
@@ -352,8 +353,14 @@ def main():
             dry_run=args.dry,
         )
 
-        if args.sleep:
-            time.sleep(args.sleep)
+        if args.sleep and i < len(param_combinations) - 1: # Don't sleep after the last job
+            print(f"Sleeping for {args.sleep} seconds before the next job...")
+            for remaining in range(args.sleep, 0, -1):
+                sys.stdout.write(f"\rTime remaining: {remaining:2d} seconds")
+                sys.stdout.flush()
+                time.sleep(1)
+            sys.stdout.write("\rDone sleeping.                           \n") # Clear the countdown line
+            sys.stdout.flush()
 
 
 if __name__ == "__main__":
