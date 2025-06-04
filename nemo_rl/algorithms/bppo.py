@@ -453,6 +453,7 @@ def bppo_train(
                 bottom_percentile_indices = get_bottom_percentile_indices(
                     baseline,
                     master_config["bppo"]["bottom_percentile_to_keep"],
+                    master_config["bppo"]["bottom_percentile_exclude_zeros"],
                 )
                 repeated_batch = repeated_batch.select_indices(bottom_percentile_indices)
                 baseline = baseline[bottom_percentile_indices]

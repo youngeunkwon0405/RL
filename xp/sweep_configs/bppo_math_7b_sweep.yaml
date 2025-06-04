@@ -17,5 +17,6 @@ config_path: "examples/configs/bppo_math_7B.yaml"
 policy.model_name: ["Qwen/Qwen2.5-7B"]
 
 bppo.bottom_percentile_to_keep: [0.25, 0.5, 0.75, 1.0]
+bppo.bottom_percentile_exclude_zeros: [true, false]
 
 # ------------------------------------------------------------

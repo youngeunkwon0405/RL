@@ -1,6 +1,7 @@
 # BPPO Algorithm Configuration
 bppo:
   bottom_percentile_to_keep: 0.2
+  bottom_percentile_exclude_zeros: false
   num_prompts_per_step: 32
   num_generations_per_prompt: 16
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
