@@ -92,7 +92,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             layout=np.arange(cluster.world_size()).reshape(
                 pp_size,  # PP
                 -1,  # DP
-                tp_size,  # TP
+                tp_size * ep_size,  # TP
             ),
             names=["pipeline_parallel", "data_parallel", "tensor_parallel"],
         )

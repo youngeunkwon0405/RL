@@ -78,16 +78,22 @@ def parse_args():
         help="Path to the model checkpoint"
     )
     parser.add_argument(
-        "--megatron_tp", 
+        "--tp_size", 
         type=int, 
         default=2,
-        help="Tensor parallelism for Megatron"
+        help="Tensor parallelism size (TP) for Megatron"
     )
     parser.add_argument(
-        "--vllm_tp", 
+        "--ep_size", 
         type=int, 
-        default=2,
-        help="Tensor parallelism for vLLM"
+        default=1,
+        help="Expert parallelism size (EP) for Megatron"
+    )
+    parser.add_argument(
+        "--pp_size", 
+        type=int, 
+        default=1,
+        help="Pipeline parallelism size (PP) for Megatron"
     )
     parser.add_argument(
         "--max_new_tokens", 
@@ -151,7 +157,7 @@ def setup_configs(args, tokenizer):
         "fsdp_offload_enabled": False,
         "max_grad_norm": 1.0,
         "refit_buffer_size_gb": args.refit_buffer_size_gb,
-        "make_sequence_length_divisible_by": args.megatron_tp,
+        "make_sequence_length_divisible_by": args.tp_size,
         "optimizer": {
             "type": "adam",
             "kwargs": {
@@ -173,11 +179,11 @@ def setup_configs(args, tokenizer):
             "converter_type": "Llama4ForCausalLM",
             "enabled": True,
             "empty_unused_memory_level": 1,
-            "tensor_model_parallel_size": args.megatron_tp,
+            "tensor_model_parallel_size": args.tp_size,
             "sequence_parallel": False,
-            "expert_tensor_parallel_size": args.megatron_tp,
-            "expert_model_parallel_size": 1,
-            "pipeline_model_parallel_size": 1,
+            "expert_tensor_parallel_size": args.tp_size,
+            "expert_model_parallel_size": args.ep_size,
+            "pipeline_model_parallel_size": args.pp_size,
             "context_parallel_size": 1,
             "pipeline_dtype": "bfloat16",
             "optimizer": {
@@ -212,6 +218,7 @@ def setup_configs(args, tokenizer):
     }
 
     # vLLM Configuration
+    vllm_tp = args.tp_size * args.ep_size * args.pp_size
     vllm_config = {
         "backend": "vllm",
         "model_name": args.model_name,
@@ -226,7 +233,7 @@ def setup_configs(args, tokenizer):
         "stop_token_ids": None,
         "stop_strings": None,
         "vllm_cfg": {
-            "tensor_parallel_size": args.vllm_tp,
+            "tensor_parallel_size": vllm_tp,
             "gpu_memory_utilization": 0.6,
             "max_model_len": args.max_sequence_length,
             "precision": "bfloat16",
@@ -252,12 +259,13 @@ def setup_clusters_and_policies(args, megatron_config, vllm_config, tokenizer):
     Returns:
         tuple: (megatron_cluster, policy, vllm_inference_policy)
     """
-    print(f"Setting up Megatron Cluster with TP={args.megatron_tp}")
+    gpus_per_node = args.tp_size * args.ep_size * args.pp_size
+    print(f"Setting up Megatron Cluster with TP={gpus_per_node}")
     megatron_cluster = RayVirtualCluster(
         name="megatron_cluster",
-        bundle_ct_per_node_list=[args.megatron_tp],
+        bundle_ct_per_node_list=[gpus_per_node],
         use_gpus=True,
-        num_gpus_per_node=args.megatron_tp,
+        num_gpus_per_node=gpus_per_node,
         max_colocated_worker_groups=2,
     )
 
