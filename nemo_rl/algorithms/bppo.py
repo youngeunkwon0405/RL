@@ -452,8 +452,9 @@ def bppo_train(
                 print("▶ Keeping bottom percentile responses...")
                 bottom_percentile_indices = get_bottom_percentile_indices(
                     baseline,
-                    master_config["bppo"]["bottom_percentile_to_keep"],
-                    master_config["bppo"]["bottom_percentile_exclude_zeros"],
+                    percentile=master_config["bppo"]["bottom_percentile_to_keep"],
+                    exclude_zeros=master_config["bppo"]["bottom_percentile_exclude_zeros"],
+                    size=master_config["bppo"]["num_prompts_per_step"] * master_config["bppo"]["num_generations_per_prompt"],
                 )
                 repeated_batch = repeated_batch.select_indices(bottom_percentile_indices)
                 baseline = baseline[bottom_percentile_indices]

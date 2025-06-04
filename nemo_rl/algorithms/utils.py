@@ -114,6 +114,7 @@ def get_bottom_percentile_indices(
     baselines: torch.Tensor,
     percentile: float,
     exclude_zeros: bool = False,
+    size: int = None,
 ) -> list[int]:
     """Get the indices of the bottom percentile responses.
     
@@ -121,6 +122,7 @@ def get_bottom_percentile_indices(
         baselines: Tensor of baseline values
         percentile: Fraction of lowest values to select (0.0 to 1.0)
         exclude_zeros: If True, exclude zero baselines from consideration
+        size: If exclude_zeros is True, we make sure the length of the returned list is at least `size`, by including some zeros if necessary
     
     Returns:
         List of indices corresponding to the bottom percentile responses
@@ -128,10 +130,15 @@ def get_bottom_percentile_indices(
     if exclude_zeros:
         # Filter out zero baselines
         non_zero_mask = baselines != 0.0
+        zero_mask = baselines == 0.0
         non_zero_indices = torch.where(non_zero_mask)[0]
+        zero_indices = torch.where(zero_mask)[0]
         
         if len(non_zero_indices) == 0:
-            # If all baselines are zero, return empty list
+            # If all baselines are zero
+            if size is not None and size > 0:
+                # Return up to 'size' zero indices if requested
+                return zero_indices[:size].tolist()
             return []
         
         # Get non-zero baselines and their corresponding indices
@@ -139,17 +146,38 @@ def get_bottom_percentile_indices(
         
         # Sort non-zero baselines and get bottom percentile
         num_bottom = int(len(filtered_baselines) * percentile)
+        # Ensure at least one item is selected if percentile is non-zero and list is non-empty
+        if percentile > 0.0 and num_bottom == 0 and len(filtered_baselines) > 0:
+            num_bottom = 1
+            
         if num_bottom == 0:
+            if size is not None and size > 0:
+                 # If no non-zero elements in percentile, pad with zero_indices
+                return zero_indices[:size].tolist()
             return []
         
         # Get indices of bottom percentile from non-zero baselines
         sorted_indices = filtered_baselines.argsort()[:num_bottom]
         
         # Map back to original indices
-        return non_zero_indices[sorted_indices].tolist()
+        result_indices = non_zero_indices[sorted_indices].tolist()
+
+        # If length is specified and current result is shorter, pad with zero_indices
+        if size is not None and len(result_indices) < size:
+            num_to_pad = size - len(result_indices)
+            # Ensure we don't add already included zero indices if somehow baselines had explicit 0.0s
+            # This is mostly a safeguard; zero_indices should not overlap with non_zero_indices.
+            padding_indices = [idx for idx in zero_indices.tolist() if idx not in result_indices]
+            result_indices.extend(padding_indices[:num_to_pad])
+            
+        return result_indices
     else:
         # Original behavior: include all baselines
-        return baselines.argsort()[:int(len(baselines) * percentile)].tolist()
+        num_total_bottom = int(len(baselines) * percentile)
+        # Ensure at least one item is selected if percentile is non-zero and list is non-empty
+        if percentile > 0.0 and num_total_bottom == 0 and len(baselines) > 0:
+            num_total_bottom = 1
+        return baselines.argsort()[:num_total_bottom].tolist()
 
 
 def surpress_user_warnings(f):  # type: ignore
