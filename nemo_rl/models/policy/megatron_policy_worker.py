@@ -415,10 +415,7 @@ class MegatronPolicyWorker:
         self._held_gather_buffer = None
     
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
-        if self.cfg["megatron_cfg"]["use_torch_cuda_expandable_segments"]:
-            return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
-        else:
-            return None, None, None
+        return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 
     def is_alive(self):
         return True
