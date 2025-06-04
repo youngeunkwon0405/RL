@@ -1,5 +1,5 @@
 #ARG BASE_IMAGE=nvcr.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
-ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:25.03-cuda12.8-runtime-ubuntu24.04
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:25.01-cuda12.8-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # It is more convenient for users to run as root
