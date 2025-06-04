@@ -161,7 +161,7 @@ def _create_ray_virtual_cluster_for_test(name: str) -> RayVirtualCluster:
 
 @pytest.fixture(scope="function")
 def policy_cluster_separate():
-    """Create a virtual cluster for the HfPolicy, using 1 GPU."""
+    """Create a virtual cluster for the Policy, using 1 GPU."""
     cluster = _create_ray_virtual_cluster_for_test("vllm-test-policy-cluster-separate")
     yield cluster
     try:
@@ -305,13 +305,13 @@ async def test_vllm_policy_generation_async(
         vllm_config["vllm_cfg"]["tensor_parallel_size"] = tensor_parallel_size
         vllm_config["vllm_cfg"]["pipeline_parallel_size"] = pipeline_parallel_size
         hf_config = get_basic_hf_test_config(enable_dtensor=True)
-        from nemo_rl.models.policy.hf_policy import HfPolicy
+        from nemo_rl.models.policy.lm_policy import Policy
 
         async_policy = VllmGeneration(cluster, vllm_config)
         async_policy.finish_generation()
         print("creating hf policy...")
 
-        hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+        hf_policy = Policy(cluster, hf_config, tokenizer)
 
         refit_policy_generation(
             hf_policy, async_policy, hf_config["refit_buffer_size_gb"]
@@ -1064,7 +1064,7 @@ def test_vllm_refit_non_collocated_handles_update_failure(
             "Test requires at least two GPUs to run policies on separate clusters."
         )
 
-    # Create HfPolicy on its own cluster
+    # Create Policy on its own cluster
     hf_config = get_basic_hf_test_config(enable_dtensor=True)
     hf_config["dtensor_cfg"]["tensor_parallel_size"] = 1
     hf_policy = Policy(policy_cluster_separate, hf_config, tokenizer)
@@ -1105,7 +1105,7 @@ def test_vllm_refit_non_collocated_handles_update_failure(
             try:
                 hf_policy_instance.shutdown()
             except Exception as e:
-                print(f"Error during HfPolicy cleanup: {e}")
+                print(f"Error during Policy cleanup: {e}")
         if vllm_policy_instance:
             try:
                 vllm_policy_instance.shutdown()

@@ -67,7 +67,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         pp_size = 1
 
         worker_builder_cls: str
-        if config["training_backend"] == "hf":
+        training_backend = None
+        if not config.get("megatron_cfg", {}).get("enabled", False): # Huggingface backend
             if config["dtensor_cfg"]["enabled"]:
                 worker_builder_cls = (
                     "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
@@ -77,14 +78,16 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 worker_builder_cls = (
                     "nemo_rl.models.policy.fsdp1_policy_worker.FSDP1PolicyWorker"
                 )
-        elif config["training_backend"] == "megatron":
+            training_backend = "hf"
+        elif config["megatron_cfg"]["enabled"]: # Megatron backend
             worker_builder_cls = (
                 "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker"
             )
             tp_size = config["megatron_cfg"]["tensor_model_parallel_size"]
             pp_size = config["megatron_cfg"]["pipeline_model_parallel_size"]
+            training_backend = "megatron"
         else:
-            raise ValueError(f"Invalid training backend: {config['training_backend']}")
+            raise ValueError(f"Invalid training backend, unsolvable. Enable megatron_cfg.enabled or use hf.")
 
         self.sharding_annotations = NamedSharding(
             layout=np.arange(cluster.world_size()).reshape(
@@ -120,7 +123,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         if config["dynamic_batching"]["enabled"]:
             assert (
                 config["dtensor_cfg"]["enabled"]
-                or config["training_backend"] == "megatron"
+                or training_backend == "megatron"
             ), "Dynamic batch is only supported for DTensor policy or Megatron policy."
             self.use_dynamic_batches = True
             self.dynamic_batching_args: DynamicBatchingArgs = {
