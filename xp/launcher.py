@@ -18,7 +18,7 @@ import itertools
 import os
 import subprocess
 from typing import Any, Dict, List, Tuple, Optional
-
+import time
 import yaml
 
 
@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument("--mounts", type=str, default=MOUNTS, help="Mounts to use")
     parser.add_argument("--jobname", type=str, default=None, help="Base name for the job")
     parser.add_argument("--dry", action="store_true", help="Print commands without executing them")
+    parser.add_argument("--sleep", type=int, default=0, help="Sleep time in seconds between jobs")
     args, extra_args = parser.parse_known_args()
     return args, extra_args
 
@@ -350,6 +351,9 @@ def main():
             job_id=job_id,
             dry_run=args.dry,
         )
+
+        if args.sleep:
+            time.sleep(args.sleep)
 
 
 if __name__ == "__main__":
