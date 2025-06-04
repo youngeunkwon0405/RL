@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=nvcr.io/nvidia/pytorch:25.05-py3
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:25.05-cuda12.9-runtime-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # It is more convenient for users to run as root
