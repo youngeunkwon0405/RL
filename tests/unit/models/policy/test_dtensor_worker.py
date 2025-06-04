@@ -30,12 +30,7 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.policy import PolicyConfig
-<<<<<<< HEAD
-from nemo_rl.models.policy.dtensor_policy_worker import DTensorPolicyWorker
 from nemo_rl.models.policy.lm_policy import Policy
-=======
-from nemo_rl.models.policy.hf_policy import HfPolicy
->>>>>>> origin
 from tests.unit.conftest import TEST_ASSETS
 from tests.unit.test_utils import SimpleLoss
 
@@ -481,7 +476,7 @@ def test_dtensor_tp_and_tied_model_with_custom_parallel_plan(two_gpu_virtual_clu
     )
     tokenizer = get_tokenizer(config["tokenizer"])
 
-    policy = HfPolicy(
+    policy = Policy(
         tokenizer=tokenizer,
         config=config,
         init_optimizer=False,
