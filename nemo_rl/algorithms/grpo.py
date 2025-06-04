@@ -13,6 +13,9 @@
 # limitations under the License.
 import json
 import os
+import time
+from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, TypedDict
 
@@ -58,9 +61,37 @@ from nemo_rl.utils.logger import (
 )
 from nemo_rl.utils.timer import Timer
 
+
 # ===============================================================================
 # Configuration
 # ===============================================================================
+@dataclass
+class TimeLimitTimer:
+    """Timer to tell us when the time limit is reached"""
+
+    duration: Optional[str]
+
+    def __post_init__(self):
+        self._duration = float("inf")
+
+        if self.duration is not None:
+            days, hours, mins, seconds = map(int, self.duration.strip().split(":"))
+            self._duration = timedelta(
+                days=days, hours=hours, minutes=mins, seconds=seconds
+            ).total_seconds()
+
+    def start_time(self):
+        self._start_time = time.monotonic()
+
+    def get_time_elapsed(self):
+        return time.monotonic() - self._start_time
+
+    def get_time_remaining(self):
+        return self._duration - self.get_time_elapsed()
+
+    def is_finished(self):
+        time_left = self.get_time_remaining()
+        return time_left <= 0
 
 
 class GRPOConfig(TypedDict):
@@ -348,6 +379,9 @@ def grpo_train(
 ):
     """Run GRPO training algorithm."""
     timer = Timer()
+    time_limit_timer = TimeLimitTimer(duration=master_config["grpo"]["time_limit"])
+    time_limit_timer.start_time()
+
     NEED_REFIT = True
     # If policy_generation is None, use the policy as the generation interface (hf framework backend)
     if policy_generation is None:
@@ -595,10 +629,14 @@ def grpo_train(
 
                 print(f"Saved grad sparsity to {sparsity_file_path}")
 
+            time_limit_reached = time_limit_timer.is_finished()
             is_last_step = step + 1 == min(max_num_steps, len(dataloader))
-
             # Run validation if it's a validation step
-            if is_last_step or (val_period > 0 and (step + 1) % val_period == 0):
+            if (
+                is_last_step
+                or (val_period > 0 and (step + 1) % val_period == 0)
+                or time_limit_reached
+            ):
                 if NEED_REFIT and POLICY_GENERATION_STALE:
                     refit_policy_generation(
                         policy,
@@ -628,6 +666,7 @@ def grpo_train(
             if master_config["checkpointing"]["enabled"] and (
                 is_last_step
                 or (step + 1) % master_config["checkpointing"]["save_period"] == 0
+                or time_limit_reached
             ):  # +1 because step is 0-indexed
                 policy.prepare_for_training()
 
@@ -706,6 +745,10 @@ def grpo_train(
         optim_step += len(list_of_train_metrics)
 
         if step >= max_num_steps:
+            break
+
+        if time_limit_reached:
+            print(f"Time limit reached of {master_config['grpo']['time_limit']}, stopping training")
             break
 
 
