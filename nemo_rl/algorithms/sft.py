@@ -29,7 +29,6 @@ from nemo_rl.algorithms.utils import set_seed
 from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import (
     AllTaskProcessedDataset,
-    PackableBatchedData,
     packed_rl_collate_fn,
     rl_collate_fn,
 )
@@ -460,7 +459,6 @@ def sft_train(
             #     f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['sft']['max_num_steps'])} {'=' * 25}"
             # )
             val_metrics, validation_timings = None, None
-            data = batch.data if isinstance(batch, PackableBatchedData) else batch
 
             with timer.time("total_step_time"):
                 # Prepare batch and generate responses
@@ -472,19 +470,19 @@ def sft_train(
                 logging.debug(
                     "================================================================"
                 )
-                log_json("batch", data.get_dict())
+                log_json("batch", batch.get_dict())
 
                 with timer.time("data_processing"):
                     ## add loss mask based on role to every message
                     logging.debug("add loss mask based on role to every message")
                     add_loss_mask_to_message_log(
-                        data["message_log"],
+                        batch["message_log"],
                         roles_to_train_on=["assistant"],
                     )
 
                     logging.debug("batch message to flat")
                     cat_and_padded, input_lengths = batched_message_log_to_flat_message(
-                        data["message_log"],
+                        batch["message_log"],
                         pad_value_dict={"token_ids": tokenizer.pad_token_id},
                         make_sequence_length_divisible_by=master_config["policy"][
                             "make_sequence_length_divisible_by"
@@ -492,47 +490,33 @@ def sft_train(
                     )
 
                     logging.debug("creating train data dict")
-                    # # TODO(ahmadki): del me:
-                    # train_data: BatchedDataDict = BatchedDataDict(
-                    #     {
-                    #         "input_ids": cat_and_padded["token_ids"],
-                    #         "input_lengths": input_lengths,
-                    #         "token_mask": cat_and_padded["token_loss_mask"],
-                    #         "sample_mask": batch["loss_multiplier"],
-                    #     }
-                    # )
+                    train_data: BatchedDataDict = BatchedDataDict(
+                        {
+                            "input_ids": cat_and_padded["token_ids"],
+                            "input_lengths": input_lengths,
+                            "token_mask": cat_and_padded["token_loss_mask"],
+                            "sample_mask": batch["loss_multiplier"],
+                        }
+                    )
+                    train_data.packed_sequence_size = batch.packed_sequence_size
 
                     # Create the base train data dictionary
-                    train_data_dict = {
-                        "input_ids": cat_and_padded["token_ids"],
-                        "input_lengths": input_lengths,
-                        "token_mask": cat_and_padded["token_loss_mask"],
-                        "sample_mask": data["loss_multiplier"],
-                    }
+                    # # TODO(ahmadki): del me:
+                    # train_data_dict = {
+                    #     "input_ids": cat_and_padded["token_ids"],
+                    #     "input_lengths": input_lengths,
+                    #     "token_mask": cat_and_padded["token_loss_mask"],
+                    #     "sample_mask": batch["loss_multiplier"],
+                    # }
 
-                    # Add packed_lengths if packed sequence
-                    if isinstance(batch, PackableBatchedData):
-                        train_data_dict["sizes"] = batch.pack_sizes
+                    # # Create the BatchedDataDict
+                    # train_data: BatchedDataDict = BatchedDataDict(train_data_dict)
 
-                    # Create the BatchedDataDict
-                    train_data: BatchedDataDict = BatchedDataDict(train_data_dict)
-
-                    if isinstance(batch, PackableBatchedData):
-                        # FIXME(ahmadki)
-                        num_samples = 10
-                        num_tokens = 1000
-                        # num_samples = sum(
-                        #     len(x) for x in train_data_dict["packed_lengths"]
-                        # )
-                        # num_tokens = sum(
-                        #     sum(x) for x in train_data_dict["packed_lengths"]
-                        # )
-                    else:
-                        num_samples = len(train_data["input_ids"])
-                        num_tokens = sum(train_data["input_lengths"])
+                    num_samples = len(train_data["input_ids"])
+                    num_tokens = sum(train_data["input_lengths"])
 
                 logging.debug("batch after processing:")
-                log_json("batch", data.get_dict())
+                log_json("batch", batch.get_dict())
                 log_json("train_data", train_data.get_dict())
 
                 print("▶ Taking a training step...")
@@ -547,7 +531,7 @@ def sft_train(
                     "max_num_steps"
                 ] or (
                     current_epoch + 1 == max_num_epochs
-                    and current_step + 1 == len(train_dataloader)
+                    # and current_step + 1 == len(train_dataloader) # FIXME(ahmadki)
                 )
 
                 # Run validation if it's a validation step

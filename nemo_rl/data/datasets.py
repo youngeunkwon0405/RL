@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import logging
-from dataclasses import dataclass
-from typing import Any, List, Optional, Union
+from itertools import chain
+from typing import Any, Optional, Union
 
 import torch
 from datasets import Dataset
@@ -171,63 +171,25 @@ def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict[Any]:
     return output
 
 
-@dataclass
-class PackableBatchedData:
-    data: BatchedDataDict
-    pack_sizes: List[int]
-
-
-def group_PackableBatchedData(self):
-    pass
-
-
-def ungroup_PackableBatchedData(self):
-    pass
-
-
-def packed_rl_collate_fn(groups: List[List[DatumSpec]]) -> PackableBatchedData:
+def packed_rl_collate_fn(
+    packet_data_batch: list[list[DatumSpec]],
+) -> BatchedDataDict[Any]:
     """Collate function for packed RL training.
 
     This function handles packed data batches from PackedDataset.
     It reuses the logic from rl_collate_fn but adapts it for packed data.
     """
     # Create a list of flattened samples to pass to rl_collate_fn
-    flattened_dataums: List[DatumSpec] = []
-
-    for group in groups:
-        # Create a single "unpacked" sample that represents the packed group
-        group_message_log = []
-        for sample in group:
-            group_message_log.extend(sample["message_log"])
-
-        # Use minimum loss multiplier from all samples
-        min_loss_multiplier = min(sample["loss_multiplier"] for sample in group)
-
-        # Create a DatumSpec from this group
-        group_datum: DatumSpec = {
-            "message_log": group_message_log,
-            "length": sum([sample["length"] for sample in group]),
-            "loss_multiplier": min_loss_multiplier,
-            "extra_env_info": group[0]["extra_env_info"],
-            "task_name": group[0].get("task_name", None),
-            "idx": group[0]["idx"],
-            "stop_strings": group[0].get("stop_strings", None),
-            "__extra__": [sample.get("__extra__", None) for sample in group],
-        }
-
-        flattened_dataums.append(group_datum)
-
-    # Use the existing rl_collate_fn to process the unpacked samples
-    output: PackableBatchedData = PackableBatchedData(
-        data=rl_collate_fn(flattened_dataums),
-        pack_sizes=[len(group) for group in groups],
-    )
+    flattened_dataums: list[DatumSpec] = list(chain.from_iterable(packet_data_batch))
+    output = rl_collate_fn(flattened_dataums)
+    # Update the output to reflect the packed nature of the data
+    output.packed_sequence_size = [len(inner) for inner in packet_data_batch]
 
     logging.debug(
         "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
     )
     logging.debug("packed_rl_collate_fn")
-    log_json("data_batch", groups)
+    log_json("packet_data_batch", packet_data_batch)
     log_json("output", output)
     logging.debug(
         "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
