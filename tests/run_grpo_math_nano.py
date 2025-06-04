@@ -77,7 +77,7 @@ def strip_templating_from_problem_50(problem):
     return problem[:cut]
 
 class L1ExpectedAnswerLengthDataset(Dataset):
-    def __init__(self, dataset, metadata):
+    def __init__(self, dataset, metadata, shuffle_data=True):
         self.dataset = dataset
         #self.sorted_keys = sorted(self.metadata.keys())
         # the metadata keys are the original problems.  They may contain some templating.  We need to remove the temoplating
@@ -95,8 +95,13 @@ class L1ExpectedAnswerLengthDataset(Dataset):
                 self.found_idxs.append(idx)
             #assert p in self.metadata, f"Problem {p} not in metadata"
         print (f"problems not found in metadata: {count}")
-        #import pdb; pdb.set_trace()
+        # randomly sorting data
+        if shuffle_data:
+            import random
+            print (f"shuffling input data")
+            random.shuffle(self.found_idxs)
     def __len__(self):
+        import pdb; p = pdb.Pdb(); p.prompt="length of dataset"; pdb.set_trace()
         return len(self.found_idxs)
     
     def __getitem__(self, idx):

@@ -74,8 +74,8 @@ logger:
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "nir_nemorl_tests"
-    name: "grpo-math_8b_nano_4096_16_16_L1_20k_"     # 20k means that benchmark measurements done with context 20k tokens
-    id: "grpo-math_8b_nano_debug_4096_16_16_L1_20k_" # 20k means that benchmark measurements done with context 20k tokens
+    name: "grpo-math_8b_nano_8192_16_16_L1_20k_"     # 20k means that benchmark measurements done with context 20k tokens
+    id: "grpo-math_8b_nano_debug_819216_16_L1_20k_" # 20k means that benchmark measurements done with context 20k tokens
   tensorboard: {}
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)
@@ -83,7 +83,7 @@ logger:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_8b_nano_1node_4096_16_16_L1_20k"
+  checkpoint_dir: "results/grpo_8b_nano_1node_8192_16_16_L1_20k"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k:   # None to keep everything

@@ -12,7 +12,7 @@ generation:
   vllm_cfg:
     tensor_parallel_size: 1
     gpu_memory_utilization: 0.9
-    max_model_len: 20000 #2048
+    max_model_len: 24000 #2048
     #max_num_batched_tokens: 16
     seed: 9388
 tokenizer:
