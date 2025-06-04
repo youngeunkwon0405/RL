@@ -191,28 +191,6 @@ def get_attention_mask_for_packed_sequence(x, token_id, eos: bool = True):
 #     return torch.cat(tensor_stacked, dim=0)
 
 
-def unpack_logits(
-    logits: torch.Tensor, input_lengths: torch.Tensor
-) -> list[torch.Tensor]:
-    """Unpacks packed logits into a list of tensors based on original input_lengths.
-
-    Args:
-        logits (torch.Tensor): Packed logits of shape [1, total_seq_len, vocab_size]
-        input_lengths (torch.Tensor): Tensor of shape [batch] containing original lengths
-
-    Returns:
-        List[torch.Tensor]: List of [seq_len_i, vocab_size] tensors
-    """
-    logits = logits.squeeze(0)  # [total_seq_len, vocab_size]
-    unpacked = []
-    start = 0
-    for length in input_lengths:
-        end = start + length.item()
-        unpacked.append(logits[start:end])
-        start = end
-    return unpacked
-
-
 def _pack_microbatch(mb):
     # Build list of 1D position tensors
     max_seqlen = 2048
@@ -286,106 +264,59 @@ def _unpack_tensor(tensor, mb):
     return torch.cat(tensor_stacked, dim=0)
 
 
-def group_and_cat_tensors(
-    tensors: list[torch.Tensor], group_sizes: list[int], padding_value: int = 0
-) -> torch.Tensor:
-    """Groups and concatenates tensors according to group_sizes, then pads them to form a 2D tensor.
-
-    Args:
-        tensors: List of 1D tensors (of varying lengths).
-        group_sizes: List of integers, each indicating the number of tensors in the group.
-        padding_value: Value used to pad shorter sequences.
-
-    Returns:
-        A 2D tensor where each row is a padded concatenation of the grouped tensors.
-    """
-    grouped = []
-    index = 0
-    for size in group_sizes:
-        group = tensors[index : index + size]
-        concat = torch.cat(group)
-        grouped.append(concat)
-        index += size
-
-    # Compute the maximum length for padding
-    max_len = max(t.size(0) for t in grouped)
-
-    # Pad each tensor to max_len
-    padded = torch.stack(
-        [
-            torch.nn.functional.pad(t, (0, max_len - t.size(0)), value=padding_value)
-            for t in grouped
-        ]
-    )
-
-    return padded
-
-
 def pack_sequences(
     input_ids: torch.Tensor,
     input_lengths: torch.Tensor,
-    packed_sequence_size: list[int],
-    padding_value: int = 0,
     return_attention_mask: bool = True,
 ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """Packs variable-length sequences into a flat input for transformer models.
 
     Args:
-        input_ids (torch.Tensor): [num_sequences, max_seq_len]
-        input_lengths (torch.Tensor): [num_sequences] with actual lengths
-        packed_sequence_size (list[int]): how many sequences make up each packed row
-        padding_value (int): pad value for input_ids
-        return_attention_mask (bool): If True, returns per-row causal attention masks
+        input_ids (torch.Tensor): [batch_size, max_seq_len]
+        input_lengths (torch.Tensor): [batch_size] with actual lengths
+        return_attention_mask (bool): If True, returns block-diagonal causal attention mask
 
     Returns:
         Tuple:
-            input_ids_packed (torch.Tensor): [batch_size, max_seq_len]
-            position_ids_packed (torch.Tensor): [batch_size, max_seq_len]
-            attention_mask (Optional[torch.Tensor]): [batch_size, max_seq_len, max_seq_len] (bool) or None
+            input_ids_packed (torch.Tensor): [1, total_seq_len]
+            position_ids_packed (torch.Tensor): [1, total_seq_len]
+            attention_mask (Optional[torch.Tensor]): [1, total_seq_len, total_seq_len] (bool) or None
     """
     flat_input_ids = []
     position_ids = []
-    flat_lengths = []
-
     for i, length in enumerate(input_lengths):
         flat_input_ids.append(input_ids[i, :length])
         position_ids.append(torch.arange(length, dtype=torch.long))
-        flat_lengths.append(length)
 
-    # Group and pad
-    input_ids_packed = group_and_cat_tensors(
-        flat_input_ids, packed_sequence_size, padding_value
-    )
-    position_ids_packed = group_and_cat_tensors(position_ids, packed_sequence_size, 0)
+    flat_input_ids = torch.cat(flat_input_ids)
+    position_ids = torch.cat(position_ids)
+    total_seq_len = flat_input_ids.size(0)
 
-    # Compute max length
-    batch_size, max_seq_len = input_ids_packed.shape
+    input_ids_packed = flat_input_ids.unsqueeze(0)  # [1, total_seq_len]
+    position_ids_packed = position_ids.unsqueeze(0)  # [1, total_seq_len]
 
     attention_mask = None
     if return_attention_mask:
-        attention_mask = torch.zeros(
-            (batch_size, max_seq_len, max_seq_len), dtype=torch.bool
-        )
-        index = 0
-        for i, group_size in enumerate(packed_sequence_size):
-            group_lengths = flat_lengths[index : index + group_size]
-            total_length = sum(l.item() for l in group_lengths)
-            attention_mask[i, :total_length, :total_length] = torch.tril(
-                torch.ones((total_length, total_length), dtype=torch.bool)
+        attention_mask = torch.zeros((total_seq_len, total_seq_len), dtype=torch.bool)
+        start = 0
+        for length in input_lengths:
+            end = start + length.item()
+            attention_mask[start:end, start:end] = torch.tril(
+                torch.ones((length, length), dtype=torch.bool)
             )
-            index += group_size
+            start = end
+        attention_mask = attention_mask.unsqueeze(
+            0
+        )  # [1, total_seq_len, total_seq_len]
 
     return input_ids_packed, position_ids_packed, attention_mask
 
 
-def get_flash_attention_kwargs(
-    input_lengths: torch.Tensor, packed_sequence_size: list[int]
-) -> dict:
-    """Returns kwargs required for FlashAttention v2 forward functions, adjusted for packed sequences.
+def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> dict:
+    """Returns kwargs required for FlashAttention v2 forward functions.
 
     Args:
-        input_lengths (torch.Tensor): [num_sequences] actual sequence lengths
-        packed_sequence_size (list[int]): Number of original sequences in each packed item
+        input_lengths (torch.Tensor): [batch_size] containing lengths of each sequence
 
     Returns:
         Dict[str, torch.Tensor | int]:
@@ -396,21 +327,11 @@ def get_flash_attention_kwargs(
                 "max_seqlen_k": int
             }
     """
-    # Calculate per-packed-sequence total lengths
-    packed_lengths = []
-    idx = 0
-    for group_size in packed_sequence_size:
-        packed_lengths.append(input_lengths[idx : idx + group_size].sum())
-        idx += group_size
-
-    packed_lengths_tensor = torch.tensor(packed_lengths, dtype=torch.int32)
-
+    input_lengths_int32 = input_lengths.to(torch.int32)
     cu_seqlens = torch.nn.functional.pad(
-        packed_lengths_tensor.cumsum(dim=0),
-        (1, 0),  # prepend 0
-    )
-
-    max_len = packed_lengths_tensor.max().item()
+        input_lengths_int32.cumsum(dim=0), (1, 0)
+    )  # prepend 0
+    max_len = input_lengths.max().item()
 
     return {
         "cu_seqlens_q": cu_seqlens,
@@ -418,6 +339,28 @@ def get_flash_attention_kwargs(
         "max_seqlen_q": max_len,
         "max_seqlen_k": max_len,
     }
+
+
+def unpack_logits(
+    logits: torch.Tensor, input_lengths: torch.Tensor
+) -> list[torch.Tensor]:
+    """Unpacks packed logits into a list of tensors based on original input_lengths.
+
+    Args:
+        logits (torch.Tensor): Packed logits of shape [1, total_seq_len, vocab_size]
+        input_lengths (torch.Tensor): Tensor of shape [batch] containing original lengths
+
+    Returns:
+        List[torch.Tensor]: List of [seq_len_i, vocab_size] tensors
+    """
+    logits = logits.squeeze(0)  # [total_seq_len, vocab_size]
+    unpacked = []
+    start = 0
+    for length in input_lengths:
+        end = start + length.item()
+        unpacked.append(logits[start:end])
+        start = end
+    return unpacked
 
 
 @ray.remote(
@@ -713,6 +656,9 @@ class DTensorPolicyWorker:
                     log_json("mb", mb.get_dict())
 
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
+                        # TODO(ahmadki): for now, with the model input with sequence packing is of batch of size 1.
+                        # a better is code can be found at: cae414c9f88d7ce8feac54b56b58fef50c0dc789, but needs some work
+                        # FIXME(ahmadki): micro batch size < global batch size results in incorrect logit sizes
                         if self.cfg["packing_strategy"] == "flash_attention":
                             # input_ids, position_ids, flash_attn_kwargs = (
                             #     _pack_microbatch(mb)
@@ -722,14 +668,14 @@ class DTensorPolicyWorker:
                             input_ids, position_ids, _ = pack_sequences(
                                 input_ids=input_ids,
                                 input_lengths=mb["input_lengths"],
-                                packed_sequence_size=mb.packed_sequence_size,
-                                padding_value=self.tokenizer.eos_token_id,
+                                # packed_sequence_size=mb.packed_sequence_size,
+                                # padding_value=self.tokenizer.eos_token_id,
                                 return_attention_mask=False,
                             )
                             attention_mask = None
                             flash_attn_kwargs = get_flash_attention_kwargs(
                                 input_lengths=mb["input_lengths"],
-                                packed_sequence_size=mb.packed_sequence_size,
+                                # packed_sequence_size=mb.packed_sequence_size,
                             )
 
                         elif self.cfg["packing_strategy"] == "vector":
@@ -750,8 +696,8 @@ class DTensorPolicyWorker:
                             input_ids, position_ids, attention_mask = pack_sequences(
                                 input_ids=input_ids,
                                 input_lengths=mb["input_lengths"],
-                                packed_sequence_size=mb.packed_sequence_size,
-                                padding_value=self.tokenizer.eos_token_id,
+                                # packed_sequence_size=mb.packed_sequence_size,
+                                # padding_value=self.tokenizer.eos_token_id,
                                 return_attention_mask=True,
                             )
                             flash_attn_kwargs = {}
