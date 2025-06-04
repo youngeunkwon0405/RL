@@ -433,8 +433,6 @@ def bppo_train(
                 )
                 policy_generation.finish_generation()
 
-            print(f"▶ Keeping bottom percentile responses")
-
             # Calculate rewards & advantages
             print("▶ Processing rewards...")
             with timer.time("reward_calculation"):
@@ -600,6 +598,7 @@ def bppo_train(
         # Log training data
         log_data = {"content": flat_messages["content"]}
         log_data["rewards"] = rewards_log.tolist()
+        log_data["rewards_bp"] = rewards.tolist()
         log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
@@ -608,12 +607,13 @@ def bppo_train(
         print("\n📊 Training Results:")
         metrics = {
             "loss": train_results["loss"].numpy(),
-            "reward": rewards.numpy(),
+            "reward": rewards_log.numpy(),
+            "rewards_bp": rewards.numpy(),
             "grad_norm": train_results["grad_norm"].numpy(),
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
+            if k in {"lr", "reward", "rewards_bp", "global_valid_seqs", "global_valid_toks"}:
                 metrics[k] = np.mean(v).item()
             else:
                 metrics[k] = np.sum(v).item()
@@ -622,7 +622,8 @@ def bppo_train(
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore
 
         print(f"  • Loss: {metrics['loss']:.4f}")
-        print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
+        print(f"  • Avg Reward: {np.mean(rewards_log.numpy()):.4f}")
+        print(f"  • Avg Reward used for Training (BP): {np.mean(rewards.numpy()):.4f}")
         print(
             f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
         )
