@@ -253,21 +253,17 @@ class MegatronPolicyWorker:
                 pretrained_path = f"{megatron_checkpoint_home}/{hf_model_name}"
             else:
                 pretrained_path = f"/opt/checkpoints/tron/{hf_model_name}"
+            pre_init_communication_queue.put(True)
             pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
                 os.path.join(pretrained_path, "iter_0000000")
             )
-            if get_rank_safe() == 0:
-                if pt_checkpoint_exists:
-                    print(
-                        f"Checkpoint already exists at {pretrained_path}. Skipping import."
-                    )
-                else:
-                    import_model_from_hf_name(hf_model_name, pretrained_path)
-                pre_init_communication_queue.put(True)
+            if pt_checkpoint_exists:
+                print(
+                    f"Checkpoint already exists at {pretrained_path}. Skipping import."
+                )
             else:
-                pre_init_communication_queue.get()
-                pre_init_communication_queue.put(True)
-                pass
+                import_model_from_hf_name(hf_model_name, pretrained_path)
+            pre_init_communication_queue.get()
 
             pretrained_run_config = os.path.join(
                 pretrained_path, "iter_0000000/run_config.yaml"
@@ -413,7 +409,7 @@ class MegatronPolicyWorker:
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self.converter_type = self.cfg["megatron_cfg"]["converter_type"]
         self._held_gather_buffer = None
-    
+
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 

@@ -99,7 +99,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         )
 
         # A queue for worker communication before torch dist init
-        pre_init_queue: RayQueue = RayQueue()
+        pre_init_queue: RayQueue = RayQueue(1)
         worker_builder = RayWorkerBuilder(
             worker_builder_cls,
             config,
