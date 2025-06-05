@@ -145,7 +145,7 @@ def main():
         vllm_generation,
         dataloader,
         math_env,
-        master_config,
+        master_config,tokenizer,
     )
 
 

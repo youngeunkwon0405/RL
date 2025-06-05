@@ -32,7 +32,7 @@ from nemo_rl.distributed.ray_actor_environment_registry import (
     get_actor_python_env,
 )
 from nemo_rl.distributed.virtual_cluster import init_ray
-from nemo_rl.environments.math_environment import MathEnvironment
+from nemo_rl.environments.math_environment_llm_tokens import MathEnvironment
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir

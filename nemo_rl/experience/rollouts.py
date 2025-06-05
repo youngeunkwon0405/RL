@@ -71,7 +71,8 @@ def generate_responses(
         generated_ids.append(output_ids[input_length:total_length])
 
     generated_texts = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)
-
+    # import pdb;
+    # pdb.set_trace() #tokenizer.batch_decode(generation_outputs["output_ids"][0], skip_special_tokens=True)
     # Append to message log
     for i, (text, input_length, total_length) in enumerate(
         zip(generated_texts, input_lengths, unpadded_sequence_lengths)
@@ -80,6 +81,7 @@ def generate_responses(
             "role": "assistant",
             "content": text,
             "token_ids": generation_outputs["output_ids"][i, input_length:total_length],
+
         }
 
         if include_logprobs and "logprobs" in generation_outputs:
@@ -88,6 +90,11 @@ def generate_responses(
             ]
 
         batch["message_log"][i].append(message)
+        new_message={"role":"metadata",
+                     "content": str(float(total_length-input_length)),
+                     "token_ids": generation_outputs["output_ids"][i, input_length:min(input_length+2, total_length)],
+                     }
+        batch["message_log"][i].append(new_message)
 
     metrics = {
         "mean_generation_length": (
@@ -147,6 +154,7 @@ def calculate_rewards(
         env_info = [batch["extra_env_info"][i] for i in indices]
 
         # Submit task to environment and store future
+
         future = task_to_env[task_name].step.remote(messages, env_info)
         futures.append(future)
         future_to_indices[future] = indices

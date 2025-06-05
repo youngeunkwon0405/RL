@@ -23,7 +23,7 @@ loss_fn:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/grpo_llm_tokens_deepscaler_data"
+  checkpoint_dir: "results/grpo_llm_tokens_deepscaler_data_source2"
   metric_name: "val_reward"
   higher_is_better: true
   keep_top_k: 10
@@ -31,7 +31,7 @@ checkpointing:
 
 policy:
   # Qwen/Qwen2.5-1.5B has tied weights which are only supported with dtensor policy with tp size 1 (https://github.com/NVIDIA/NeMo-RL/issues/227)
-  model_name: "/lustre/fsw/portfolios/coreai/users/ageifman/code/checkpoints/qwen_1_5b_llm_tokens/updated_model"
+  model_name: "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 64
@@ -110,7 +110,7 @@ policy:
 #  dataset_name: "DeepScaler"
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  prompt_file: "examples/prompts/cot_llm_tokens.txt"
+  prompt_file: "examples/prompts/cot.txt"
   system_prompt_file: null
   dataset_name: "DeepScaler"  #"OpenMathInstruct-2"
 
@@ -126,7 +126,7 @@ logger:
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "amnon_rl_experiments_llm_tokens"
-    name: "grpo-llm_tokens_deepscaler_data"
+    name: "grpo-llm_tokens_deepscaler_data_source2"
   tensorboard: {}
   gpu_monitoring:
     collection_interval: 10  # How often to collect GPU usage metrics (in seconds)

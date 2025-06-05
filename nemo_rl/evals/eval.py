@@ -150,7 +150,7 @@ def setup(
 # ===============================================================================
 
 
-def run_env_eval(vllm_generation, dataloader, env, master_config):
+def run_env_eval(vllm_generation, dataloader, env, master_config,tokenizer):
     """Main entry point for running evaluation using environment.
 
     Generates model responses and evaluates them by env.
