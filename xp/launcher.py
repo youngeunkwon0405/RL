@@ -24,7 +24,7 @@ import sys # Added for countdown timer
 
 
 # Environment variables
-LOG_DIR = os.environ["LOG"] + "/nemo-rl-bppo"
+LOG_DIR = os.environ["LOG"] + "/nemo-rl"
 ACCOUNT = os.environ["ACCOUNT"]
 CONTAINER = os.environ["CON"] + "/nemo_rl_base.sqsh"
 MOUNTS = "/lustre:/lustre"
