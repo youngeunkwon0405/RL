@@ -626,6 +626,9 @@ def grpo_train(
         logger.log_metrics(metrics, step + 1, prefix="train")
         logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
+        import pprint
+        pprint.pprint(metrics)
+
         timer.reset()
         step += 1
         if step >= master_config["grpo"]["max_num_steps"]:
