@@ -75,13 +75,15 @@ policy:
     pipeline_dtype: ${policy.precision}
     expert_tensor_parallel_size: 1
     sequence_parallel: false
+    moe_router_load_balancing_type: "none" # "seq_aux_loss" causes logprob error divergence
+    moe_router_bias_update_rate: 0.0 # by default, disable bias updates
 
     optimizer:
       optimizer: "adam"
       lr: 5.0e-6
       min_lr: 5.0e-7
       weight_decay: 0.01
-      bf16: false
+      bf16: true
       fp16: false
       params_dtype: "float32"
 

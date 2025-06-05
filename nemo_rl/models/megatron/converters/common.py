@@ -243,7 +243,7 @@ class MegatronToHFConverter:
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )
-        elif "deepseek" in hf_model_name.lower() or hf_model_name in ("ByteDance-Seed/academic-ds-9B", "moonshotai/Moonlight-16B-A3B"):
+        elif "deepseek" in hf_model_name.lower() or "Moonlight-16B-A3B" in hf_model_name or hf_model_name in ("ByteDance-Seed/academic-ds-9B",):
             self.export_mapping = deepseek_converter.get_export_mapping(
                 source=global_keys_map,
                 source_config=megatron_model.config.__dict__,
