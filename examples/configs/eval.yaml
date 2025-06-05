@@ -1,7 +1,7 @@
 # Evaluation Configuration
 eval:
   seed: 42
-  num_repeats: 2
+  num_repeats: 1
 
 generation:
   backend: "vllm" # only vllm is supported for evaluation

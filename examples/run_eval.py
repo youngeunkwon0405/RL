@@ -21,6 +21,8 @@ import jsonlines
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from pathlib import Path
+
 from omegaconf import OmegaConf
 
 from examples.run_grpo import setup_data
@@ -109,7 +111,8 @@ def main():
     os.makedirs(save_dir, exist_ok=True)
 
     # Atomic save using jsonlines
-    output_file = os.path.join(save_dir, "data_for_saving.jsonl")
+    base_name = Path(config["data"]["train"]["jsonl_path"]).stem
+    output_file = os.path.join(save_dir, f"{base_name}_sampled.jsonl")
     temp_file = output_file + ".tmp"
 
     with jsonlines.open(temp_file, "w") as f:
