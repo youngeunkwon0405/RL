@@ -18,7 +18,7 @@ ENV UV_LINK_MODE=copy
 ENV PATH="/root/.local/bin:/opt/nemo_rl_venv/bin:$PATH"
 
 WORKDIR /opt/nemo-rl
-COPY .python-version pyproject.toml uv.lock nemo_rl/__init__.py nemo_rl/package_info.py ./
+COPY .python-version pyproject.toml ./
 
 RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh && \
     uv python install $(cat .python-version) && \
@@ -32,6 +32,8 @@ ENV RAY_USAGE_STATS_ENABLED=0
 
 FROM base AS hermetic
 
+# First copy only the dependency files
+COPY uv.lock ./
 COPY --link 3rdparty/ ./3rdparty/
 
 # Variables to control the build of TE. If there are issues with parallelization, consider
