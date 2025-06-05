@@ -108,6 +108,27 @@ from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.utils import get_gpu_info
 
 
+def _get_model_from_config(
+    cfg: ConfigContainer,
+):
+    model = get_model_from_config(
+        cfg.model_config,
+        cfg.ddp_config,
+        wrap_with_ddp=False, # Wrap with DDP separately so we can disable grads for certain layers before DDP
+        use_torch_fsdp2=cfg.dist_config.use_torch_fsdp2,
+        overlap_param_gather_with_optimizer_step=cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
+        data_parallel_random_init=cfg.rng_config.data_parallel_random_init,
+    )
+
+    # reference_model = get_model_from_config(
+    #     self.megatron_cfg.model_config,
+    #     self.megatron_cfg.ddp_config,
+    #     use_torch_fsdp2=self.megatron_cfg.dist_config.use_torch_fsdp2,
+    #     overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
+    #     data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
+    # )
+
+
 def setup_megatron_model(
     cfg: ConfigContainer,
     load_optimizer: bool = True,
@@ -155,7 +176,8 @@ def setup_megatron_model(
     build_tokenizer(
         cfg.tokenizer_config,
         # TODO(yifu): should just pull the vocab size from HF config instead?
-        make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by // cfg.model_config.tensor_model_parallel_size,
+        make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by
+        // cfg.model_config.tensor_model_parallel_size,
         tensor_model_parallel_size=cfg.model_config.tensor_model_parallel_size,
     )
     if not cfg.model_config.vocab_size:
@@ -232,6 +254,11 @@ class MegatronPolicyWorker:
         megatron_checkpoint_home: Optional[str] = None,
         **kwargs: Any,
     ):
+        print("STARTING MEGATRON POLICY WORKER")
+        from transformers.dynamic_module_utils import init_hf_modules
+
+        init_hf_modules()
+
         self.cfg = config
         dtype_map = {
             "float32": torch.float32,
@@ -280,13 +307,27 @@ class MegatronPolicyWorker:
         model_cfg = cfg_from_pretrained.model_config
         cfg_from_pretrained.logger_config = LoggerConfig()
 
-        model_cfg.tensor_model_parallel_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
-        model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
-        model_cfg.num_layers_in_first_pipeline_stage = self.cfg["megatron_cfg"]["num_layers_in_first_pipeline_stage"]
-        model_cfg.num_layers_in_last_pipeline_stage = self.cfg["megatron_cfg"]["num_layers_in_last_pipeline_stage"]
-        model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
-        model_cfg.context_parallel_size = self.cfg["megatron_cfg"]["context_parallel_size"] # not supported right now
-        model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"]["expert_tensor_parallel_size"]
+        model_cfg.tensor_model_parallel_size = self.cfg["megatron_cfg"][
+            "tensor_model_parallel_size"
+        ]
+        model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"][
+            "pipeline_model_parallel_size"
+        ]
+        model_cfg.num_layers_in_first_pipeline_stage = self.cfg["megatron_cfg"][
+            "num_layers_in_first_pipeline_stage"
+        ]
+        model_cfg.num_layers_in_last_pipeline_stage = self.cfg["megatron_cfg"][
+            "num_layers_in_last_pipeline_stage"
+        ]
+        model_cfg.pipeline_model_parallel_size = self.cfg["megatron_cfg"][
+            "pipeline_model_parallel_size"
+        ]
+        model_cfg.context_parallel_size = self.cfg["megatron_cfg"][
+            "context_parallel_size"
+        ]  # not supported right now
+        model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"][
+            "expert_tensor_parallel_size"
+        ]
         model_cfg.sequence_parallel = self.cfg["megatron_cfg"]["sequence_parallel"]
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
@@ -295,14 +336,23 @@ class MegatronPolicyWorker:
         ]  # FP32 for amp
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
-        model_cfg.moe_router_dtype = 'fp64'
+        model_cfg.moe_router_dtype = "fp64"
 
         model_cfg.apply_rope_fusion = False
         model_cfg.bias_activation_fusion = False
         model_cfg.bias_dropout_fusion = False
         model_cfg.masked_softmax_fusion = False
         model_cfg.gradient_accumulation_fusion = False
+        model_cfg.moe_router_load_balancing_type = self.cfg["megatron_cfg"][
+            "moe_router_load_balancing_type"
+        ]
+        model_cfg.moe_router_bias_update_rate = self.cfg["megatron_cfg"][
+            "moe_router_bias_update_rate"
+        ]
+        model_cfg.disable_bf16_reduced_precision_matmul = True
 
+        # model_cfg.moe_router_num_groups = 1
+        # model_cfg.moe_router_group_topk = 1
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
@@ -419,8 +469,11 @@ class MegatronPolicyWorker:
 
         self.megatron_tokenizer = build_tokenizer(
             tokenizer_config,
-            make_vocab_size_divisible_by=self.megatron_cfg.model_config.make_vocab_size_divisible_by // self.cfg["megatron_cfg"]["tensor_model_parallel_size"],
-            tensor_model_parallel_size=self.cfg["megatron_cfg"]["tensor_model_parallel_size"],
+            make_vocab_size_divisible_by=self.megatron_cfg.model_config.make_vocab_size_divisible_by
+            // self.cfg["megatron_cfg"]["tensor_model_parallel_size"],
+            tensor_model_parallel_size=self.cfg["megatron_cfg"][
+                "tensor_model_parallel_size"
+            ],
         )
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
@@ -771,7 +824,9 @@ class MegatronPolicyWorker:
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
 
-                return torch.tensor(0.0, device=token_logprobs.device), {"logprobs": token_logprobs}
+                return torch.tensor(0.0, device=token_logprobs.device), {
+                    "logprobs": token_logprobs
+                }
 
             return output_tensor, collection_fn
 
