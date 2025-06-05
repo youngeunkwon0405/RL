@@ -324,9 +324,12 @@ def main():
         param_overrides = format_parameter_override(params)
         
         # Generate job name if not provided
-        job_name = args.jobname or os.path.splitext(os.path.basename(script_path))[0]
+        job_name = args.jobname or (
+            os.path.splitext(os.path.basename(args.sweep))[0] if args.sweep 
+            else os.path.splitext(os.path.basename(script_path))[0]
+        )
         if len(param_combinations) > 1:
-            job_name = f"{job_name}_sweep_{i+1}"
+            job_name = f"{job_name}_{i+1}"
         
         # Launch experiment
         cmd, job_id = launch_experiment(
