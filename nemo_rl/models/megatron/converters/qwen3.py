@@ -43,7 +43,7 @@ def get_export_transforms():
             fn=TransformFns.split_qkv,
         ),
         io.state_transform(
-            source_key="**.mlp.linear_fc1.weight",
+            source_key="**.mlp.experts.linear_fc1.weight*",
             target_key=(
                 "**.mlp.experts.*.gate_proj.weight",
                 "**.mlp.experts.*.up_proj.weight",
