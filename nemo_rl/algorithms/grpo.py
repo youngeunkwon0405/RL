@@ -440,9 +440,7 @@ def grpo_train(
                         f"▶ Taking top {master_config['grpo']['top_p_std'] * 100}% samples with most variation..."
                     )
                     indices = torch.argsort(std, descending=True)
-                    top_p_std = master_config["grpo"]["top_p_std"]
-                    num_to_keep = int(top_p_std * len(indices))
-                    assert num_to_keep == master_config["grpo"]["num_prompts_per_step"] * master_config["grpo"]["num_generations_per_prompt"]
+                    num_to_keep = master_config["grpo"]["num_prompts_per_step"] * master_config["grpo"]["num_generations_per_prompt"]
                     indices = indices[:num_to_keep].tolist()
                     rewards_log = rewards.clone()   # we log rewards for all samples
                     rewards = rewards[indices]
