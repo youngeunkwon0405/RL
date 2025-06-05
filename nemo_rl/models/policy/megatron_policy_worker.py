@@ -23,6 +23,9 @@ from typing import Any, Iterable, Optional
 import ray
 import torch
 from megatron.core import parallel_state
+from megatron.core.distributed import (
+    DistributedDataParallel,
+)
 from megatron.core.inference.engines import (
     StaticInferenceEngine,
 )
@@ -104,28 +107,8 @@ from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.utils import get_gpu_info
 
 
-def _get_model_from_config(
-    cfg: ConfigContainer,
-):
-    model = get_model_from_config(
-        cfg.model_config,
-        cfg.ddp_config,
-        wrap_with_ddp=False, # Wrap with DDP separately so we can disable grads for certain layers before DDP
-        use_torch_fsdp2=cfg.dist_config.use_torch_fsdp2,
-        overlap_param_gather_with_optimizer_step=cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
-        data_parallel_random_init=cfg.rng_config.data_parallel_random_init,
-    )
-
-    # reference_model = get_model_from_config(
-    #     self.megatron_cfg.model_config,
-    #     self.megatron_cfg.ddp_config,
-    #     use_torch_fsdp2=self.megatron_cfg.dist_config.use_torch_fsdp2,
-    #     overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
-    #     data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
-    # )
-
-
 def setup_megatron_model(
+    policy_cfg: PolicyConfig,
     cfg: ConfigContainer,
     load_optimizer: bool = True,
     get_embedding_ranks=None,  # TODO @sahilj: What is this?
@@ -181,6 +164,16 @@ def setup_megatron_model(
 
     torch.distributed.barrier()
 
+    model_post_init_fns = []
+    if policy_cfg["megatron_cfg"]["freeze_moe_router"]:
+
+        def freeze_moe_router(model_module):
+            for layer in model_module.decoder.layers:
+                if hasattr(layer.mlp, "router"):
+                    layer.mlp.router.weight.requires_grad = False
+
+        model_post_init_fns.append(freeze_moe_router)
+
     # Model, optimizer, and learning rate.
     model = get_model_from_config(
         cfg.model_config,
@@ -188,6 +181,7 @@ def setup_megatron_model(
         use_torch_fsdp2=cfg.dist_config.use_torch_fsdp2,
         overlap_param_gather_with_optimizer_step=cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
         data_parallel_random_init=cfg.rng_config.data_parallel_random_init,
+        model_post_init_fns=model_post_init_fns,
     )
     if load_optimizer:
         optimizer, scheduler = setup_optimizer(
@@ -325,7 +319,9 @@ class MegatronPolicyWorker:
         model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"][
             "expert_tensor_parallel_size"
         ]
-        model_cfg.expert_model_parallel_size = self.cfg["megatron_cfg"]["expert_model_parallel_size"]
+        model_cfg.expert_model_parallel_size = self.cfg["megatron_cfg"][
+            "expert_model_parallel_size"
+        ]
         model_cfg.sequence_parallel = self.cfg["megatron_cfg"]["sequence_parallel"]
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
@@ -405,7 +401,9 @@ class MegatronPolicyWorker:
             self.optimizer,
             self.scheduler,
             self.checkpointing_context,
-        ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
+        ) = setup_megatron_model(
+            self.cfg, self.megatron_cfg, load_optimizer=init_optimizer
+        )
         self.model = self.model[0]  # Get the first model from the list
 
         if init_reference_model:
