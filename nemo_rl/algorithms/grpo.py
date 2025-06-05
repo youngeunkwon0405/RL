@@ -181,7 +181,10 @@ def setup(
     # ==========================
     dataloader = StatefulDataLoader(
         dataset,
-        batch_size=grpo_config["num_prompts_per_step"],
+        batch_size=(
+            grpo_config["num_prompts_per_step"]
+            // grpo_config["top_p_std"],  # make room for rejected samples (more inference-heavy)
+        ),
         shuffle=False,
         collate_fn=rl_collate_fn,
     )
@@ -431,6 +434,22 @@ def grpo_train(
                         "use_leave_one_out_baseline"
                     ],
                 )
+                rewards_log = rewards
+                if master_config["grpo"]["top_p_std"] < 1.0:
+                    print(
+                        f"▶ Taking top {master_config['grpo']['top_p_std'] * 100}% samples with most variation..."
+                    )
+                    indices = torch.argsort(std, descending=True)
+                    top_p_std = master_config["grpo"]["top_p_std"]
+                    num_to_keep = int(top_p_std * len(indices))
+                    assert num_to_keep == master_config["grpo"]["num_prompts_per_step"] * master_config["grpo"]["num_generations_per_prompt"]
+                    indices = indices[:num_to_keep].tolist()
+                    rewards_log = rewards.clone()   # we log rewards for all samples
+                    rewards = rewards[indices]
+                    baseline = baseline[indices]
+                    std = std[indices]
+                    repeated_batch = repeated_batch.select_indices(indices)
+
                 advantages = (rewards - baseline).unsqueeze(-1)
 
                 if master_config["grpo"]["normalize_rewards"]:
@@ -564,7 +583,8 @@ def grpo_train(
         # Logging
         # Log training data
         log_data = {"content": flat_messages["content"]}
-        log_data["rewards"] = rewards.tolist()
+        log_data["rewards"] = rewards_log.tolist()
+        log_data["rewards_top_p_std"] = rewards.tolist()
         log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
@@ -573,12 +593,13 @@ def grpo_train(
         print("\n📊 Training Results:")
         metrics = {
             "loss": train_results["loss"].numpy(),
-            "reward": rewards.numpy(),
+            "reward": rewards_log.numpy(),
+            "reward_top_p_std": rewards.numpy(),
             "grad_norm": train_results["grad_norm"].numpy(),
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
+            if k in {"lr", "reward", "reward_top_p_std", "global_valid_seqs", "global_valid_toks"}:
                 metrics[k] = np.mean(v).item()
             else:
                 metrics[k] = np.sum(v).item()
@@ -587,7 +608,8 @@ def grpo_train(
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore
 
         print(f"  • Loss: {metrics['loss']:.4f}")
-        print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
+        print(f"  • Avg Reward: {np.mean(rewards_log.numpy()):.4f}")
+        print(f"  • Avg Reward (top p std): {np.mean(rewards.numpy()):.4f}")
         print(
             f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
         )
