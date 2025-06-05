@@ -181,7 +181,7 @@ def setup(
     # ==========================
     dataloader = StatefulDataLoader(
         dataset,
-        batch_size=(
+        batch_size=int(
             grpo_config["num_prompts_per_step"]
             // grpo_config["top_p_std"],  # make room for rejected samples (more inference-heavy)
         ),
