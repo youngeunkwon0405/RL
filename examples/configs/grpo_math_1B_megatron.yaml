@@ -66,6 +66,8 @@ policy:
 
   megatron_cfg:
     enabled: true
+    freeze_moe_router: true
+
     empty_unused_memory_level: 1
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
