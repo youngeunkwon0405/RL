@@ -48,6 +48,7 @@ uv venv ${UV_PROJECT_ENVIRONMENT}
 # Do everything in one layer to prevent large layers.
 
 # The venv is symlinked to avoid bloating the layer size
+VIRTUAL_ENV=${UV_PROJECT_ENVIRONMENT} uv pip install setuptools torch==2.7.0 psutil
 uv sync --link-mode symlink --locked --extra vllm --no-install-project
 uv sync --link-mode symlink --locked --extra mcore --no-install-project --no-build-isolation
 uv sync --link-mode symlink --locked --all-groups --no-install-project
