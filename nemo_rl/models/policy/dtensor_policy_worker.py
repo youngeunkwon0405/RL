@@ -658,7 +658,6 @@ class DTensorPolicyWorker:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         # TODO(ahmadki): for now, with the model input with sequence packing is of batch of size 1.
                         # a better is code can be found at: cae414c9f88d7ce8feac54b56b58fef50c0dc789, but needs some work
-                        # FIXME(ahmadki): micro batch size < global batch size results in incorrect logit sizes
                         if self.cfg["packing_strategy"] == "flash_attention":
                             # input_ids, position_ids, flash_attn_kwargs = (
                             #     _pack_microbatch(mb)
@@ -758,7 +757,11 @@ class DTensorPolicyWorker:
                         )
 
                     loss, loss_metrics = loss_fn(
-                        logits, mb, global_valid_seqs, global_valid_toks
+                        logits,
+                        mb,
+                        global_valid_seqs,
+                        global_valid_toks,
+                        max_seq_len=max(mb["input_lengths"]),
                     )
 
                     ## scale by the number of global batches so we get the correct
@@ -839,16 +842,6 @@ class DTensorPolicyWorker:
                 "rank": torch.distributed.get_rank(),
                 "all_mb_metrics": dict(mb_metrics),
             }
-
-            def get_model_weight_stats(model):
-                weights = torch.cat([p.data.flatten() for p in model.parameters()])
-                return {
-                    "mean": weights.mean().item(),
-                    "min": weights.min().item(),
-                    "max": weights.max().item(),
-                }
-
-            logging.debug(get_model_weight_stats(self.model))
 
             logging.debug(
                 "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
