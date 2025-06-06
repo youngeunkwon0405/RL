@@ -56,7 +56,7 @@ class MathToolsEnvironment(EnvironmentInterface):
     def __init__(self, cfg: MathToolsConfig):
         self.cfg = cfg
         
-        # TODO: use sandbox code execution
+        # TODO: use containerized code execution
         self.bash_tool = BashTool(
             timeout=cfg.get("max_bash_timeout", 30),
             memory_limit=cfg.get("memory_limit", 512),
@@ -144,7 +144,6 @@ class MathToolsEnvironment(EnvironmentInterface):
                             tool_name = tool_call_data.get("name")
                             parameters = tool_call_data.get("parameters", {})
                             
-                            # ensure parameters is a dictionary
                             if not isinstance(parameters, dict):
                                 parameters = {}
                             
@@ -159,7 +158,6 @@ class MathToolsEnvironment(EnvironmentInterface):
         return tool_calls
 
     def _extract_final_answer(self, content: str) -> Optional[str]:
-        """extract answer from \\boxed{} LaTeX format"""
         return extract_answer(content, extract_from_boxed=True)
 
     def _check_answer(self, submitted: str, ground_truth: str) -> bool:
@@ -246,7 +244,7 @@ class MathToolsEnvironment(EnvironmentInterface):
                 next_stop_strings.append(None)
                 continue
             
-            # parse and execute tool calls
+            # parse tool calls
             tool_calls = self._parse_tool_calls(last_assistant_msg)
             
             if not tool_calls:
@@ -262,12 +260,11 @@ class MathToolsEnvironment(EnvironmentInterface):
                 next_stop_strings.append(["</tool_call>", "<|im_end|>"]) # not sure we need to append here
                 continue
             
-            # execute tools
+            # execute tool calls
             tool_results = []
             updated_metadata = metadata.copy()
             
             for tool_name, tool_args in tool_calls:
-                # validate that tool_args is a dictionary
                 if not isinstance(tool_args, dict):
                     result = f"Error: Invalid tool arguments format for {tool_name}. Expected dictionary, got {type(tool_args).__name__}"
                     tool_results.append(f"[{tool_name}]\n{result}")
@@ -276,7 +273,6 @@ class MathToolsEnvironment(EnvironmentInterface):
                 result = self._execute_tool(tool_name, tool_args, metadata["working_dir"])
                 tool_results.append(f"[{tool_name}]\n{result}")
                 
-                # update metadata
                 updated_metadata["tool_calls_count"][tool_name] = (
                     updated_metadata["tool_calls_count"].get(tool_name, 0) + 1
                 )
