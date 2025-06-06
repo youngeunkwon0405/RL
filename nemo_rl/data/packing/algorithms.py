@@ -201,7 +201,7 @@ class ConcatenativePacker(SequencePacker):
 
     # Global class variable to limit the number of sequences packed in a unit
     # -1 disables this limit
-    max_sequences_per_bin = 4  # TODO(ahmadki): debug option, del me
+    max_sequences_per_bin = -1  # TODO(ahmadki): debug option, del me
 
     def _pack_implementation(self, sequence_lengths: List[int]) -> List[List[int]]:
         """Pack sequences using the Concatenative algorithm.
