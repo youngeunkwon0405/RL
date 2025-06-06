@@ -610,6 +610,7 @@ class DTensorPolicyWorker:
                 )
             all_log_probs_padded.append(lp)
         return_data["logprobs"] = torch.cat(all_log_probs_padded, dim=0).cpu()
+        return_data["tokenentropy"] = torch.cat(all_entropies, dim=0).cpu()
 
         return return_data
 
