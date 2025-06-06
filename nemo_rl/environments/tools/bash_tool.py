@@ -15,12 +15,8 @@
 import os
 import subprocess
 import threading
-from typing import Optional
-
 
 class BashTool:
-    """Tool for executing bash commands with safety constraints."""
-    
     BLACKLISTED_COMMANDS = {
         "rm -rf /",
         "dd",
@@ -49,6 +45,13 @@ class BashTool:
         "ssh",
         "scp",
         "rsync",
+        "ping",
+        "telnet",
+        "ftp",
+        "sftp",
+        "dig",
+        "nslookup",
+        "traceroute",
     }
     
     def __init__(
@@ -56,12 +59,10 @@ class BashTool:
         timeout: int = 30,
         memory_limit: int = 512,  # MB
         cpu_limit: float = 1.0,  # CPU cores
-        enable_network: bool = False,
     ):
         self.timeout = timeout
         self.memory_limit = memory_limit
         self.cpu_limit = cpu_limit
-        self.enable_network = enable_network
     
     def _is_command_safe(self, command: str) -> bool:
         command_lower = command.lower().strip()
@@ -90,12 +91,6 @@ class BashTool:
         for pattern in dangerous_patterns:
             if pattern in command_lower:
                 return False
-        
-        if not self.enable_network:
-            network_commands = ["ping", "telnet", "ftp", "sftp", "dig", "nslookup", "traceroute"]
-            for net_cmd in network_commands:
-                if net_cmd in command_words:
-                    return False
         
         return True
     

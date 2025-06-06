@@ -35,7 +35,6 @@ class MathToolsConfig(TypedDict):
     max_turns: int
     max_bash_timeout: int  # s
     max_file_size: int  # bytes
-    enable_network: bool
     memory_limit: int  # MB
     cpu_limit: float  # cores
 
@@ -62,7 +61,6 @@ class MathToolsEnvironment(EnvironmentInterface):
             timeout=cfg.get("max_bash_timeout", 30),
             memory_limit=cfg.get("memory_limit", 512),
             cpu_limit=cfg.get("cpu_limit", 1.0),
-            enable_network=cfg.get("enable_network", False),
         )
         self.file_tool = FileTool(
             max_file_size=cfg.get("max_file_size", 1024 * 1024)  # 1MB default

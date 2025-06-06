@@ -87,7 +87,7 @@ policy:
     top_p: 1.0
     top_k: 20
     stop_token_ids: null
-    stop_strings: ["</tool_call>", "<|im_end|>", "✿RESULT✿:", "✿RETURN✿:"] # qwen
+    stop_strings: ["</tool_call>", "<|im_end|>", "✿RESULT✿:", "✿RETURN✿:"] 
     vllm_cfg:
       precision: ${policy.precision}
       tensor_parallel_size: 1
@@ -105,7 +105,6 @@ env:
     max_turns: 20
     max_bash_timeout: 30
     max_file_size: 1048576  # 1MB
-    enable_network: false
     memory_limit: 512
     cpu_limit: 1.0
 
