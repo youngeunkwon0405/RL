@@ -14,7 +14,7 @@ export VENV_DIR=$VENV_DIR
 export VLLM_PORT_RANGE="20000-30000"
 
 
-JOB_NAME="grpo-math_8b_nano_large_context"
+JOB_NAME="grpo-math_8b_nano_large_context_"
 
 source ~/secrets
 echo WANDB_API_KEY=${WANDB_API_KEY}

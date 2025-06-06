@@ -101,7 +101,6 @@ class L1ExpectedAnswerLengthDataset(Dataset):
             print (f"shuffling input data")
             random.shuffle(self.found_idxs)
     def __len__(self):
-        import pdb; p = pdb.Pdb(); p.prompt="length of dataset"; pdb.set_trace()
         return len(self.found_idxs)
     
     def __getitem__(self, idx):
