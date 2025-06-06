@@ -515,19 +515,28 @@ def grpo_train(
             
             if master_config["grpo"]["top_p_ent"] < 1.0:
                 print(f"▶ Taking top {master_config['grpo']['top_p_ent'] * 100}% tokens with most entropy...")
-                # Flatten generation_logprobs to get all tokens
+                # Flatten token entropies and filter out zeros (from padding)
                 flat_token_entropy = fprop_token_entropy.flatten()
-                sorted_token_entropy, _ = torch.sort(flat_token_entropy, descending=True)
-                
-                # Calculate threshold index for top-p tokens
-                total_tokens = flat_token_entropy.numel()
-                entropy_threshold_idx = int(total_tokens * master_config["grpo"]["top_p_ent"])
-                entropy_threshold = sorted_token_entropy[entropy_threshold_idx]
-                
-                # Create mask for tokens with entropy >= threshold
-                entropy_mask = train_data["generation_logprobs"] >= entropy_threshold
-                # Expand sample_mask to match token dimensions for broadcasting
-                train_data["token_mask"] *= entropy_mask
+                non_zero_entropy = flat_token_entropy[flat_token_entropy > 0]
+
+                if non_zero_entropy.numel() > 0:
+                    sorted_token_entropy, _ = torch.sort(
+                        non_zero_entropy, descending=True
+                    )
+
+                    # Calculate threshold index for top-p tokens
+                    num_non_zero_tokens = non_zero_entropy.numel()
+                    entropy_threshold_idx = int(
+                        num_non_zero_tokens * master_config["grpo"]["top_p_ent"]
+                    )
+                    entropy_threshold_idx = min(
+                        entropy_threshold_idx, num_non_zero_tokens - 1
+                    )
+                    entropy_threshold = sorted_token_entropy[entropy_threshold_idx]
+
+                    # Create mask for tokens with entropy >= threshold
+                    entropy_mask = fprop_token_entropy >= entropy_threshold
+                    train_data["token_mask"] *= entropy_mask
 
             print("▶ Preparing for training...")
             with timer.time("training_prep"):
