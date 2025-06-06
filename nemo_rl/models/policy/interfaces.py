@@ -25,6 +25,7 @@ class LogprobOutputSpec(TypedDict):
     """logprobs: Tensor of log probabilities."""
 
     logprobs: torch.Tensor
+    tokenentropy: torch.Tensor
 
 
 class ReferenceLogprobOutputSpec(TypedDict):

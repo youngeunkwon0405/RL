@@ -505,7 +505,8 @@ def grpo_train(
 
             print("▶ Computing logprobs...")
             with timer.time("policy_and_reference_logprobs"):
-                fprop_logprobs = policy.get_logprobs(train_data)["logprobs"]
+                fprops = policy.get_logprobs(train_data)["logprobs"]
+                fprop_logprobs, fprop_token_entropy = fprops["logprobs"], fprops["tokenentropy"]
                 reference_logprobs = policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
                 ]
@@ -515,13 +516,13 @@ def grpo_train(
             if master_config["grpo"]["top_p_ent"] < 1.0:
                 print(f"▶ Taking top {master_config['grpo']['top_p_ent'] * 100}% tokens with most entropy...")
                 # Flatten generation_logprobs to get all tokens
-                flat_generation_logprobs = train_data["generation_logprobs"].flatten()
-                sorted_logprobs, _ = torch.sort(flat_generation_logprobs, descending=True)
+                flat_token_entropy = fprop_token_entropy.flatten()
+                sorted_token_entropy, _ = torch.sort(flat_token_entropy, descending=True)
                 
                 # Calculate threshold index for top-p tokens
-                total_tokens = flat_generation_logprobs.numel()
+                total_tokens = flat_token_entropy.numel()
                 entropy_threshold_idx = int(total_tokens * master_config["grpo"]["top_p_ent"])
-                entropy_threshold = sorted_logprobs[entropy_threshold_idx]
+                entropy_threshold = sorted_token_entropy[entropy_threshold_idx]
                 
                 # Create mask for tokens with entropy >= threshold
                 entropy_mask = train_data["generation_logprobs"] >= entropy_threshold

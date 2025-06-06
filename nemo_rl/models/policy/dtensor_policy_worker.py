@@ -35,6 +35,7 @@ from nemo_rl.models.dtensor.parallelize import (
     clip_grad_by_total_norm_,
     get_grad_norm,
     get_logprobs_from_vocab_parallel_logits,
+    get_entropy_from_vocab_parallel_logits,
     to_local_if_dtensor,
 )
 from nemo_rl.models.huggingface.common import ModelFlag
@@ -512,6 +513,7 @@ class DTensorPolicyWorker:
                 )
 
         all_log_probs = []
+        all_entropies = []
         self.model.eval()
 
         with unshard_fsdp2_model(self.model), torch.no_grad():
@@ -560,18 +562,25 @@ class DTensorPolicyWorker:
                     token_logprobs = get_logprobs_from_vocab_parallel_logits(
                         outputs.logits.to(torch.float32), input_ids
                     )
+                    token_entropy = get_entropy_from_vocab_parallel_logits(
+                        outputs.logits.to(torch.float32)
+                    )
                 else:
                     # Extract logprobs for each token in the sequence by gathering the logprob
                     # corresponding to the next token at each position
                     # Input shapes:
                     #   log_probs: [batch_size, sequence_length, vocab_size] - logits for each position
                     #   token_ids: [batch_size, sequence_length] - actual tokens
-                    # Output shape: [batch_size, sequence_length] - logprob of each token given previous
+                    # Output shape logprobs: [batch_size, sequence_length] - logprob of each token given previous
+                    # Output shape tokenentropy: [batch_size, sequence_length] - entropy of each token distribution
                     # We get logprob of token[t+1] from logits[t], prepending 0 to maintain sequence length
 
                     log_probs = torch.nn.functional.log_softmax(
                         outputs.logits.to(torch.float32), dim=-1
                     )
+                    probs = torch.exp(log_probs)
+                    entropy = -torch.sum(probs * log_probs, dim=-1)
+                    token_entropy = entropy[:, :-1]
                     next_tokens = input_ids[:, 1:]
                     log_probs = log_probs[:, :-1]
                     token_logprobs = log_probs.gather(
@@ -581,10 +590,13 @@ class DTensorPolicyWorker:
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
-
-                # Apply mask to zero out padding tokens logprobs
                 token_logprobs = token_logprobs * attention_mask
                 all_log_probs.append(token_logprobs)
+                token_entropy = torch.cat(
+                    [torch.zeros_like(token_entropy[:, :1]), token_entropy], dim=1
+                )
+                token_entropy = token_entropy * attention_mask
+                all_entropies.append(token_entropy)
 
         # Concatenate all batches
         return_data = BatchedDataDict[LogprobOutputSpec]()

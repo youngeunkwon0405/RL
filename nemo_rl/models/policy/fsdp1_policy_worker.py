@@ -437,6 +437,7 @@ class FSDP1PolicyWorker:
             else self.cfg["logprob_batch_size"]
         )
         all_log_probs = []
+        all_entropies = []
         self.model.eval()
 
         # Process in batches
@@ -468,13 +469,18 @@ class FSDP1PolicyWorker:
                     outputs.logits.to(torch.float32), dim=-1
                 )
 
+                probs = torch.exp(log_probs)
+                entropy = -torch.sum(probs * log_probs, dim=-1)
+
                 # Extract logprobs for each token in the sequence by gathering the logprob
                 # corresponding to the next token at each position
                 # Input shapes:
                 #   log_probs: [batch_size, sequence_length, vocab_size] - logits for each position
                 #   token_ids: [batch_size, sequence_length] - actual tokens
-                # Output shape: [batch_size, sequence_length] - logprob of each token given previous
+                # Output shape logprobs: [batch_size, sequence_length] - logprob of each token given previous
+                # Output shape tokenentropy: [batch_size, sequence_length] - entropy of each token distribution
                 # We get logprob of token[t+1] from logits[t], prepending 0 to maintain sequence length
+                
                 token_ids = input_ids
                 next_tokens = token_ids[:, 1:]  # Skip first token
                 log_probs = log_probs[:, :-1]  # Remove last position's logits
@@ -491,9 +497,18 @@ class FSDP1PolicyWorker:
                 token_logprobs = token_logprobs * attention_mask
                 all_log_probs.append(token_logprobs)
 
+                # Align entropy with our token logprobs
+                token_entropy = entropy[:, :-1]
+                token_entropy = torch.cat(
+                    [torch.zeros_like(token_entropy[:, :1]), token_entropy], dim=1
+                )
+                token_entropy = token_entropy * attention_mask
+                all_entropies.append(token_entropy)
+
         # Concatenate all batches
         return_data = BatchedDataDict[LogprobOutputSpec]()
         return_data["logprobs"] = torch.cat(all_log_probs, dim=0).cpu()
+        return_data["tokenentropy"] = torch.cat(all_entropies, dim=0).cpu()
 
         return return_data
 
