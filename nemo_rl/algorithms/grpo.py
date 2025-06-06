@@ -581,8 +581,7 @@ def grpo_train(
         # Logging
         # Log training data
         log_data = {"content": flat_messages["content"]}
-        log_data["rewards"] = rewards_log.tolist()
-        log_data["rewards_top_p_std"] = rewards.tolist()
+        log_data["rewards"] = rewards.tolist()
         log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
