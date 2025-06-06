@@ -65,10 +65,15 @@ class BashTool:
     
     def _is_command_safe(self, command: str) -> bool:
         command_lower = command.lower().strip()
+        command_words = command_lower.split()
         
         for blacklisted in self.BLACKLISTED_COMMANDS:
-            if blacklisted in command_lower:
-                return False
+            if ' ' in blacklisted:
+                if blacklisted in command_lower:
+                    return False
+            else:
+                if blacklisted in command_words:
+                    return False
         
         dangerous_patterns = [
             ">/dev/",
@@ -89,7 +94,7 @@ class BashTool:
         if not self.enable_network:
             network_commands = ["ping", "telnet", "ftp", "sftp", "dig", "nslookup", "traceroute"]
             for net_cmd in network_commands:
-                if net_cmd in command_lower.split():
+                if net_cmd in command_words:
                     return False
         
         return True
