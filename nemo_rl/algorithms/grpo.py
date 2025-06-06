@@ -505,7 +505,7 @@ def grpo_train(
 
             print("▶ Computing logprobs...")
             with timer.time("policy_and_reference_logprobs"):
-                fprops = policy.get_logprobs(train_data)["logprobs"]
+                fprops = policy.get_logprobs(train_data)
                 fprop_logprobs, fprop_token_entropy = fprops["logprobs"], fprops["tokenentropy"]
                 reference_logprobs = policy.get_reference_policy_logprobs(train_data)[
                     "reference_logprobs"
