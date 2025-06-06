@@ -602,15 +602,20 @@ class DTensorPolicyWorker:
         return_data = BatchedDataDict[LogprobOutputSpec]()
 
         all_log_probs_padded = []
-        for lp in all_log_probs:
+        all_entropies_padded = []
+        for lp, entropy in zip(all_log_probs, all_entropies):
             padding_needed = seq_dim_size - lp.shape[1]
             if padding_needed > 0:
                 lp = torch.nn.functional.pad(
                     lp, (0, padding_needed), mode="constant", value=0.0
                 )
+                entropy = torch.nn.functional.pad(
+                    entropy, (0, padding_needed), mode="constant", value=0.0
+                )
             all_log_probs_padded.append(lp)
+            all_entropies_padded.append(entropy)
         return_data["logprobs"] = torch.cat(all_log_probs_padded, dim=0).cpu()
-        return_data["tokenentropy"] = torch.cat(all_entropies, dim=0).cpu()
+        return_data["tokenentropy"] = torch.cat(all_entropies_padded, dim=0).cpu()
 
         return return_data
 
