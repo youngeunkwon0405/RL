@@ -1,5 +1,6 @@
 grpo:
   top_p_std: 0.20
+  top_p_ent: 0.20
   num_prompts_per_step: 64
   num_generations_per_prompt: 32
   max_rollout_turns: 1
