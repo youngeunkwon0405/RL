@@ -1,0 +1,18 @@
+# Sample sweep configuration for GRPO math experiments
+# Each parameter can have a list of values to sweep over
+# The launcher will generate all possible combinations
+
+# Required parameter that must match the target script name
+script_path: "examples/run_grpo_math.py"
+
+# Optional: Path to the base YAML config file
+# Can be overridden by the --config command-line argument
+# If null and --config is not provided, no base config will be used
+config_path: "examples/configs/recipes/llm/grpo-qwen2.5-32b-16n8g-fsdp2tp8sp-actckpt-long.v3.yaml" 
+
+
+# Model configuration
+policy.model_name: ["Qwen/Qwen2.5-32B"]
+
+# Top P STD
+grpo.top_p_std: [1.0]
