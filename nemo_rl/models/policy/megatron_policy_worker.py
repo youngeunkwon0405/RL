@@ -257,38 +257,38 @@ class MegatronPolicyWorker:
         }
         self.dtype = dtype_map[self.cfg["precision"]]
 
-        # cfg["model_name"] is allowed to be either an HF model name or a path to a Megatron checkpoint dir
+        # cfg["model_name"] is allowed to be either an HF model name or a path to an HF checkpoint
         # check if hf_model_name is a path
         hf_model_name = self.cfg["model_name"]
+        # Check if the checkpoint already exists
+        hf_model_subdir = hf_model_name
         if os.path.exists(hf_model_name):
-            pt_checkpoint_exists = True
-            pretrained_path = hf_model_name
-            pretrained_run_config = os.path.join(pretrained_path, "run_config.yaml")
-        else:
-            # Check if the checkpoint already exists
-            if megatron_checkpoint_home is not None:
-                pretrained_path = f"{megatron_checkpoint_home}/{hf_model_name}"
-            else:
-                pretrained_path = f"/opt/checkpoints/tron/{hf_model_name}"
-            pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
-                os.path.join(pretrained_path, "iter_0000000")
-            )
-            if get_rank_safe() == 0:
-                if pt_checkpoint_exists:
-                    print(
-                        f"Checkpoint already exists at {pretrained_path}. Skipping import."
-                    )
-                else:
-                    import_model_from_hf_name(hf_model_name, pretrained_path)
-                pre_init_communication_queue.put(True)
-            else:
-                pre_init_communication_queue.get()
-                pre_init_communication_queue.put(True)
-                pass
+            hf_model_subdir = f"model-{hf_model_subdir.replace("/", "_")}"
 
-            pretrained_run_config = os.path.join(
-                pretrained_path, "iter_0000000/run_config.yaml"
-            )
+        if megatron_checkpoint_home is not None:
+            pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
+        else:
+            pretrained_path = f"/opt/checkpoints/tron/{hf_model_subdir}"
+        print("PRETRAINED PATH: ", pretrained_path)
+        pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
+            os.path.join(pretrained_path, "iter_0000000")
+        )
+        if get_rank_safe() == 0:
+            if pt_checkpoint_exists:
+                print(
+                    f"Checkpoint already exists at {pretrained_path}. Skipping import."
+                )
+            else:
+                import_model_from_hf_name(hf_model_name, pretrained_path)
+            pre_init_communication_queue.put(True)
+        else:
+            pre_init_communication_queue.get()
+            pre_init_communication_queue.put(True)
+            pass
+
+        pretrained_run_config = os.path.join(
+            pretrained_path, "iter_0000000/run_config.yaml"
+        )
 
         self.tokenizer = tokenizer
         if self.tokenizer.pad_token is None:
