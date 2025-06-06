@@ -56,6 +56,8 @@ class MathToolsMetadata(TypedDict):
 class MathToolsEnvironment(EnvironmentInterface):
     def __init__(self, cfg: MathToolsConfig):
         self.cfg = cfg
+        
+        # TODO: use sandbox code execution
         self.bash_tool = BashTool(
             timeout=cfg.get("max_bash_timeout", 30),
             memory_limit=cfg.get("memory_limit", 512),
@@ -193,6 +195,20 @@ class MathToolsEnvironment(EnvironmentInterface):
         message_log_batch: list[list[dict[str, str]]],
         metadata_batch: list[MathToolsMetadata],
     ) -> EnvironmentReturn:
+        """Runs a step in the math environment.
+
+        Args:
+            message_log: list[list[dict[str, str]]]. A batch of OpenAI-API-like message logs that represent interactions with the LLM.
+            metadata: list[MathToolsMetadata]. The grader will use the 'ground_truth' key to evaluate correctness.
+
+        Returns:
+            EnvironmentReturn: A tuple containing:
+                - list[dict[str, str]]: Observations/responses batch
+                - list[dict]: Updated metadata
+                - list[str]: Next stop strings for the next turn
+                - Tensor: Rewards tensor
+                - Tensor: Done flags tensor
+        """
         observations = []
         rewards = []
         terminateds = []
@@ -245,7 +261,7 @@ class MathToolsEnvironment(EnvironmentInterface):
                 updated_metadata = metadata.copy()
                 updated_metadata["current_turn"] += 1
                 next_metadata.append(updated_metadata)
-                next_stop_strings.append(["</tool_call>", "<|im_end|>"])
+                next_stop_strings.append(["</tool_call>", "<|im_end|>"]) # not sure we need to append here
                 continue
             
             # execute tools
@@ -307,14 +323,35 @@ class MathToolsEnvironment(EnvironmentInterface):
         
         total_tool_calls = 0
         tool_usage = {"bash": 0, "file_edit": 0}
+        total_turns = 0
+        num_problems = 0
+        
+        if (batch["rewards"] == 1).float().sum() > 0:
+            correct_solution_generation_lengths = (
+                (batch["generation_lengths"] - batch["prompt_lengths"])[
+                    batch["rewards"] == 1
+                ]
+                .float()
+                .mean()
+                .item()
+            )
+        else:
+            correct_solution_generation_lengths = 0
         
         if "extra_env_info" in batch:
             for info in batch["extra_env_info"]:
-                if info and "tool_calls_count" in info:
-                    for tool, count in info["tool_calls_count"].items():
-                        if tool in tool_usage:
-                            tool_usage[tool] += count
-                        total_tool_calls += count
+                if info:
+                    if "tool_calls_count" in info:
+                        for tool, count in info["tool_calls_count"].items():
+                            if tool in tool_usage:
+                                tool_usage[tool] += count
+                            total_tool_calls += count
+                    
+                    if "current_turn" in info:
+                        total_turns += info["current_turn"]
+                        num_problems += 1
+        
+        avg_turns_per_problem = total_turns / num_problems if num_problems > 0 else 0
         
         metrics = {
             "accuracy": accuracy,
@@ -323,8 +360,11 @@ class MathToolsEnvironment(EnvironmentInterface):
             ),
             "fraction_of_samples_properly_ended": batch["is_end"].float().mean().item(),
             "num_problems_in_batch": batch["is_end"].shape[0],
-            "avg_turns_per_problem": batch.get("generation_lengths", torch.zeros(1)).float().mean().item(),
+            "avg_turns_per_problem": avg_turns_per_problem,
             "total_tool_calls": total_tool_calls,
+            "generation_lengths": batch["generation_lengths"].float().mean().item(),
+            "prompt_lengths": batch["prompt_lengths"].float().mean().item(),
+            "correct_solution_generation_lengths": correct_solution_generation_lengths,
             **{f"tool_usage_{k}": v for k, v in tool_usage.items()},
         }
         
