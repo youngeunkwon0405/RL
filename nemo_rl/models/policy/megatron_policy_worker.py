@@ -13,6 +13,7 @@
 # limitations under the License.
 import gc
 import os
+import re
 import time
 import warnings
 from collections import defaultdict
@@ -266,7 +267,11 @@ class MegatronPolicyWorker:
         # Check if the checkpoint already exists
         hf_model_subdir = hf_model_name
         if os.path.exists(hf_model_name):
+<<<<<<< HEAD
             hf_model_subdir = f"model-{hf_model_subdir.replace('/', '_')}"
+=======
+            hf_model_subdir = f"model_{hf_model_subdir.replace("/", "_")}"
+>>>>>>> e818ae2 (Updates)
 
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
@@ -347,6 +352,10 @@ class MegatronPolicyWorker:
             "moe_router_bias_update_rate"
         ]
         model_cfg.disable_bf16_reduced_precision_matmul = True
+        if self.cfg["megatron_cfg"]["activation_checkpointing"]:
+            model_cfg.activations_checkpoint_granularity = "full"
+            model_cfg.activations_checkpoint_method = "uniform"
+            model_cfg.activations_checkpoint_num_layers = 1
 
         # model_cfg.moe_router_num_groups = 1
         # model_cfg.moe_router_group_topk = 1
@@ -1027,6 +1036,7 @@ class MegatronPolicyWorker:
         self.model.eval()
 
         # Get parallel info
+<<<<<<< HEAD
         tp_group = parallel_state.get_tensor_model_parallel_group()
         tp_world_size = torch.distributed.get_world_size(tp_group)
         tp_group_rank_ids = get_all_rank_ids_in_group(tp_group)
@@ -1038,6 +1048,10 @@ class MegatronPolicyWorker:
         ep_group = parallel_state.get_expert_model_parallel_group()
         ep_world_size = torch.distributed.get_world_size(ep_group)
         ep_group_rank_ids = get_all_rank_ids_in_group(ep_group)
+=======
+        tp_world_size = parallel_state.get_tensor_model_parallel_world_size()
+        ep_world_size = parallel_state.get_expert_model_parallel_world_size()
+>>>>>>> e818ae2 (Updates)
 
         # Collect parameter info
         param_info = []
@@ -1063,6 +1077,13 @@ class MegatronPolicyWorker:
 
             pp_rank_ids = tuple(sorted(pp_group_rank_ids))
             ep_rank_ids = tuple(sorted(ep_group_rank_ids))
+
+            ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
+            if ep_pattern.search(name):
+                ep = ep_world_size
+            else:
+                ep = 1
+
 
             # Calculate size for this parameter
             prec_to_bytes = {
