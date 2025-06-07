@@ -16,3 +16,6 @@ policy.model_name: ["Qwen/Qwen2.5-14B-Base"]
 
 # Top P STD
 grpo.top_p_std: [0.2, 0.5, 1.0]
+
+# Top P Entropy
+grpo.top_p_entropy: [0.2, 0.5, 1.0]
