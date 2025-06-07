@@ -472,6 +472,17 @@ wheels = [
 ]
 
 [[package]]
+name = "causal-conv1d"
+version = "1.5.0.post8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "ninja" },
+    { name = "packaging" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/51/2a/5d5ce2bbc1dd20ed98c57a7e3456aaab2f5a25088aaf1fbb74142450054f/causal_conv1d-1.5.0.post8.tar.gz", hash = "sha256:b3dc31fac0278da281b3f24ab164b01bd4518ac744e9fdd8d5d65adbf45b7136", size = 9401, upload-time = "2024-12-06T09:48:49.687Z" }
+
+[[package]]
 name = "certifi"
 version = "2025.4.26"
 source = { registry = "https://pypi.org/simple" }
@@ -2276,6 +2287,20 @@ wheels = [
 ]
 
 [[package]]
+name = "mamba-ssm"
+version = "2.2.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "ninja" },
+    { name = "packaging" },
+    { name = "setuptools" },
+    { name = "torch" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1d/c7/6e21ecece28e6d625f42e708c7523cd78ec82d1622f98562f82bf02748b7/mamba_ssm-2.2.4.tar.gz", hash = "sha256:e4114c69302796c91b71e90032c2d974f611608fab331582a80de6eaf075efb9", size = 91800, upload-time = "2024-12-06T23:22:09.794Z" }
+
+[[package]]
 name = "markdown"
 version = "3.8"
 source = { registry = "https://pypi.org/simple" }
@@ -2818,9 +2843,11 @@ name = "nemo-rl"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
+    { name = "causal-conv1d" },
     { name = "colored" },
     { name = "datasets" },
     { name = "hydra-core" },
+    { name = "mamba-ssm" },
     { name = "math-verify" },
     { name = "numpy" },
     { name = "nvidia-ml-py" },
@@ -2879,9 +2906,11 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
+    { name = "causal-conv1d" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets" },
     { name = "hydra-core" },
+    { name = "mamba-ssm" },
     { name = "math-verify" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM-workspace" },
     { name = "nemo-tron", marker = "extra == 'mcore'", editable = "3rdparty/NeMo-workspace" },
