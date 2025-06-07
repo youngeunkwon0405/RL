@@ -71,6 +71,7 @@ policy:
     enabled: true
     empty_unused_memory_level: 0
     freeze_moe_router: true
+    activation_checkpointing: false
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
     num_layers_in_first_pipeline_stage: null
