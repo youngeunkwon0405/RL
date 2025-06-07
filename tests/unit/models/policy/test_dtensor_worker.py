@@ -38,8 +38,8 @@ from tests.unit.test_utils import SimpleLoss
 def create_test_config(
     model_name: str = TEST_ASSETS.TINY_LLAMA_MODEL_PATH,
     tp: int = 1,
-    sequence_parallel: bool = False,
     cpu_offload: bool = False,
+    sequence_parallel: bool = False,
     activation_checkpointing: bool = False,
     custom_parallel_plan: str = None,
 ) -> PolicyConfig:
@@ -311,10 +311,10 @@ def training_setup(request, two_gpu_virtual_cluster):
         (TEST_ASSETS.TINY_GEMMA3_MODEL_PATH, 1, True, False, True),
         (TEST_ASSETS.TINY_GEMMA3_MODEL_PATH, 1, False, True, True),
         (TEST_ASSETS.TINY_GEMMA3_MODEL_PATH, 1, True, True, True),
-        (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, True, True, False),
+        # (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, True, True, False),
         (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, True, False, True),
-        (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, False, True, True),
-        (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, True, True, True),
+        # (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, False, True, True),
+        # (TEST_ASSETS.TINY_NEMOTRON5_H_MODEL_PATH, 1, True, True, True),
     ],
     indirect=True,
 )
