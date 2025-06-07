@@ -222,6 +222,9 @@ class VllmGenerationWorker:
         if not self.cfg["vllm_cfg"]["async_engine"]:
             os.environ["VLLM_USE_V1"] = "1"
 
+        # HACK for nm5
+        os.environ["VLLM_USE_V1"] = "0"
+
         load_format = self.cfg["vllm_cfg"]["load_format"]
         if ModelFlag.VLLM_LOAD_FORMAT_AUTO.matches(self.model_name):
             load_format = "auto"
@@ -233,7 +236,8 @@ class VllmGenerationWorker:
             tensor_parallel_size=self.tensor_parallel_size,
             pipeline_parallel_size=self.pipeline_parallel_size,
             gpu_memory_utilization=self.gpu_memory_utilization,
-            enable_prefix_caching=torch.cuda.get_device_capability()[0] >= 8,
+            # enable_prefix_caching=torch.cuda.get_device_capability()[0] >= 8,
+            enable_prefix_caching=False,
             dtype=self.cfg["vllm_cfg"]["precision"],
             seed=seed,
             # Don't use cuda-graph by default as it leads to convergence issues (see https://github.com/NVIDIA/NeMo-RL/issues/186)

@@ -380,13 +380,12 @@ wheels = [
 [[package]]
 name = "causal-conv1d"
 version = "1.5.0.post8"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/Dao-AILab/causal-conv1d?tag=v1.5.0.post8#82867a9d2e6907cc0f637ac6aff318f696838548" }
 dependencies = [
     { name = "ninja" },
     { name = "packaging" },
     { name = "torch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/51/2a/5d5ce2bbc1dd20ed98c57a7e3456aaab2f5a25088aaf1fbb74142450054f/causal_conv1d-1.5.0.post8.tar.gz", hash = "sha256:b3dc31fac0278da281b3f24ab164b01bd4518ac744e9fdd8d5d65adbf45b7136", size = 9401, upload-time = "2024-12-06T09:48:49.687Z" }
 
 [[package]]
 name = "certifi"
@@ -527,16 +526,16 @@ wheels = [
 
 [[package]]
 name = "compressed-tensors"
-version = "0.9.4"
+version = "0.10.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pydantic" },
     { name = "torch" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/af/cb/1de205e8018cb21a4dc995324652115cf209357de5aaed8d6af101d26b42/compressed_tensors-0.9.4.tar.gz", hash = "sha256:34779417ffa31a207adb0cc4fd2a86cb75e239e504fb2068e494092f4b5703b7", size = 111223, upload-time = "2025-04-24T19:19:07.826Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e9/6e/3b4155cfc3cf55b9bb319cc1e865e455b51aaf804e1b64657f1452a3ce5a/compressed_tensors-0.10.0.tar.gz", hash = "sha256:e56cfefecfe25e189ef4be97396195792ec3e67b50ab9046875fd005146a53f6", size = 122625, upload-time = "2025-06-05T17:49:41.269Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/98/bf09fd8196e0b658e7b48404ed1b60544b5111f80731d76b378e3d8765bb/compressed_tensors-0.9.4-py3-none-any.whl", hash = "sha256:b12e3616f06243a074f61b736596882c6549cdc3669ac48434102a4a88e8002a", size = 100345, upload-time = "2025-04-24T19:19:05.415Z" },
+    { url = "https://files.pythonhosted.org/packages/85/77/24a7f092670b9c5eb3a610ba55cffe4e13a3d8cde10efba1341ea4e6bb09/compressed_tensors-0.10.0-py3-none-any.whl", hash = "sha256:a7a1c7b330ee6e3a26832ca992ae9e317dfe22c7e2dbc2722c91c0362e361518", size = 111759, upload-time = "2025-06-05T17:49:38.949Z" },
 ]
 
 [[package]]
@@ -1848,7 +1847,7 @@ wheels = [
 [[package]]
 name = "mamba-ssm"
 version = "2.2.4"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/state-spaces/mamba.git?tag=v2.2.4#95d8aba8a8c75aedcaa6143713b11e745e7cd0d9" }
 dependencies = [
     { name = "einops" },
     { name = "ninja" },
@@ -1857,7 +1856,6 @@ dependencies = [
     { name = "torch" },
     { name = "transformers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1d/c7/6e21ecece28e6d625f42e708c7523cd78ec82d1622f98562f82bf02748b7/mamba_ssm-2.2.4.tar.gz", hash = "sha256:e4114c69302796c91b71e90032c2d974f611608fab331582a80de6eaf075efb9", size = 91800, upload-time = "2024-12-06T23:22:09.794Z" }
 
 [[package]]
 name = "markdown"
@@ -2360,11 +2358,11 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
-    { name = "causal-conv1d" },
+    { name = "causal-conv1d", git = "https://github.com/Dao-AILab/causal-conv1d?tag=v1.5.0.post8" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets", specifier = ">=3.6.0" },
     { name = "hydra-core" },
-    { name = "mamba-ssm" },
+    { name = "mamba-ssm", git = "https://github.com/state-spaces/mamba.git?tag=v2.2.4" },
     { name = "math-verify" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM-workspace" },
     { name = "nemo-tron", marker = "extra == 'mcore'", editable = "3rdparty/NeMo-workspace" },
@@ -2378,7 +2376,7 @@ requires-dist = [
     { name = "torchdata" },
     { name = "transformer-engine", extras = ["pytorch"], marker = "extra == 'mcore'", specifier = "==2.3.0" },
     { name = "transformers", specifier = ">=4.51.0" },
-    { name = "vllm", marker = "extra == 'vllm'", specifier = "==0.9.0" },
+    { name = "vllm", marker = "extra == 'vllm'", index = "https://wheels.vllm.ai/nightly" },
     { name = "wandb" },
 ]
 provides-extras = ["vllm", "mcore"]
@@ -5023,8 +5021,8 @@ wheels = [
 
 [[package]]
 name = "vllm"
-version = "0.9.0"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.1.dev230+g2d8476e46"
+source = { registry = "https://wheels.vllm.ai/nightly" }
 dependencies = [
     { name = "aiohttp" },
     { name = "blake3" },
@@ -5082,9 +5080,8 @@ dependencies = [
     { name = "xformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "xgrammar", marker = "platform_machine == 'aarch64' or platform_machine == 'x86_64'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/e6/b4703aa8a0ce74984471cbe36b0f8c715e198ff68ca19eb0b22600703488/vllm-0.9.0.tar.gz", hash = "sha256:78e3e71fbbd1adfc3b7095b4ab4b6d341c0cffc9e8b96f0c74db275d60108902", size = 8551061, upload-time = "2025-05-28T01:30:40.781Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cd/08/cb88fd52c08df57ccc4f722241150643d521b3174f8d0c3a1ec5549c3927/vllm-0.9.0-cp38-abi3-manylinux1_x86_64.whl", hash = "sha256:a130715cc915377f78e84088fc35c426266e278a0793be0b2ad78deda2e2f55e", size = 377192911, upload-time = "2025-05-28T01:30:28.547Z" },
+    { url = "https://wheels.vllm.ai/nightly/vllm-0.9.1.dev230%2Bg2d8476e46-cp38-abi3-manylinux1_x86_64.whl" },
 ]
 
 [[package]]

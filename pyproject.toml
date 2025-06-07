@@ -35,14 +35,13 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
-    #"mamba-ssm[causal-conv1d]",
     "mamba-ssm",
     "causal-conv1d",
 ]
 
 [project.optional-dependencies]
 vllm = [
-    "vllm==0.9.0",
+    "vllm",
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
@@ -97,6 +96,13 @@ megatron-core = { workspace = true }
 nemo-tron = { workspace = true }
 # The NeMo Run source to be used by nemo-tron
 nemo_run = { git = "https://github.com/NVIDIA/NeMo-Run", rev = "414f0077c648fde2c71bb1186e97ccbf96d6844c" }
+causal-conv1d = { git = "https://github.com/Dao-AILab/causal-conv1d", tag = "v1.5.0.post8" }
+mamba-ssm = { git = "https://github.com/state-spaces/mamba.git", tag = "v2.2.4" }
+vllm = { index = "vllm-index" }
+
+[[tool.uv.index]]
+name = "vllm-index"
+url = "https://wheels.vllm.ai/nightly"
 
 [tool.uv.workspace]
 members = [
