@@ -12,7 +12,7 @@ config_path: "examples/configs/grpo_math_14B.yaml"
 
 
 # Model configuration
-policy.model_name: ["Qwen/Qwen2.5-14B-Base"]
+policy.model_name: ["Qwen/Qwen3-14B-Base"]
 
 # Top P STD
 grpo.top_p_std: [1.0]
