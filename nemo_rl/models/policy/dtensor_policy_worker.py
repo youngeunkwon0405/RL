@@ -658,7 +658,8 @@ class DTensorPolicyWorker:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         # TODO(ahmadki): for now, with the model input with sequence packing is of batch of size 1.
                         # a better is code can be found at: cae414c9f88d7ce8feac54b56b58fef50c0dc789, but needs some work
-                        if self.cfg["packing_strategy"] == "flash_attention":
+                        packing_strategy = self.cfg.get("packing_strategy", "default")
+                        if packing_strategy == "flash_attention":
                             # input_ids, position_ids, flash_attn_kwargs = (
                             #     _pack_microbatch(mb)
                             # )
@@ -677,7 +678,7 @@ class DTensorPolicyWorker:
                                 # packed_sequence_size=mb.packed_sequence_size,
                             )
 
-                        elif self.cfg["packing_strategy"] == "vector":
+                        elif packing_strategy == "vector":
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, flash_attn_kwargs = (
                                 _pack_microbatch(mb)
@@ -690,7 +691,7 @@ class DTensorPolicyWorker:
                             )
                             flash_attn_kwargs = {}
 
-                        elif self.cfg["packing_strategy"] == "matrix":
+                        elif packing_strategy == "matrix":
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, attention_mask = pack_sequences(
                                 input_ids=input_ids,
@@ -701,7 +702,7 @@ class DTensorPolicyWorker:
                             )
                             flash_attn_kwargs = {}
 
-                        elif self.cfg["packing_strategy"] == "default":
+                        elif packing_strategy == "default":
                             input_ids = mb.get("input_ids").cuda()
                             batch_size, seq_len = input_ids.shape
 
@@ -743,13 +744,13 @@ class DTensorPolicyWorker:
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
 
-                    if self.cfg["packing_strategy"] == "flash_attention":
+                    if packing_strategy == "flash_attention":
                         logits = _unpack_tensor(logits, mb)
-                    elif self.cfg["packing_strategy"] == "vector":
+                    elif packing_strategy == "vector":
                         logits = _unpack_tensor(logits, mb)
-                    elif self.cfg["packing_strategy"] == "matrix":
+                    elif packing_strategy == "matrix":
                         logits = _unpack_tensor(logits, mb)  # FIXME(ahmadki)
-                    elif self.cfg["packing_strategy"] == "default":
+                    elif packing_strategy == "default":
                         pass
                     else:
                         raise ValueError(
