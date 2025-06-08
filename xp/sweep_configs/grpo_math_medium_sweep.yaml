@@ -18,4 +18,4 @@ policy.model_name: ["Qwen/Qwen2.5-14B-Base"]
 grpo.top_p_std: [1.0]
 
 # Top P Entropy
-grpo.top_p_entropy: [1.0]
+grpo.top_p_ent: [1.0]
