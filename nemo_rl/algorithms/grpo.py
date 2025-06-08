@@ -683,7 +683,7 @@ def validate(
         max_batches = (
             master_config["grpo"]["max_val_samples"]
             // master_config["grpo"]["val_batch_size"]
-            // master_config["grpo"]["val_accuracy_at_k"]
+            * master_config["grpo"]["val_accuracy_at_k"]
         )
         for batch_idx, val_batch in enumerate(val_dataloader):
             if batch_idx >= max_batches:
