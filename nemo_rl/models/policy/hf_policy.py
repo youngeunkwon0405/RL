@@ -255,13 +255,13 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
             self.dynamic_batching_args["max_tokens_per_microbatch"] = self.cfg[
                 "dynamic_batching"
             ]["train_mb_tokens"]
-            sharded_data, _ = data.shard_by_batch_size2(
+            sharded_data, _ = data.shard_by_batch_size(
                 dp_size,
                 batch_size=batch_size,
                 dynamic_batching_args=self.dynamic_batching_args,
             )
         else:
-            sharded_data = data.shard_by_batch_size2(
+            sharded_data = data.shard_by_batch_size(
                 dp_size,
                 batch_size=batch_size,
             )
