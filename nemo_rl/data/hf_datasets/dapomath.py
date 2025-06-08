@@ -48,7 +48,7 @@ def prepare_dapomath17k_dataset(
     )
 
     # Load the original dataset
-    original_ds = load_dataset("open-r1/DAPO-Math-17k-Processed")
+    original_ds = load_dataset("open-r1/DAPO-Math-17k-Processed", "all")
 
     # Format the examples, removing original columns
     train_formatted = original_ds["train"].map(
