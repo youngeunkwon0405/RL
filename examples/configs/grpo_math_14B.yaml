@@ -10,7 +10,7 @@ policy:
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 32
-  train_micro_batch_size: 2
+  train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 2
   max_total_sequence_length: 8192
@@ -23,7 +23,7 @@ policy:
     cpu_offload: false
     sequence_parallel: true
     activation_checkpointing: true
-    tensor_parallel_size: 4
+    tensor_parallel_size: 8
     custom_parallel_plan: null
 
   dynamic_batching:
