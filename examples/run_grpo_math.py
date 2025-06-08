@@ -28,6 +28,8 @@ from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset
 from nemo_rl.data.hf_datasets.deepscaler import DeepScalerDataset
 from nemo_rl.data.hf_datasets.openmathinstruct2 import OpenMathInstruct2Dataset
+from nemo_rl.data.hf_datasets.dapomath import DAPOMathDataset
+from nemo_rl.data.hf_datasets.aime24 import AIME24Dataset
 from nemo_rl.data.interfaces import (
     DatumSpec,
     LLMMessageLogType,
@@ -203,13 +205,20 @@ def setup_data(
 
     # Load OpenMathInstruct2Dataset using nemo rl datasets
     if data_config["dataset_name"] == "OpenMathInstruct-2":
-        print("Loading nvidia/OpenMathInstruct2Dataset for training and validation")
+        print(
+            "Loading nvidia/OpenMathInstruct2Dataset for training and validation"
+        )
         data: Any = OpenMathInstruct2Dataset()
     elif data_config["dataset_name"] == "DeepScaler":
         print(
             "Loading agentica-org/DeepScaleR-Preview-Dataset for training and validation"
         )
         data: Any = DeepScalerDataset()
+    elif data_config["dataset_name"] == "DAPOMath":
+        print(
+            "Loading open-r1/DAPO-Math-17k-Processed for training"
+        )
+        data: Any = DAPOMathDataset()
     else:
         raise ValueError(f"No processor for dataset {data_config['dataset_name']}.")
 
@@ -244,7 +253,16 @@ def setup_data(
             max_seq_length=data_config["max_input_seq_length"],
         )
     else:
-        val_dataset = None
+        print("No validation dataset found")
+        print("Loading HuggingFaceH4/aime_2024 for validation")
+        data.formatted_ds["validation"] = AIME24Dataset().formatted_ds["validation"]
+        val_dataset = AllTaskProcessedDataset(
+            data.formatted_ds["validation"],
+            tokenizer,
+            math_task_spec,
+            task_data_processors,
+            max_seq_length=data_config["max_input_seq_length"],
+        )
 
     task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
     task_to_env["math"] = math_env

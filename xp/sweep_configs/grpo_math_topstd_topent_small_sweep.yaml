@@ -12,10 +12,17 @@ config_path: "examples/configs/grpo_math_8B.yaml"
 
 
 # Model configuration
-policy.model_name: ["Qwen/Qwen2.5-7B"]
+policy.model_name: ["Qwen/Qwen3-8B-Base"]
 
 # Top P Variance
 grpo.top_p_std: [0.2, 0.5, 1.0]
 
 # Top P Entropy
-grpo.top_p_ent: [0.2, 1.0]
+grpo.top_p_ent: [0.2, 0.5, 1.0]
+
+# Training and Validation Dataset
+data.dataset_name: ["DAPOMath"]
+grpo.val_batch_size: [30]
+grpo.max_val_samples: [240] # 240 = 30 * 8, fit everything in one batch
+grpo.val_accuracy_at_k: [8]
+grpo.val_period: [1]
