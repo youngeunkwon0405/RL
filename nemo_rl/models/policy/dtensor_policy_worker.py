@@ -408,7 +408,7 @@ class DTensorPolicyWorker:
         print(f"[Rank {rank}] Loading model {model_name} on CPU...")
         attn_implementation = (
             "flash_attention_2"
-            if self.cfg["packing_strategy"] == "flash_attention"
+            if self.cfg.get("packing_strategy", None) == "flash_attention"
             else None
         )
         print(
