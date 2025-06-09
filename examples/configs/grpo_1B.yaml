@@ -150,9 +150,8 @@ env:
     enable: true
     num_workers: 32
     livecodebench_tests_path: ...
-    execution_timeout: 5
-    max_total_timeout: 30
-    disable_retries: true
+    execution_timeout: 5 # hardcoded in utils for now
+    disable_retries: true # hardcoded in utils for now
 
 logger:
   log_dir: "logs"  # Base directory for all logs
