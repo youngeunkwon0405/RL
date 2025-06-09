@@ -1,0 +1,28 @@
+# Sample sweep configuration for GRPO math experiments
+# Each parameter can have a list of values to sweep over
+# The launcher will generate all possible combinations
+
+# Required parameter that must match the target script name
+script_path: "examples/run_grpo_math.py"
+
+# Optional: Path to the base YAML config file
+# Can be overridden by the --config command-line argument
+# If null and --config is not provided, no base config will be used
+config_path: "examples/configs/grpo_math_8B.yaml" 
+
+
+# Model configuration
+policy.model_name: ["Qwen/Qwen3-8B-Base"]
+
+# Top P Variance
+grpo.top_p_std: [0.2, 0.5, 1.0]
+
+# Top P Entropy
+grpo.top_p_ent: [0.2, 0.5, 1.0]
+
+# Training and Validation Dataset
+data.dataset_name: ["DAPOMath"]
+grpo.val_batch_size: [30]
+grpo.max_val_samples: [240] # 240 = 30 * 8, fit everything in one batch
+grpo.val_accuracy_at_k: [8]
+grpo.val_period: [10]
