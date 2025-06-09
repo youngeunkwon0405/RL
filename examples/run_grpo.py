@@ -30,6 +30,7 @@ from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.environments.llm_judge_async_environment import LLMJudgeAsyncEnvironment
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.environments.ifeval_environment import IFEvalEnvironment
+from nemo_rl.environments.lcb_environment import LCBEnvironment
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -165,6 +166,16 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
             },
         ).remote(env_configs["ifeval"])
         task_to_env["ifeval"] = ifeval_env
+    
+    if "lcb" in env_configs and env_configs["lcb"]["enable"]:
+        lcb_env = LCBEnvironment.options(
+            runtime_env={
+                "py_executable": LCBEnvironment.DEFAULT_PY_EXECUTABLE,
+                "env_vars": dict(os.environ),
+            },
+        ).remote(env_configs["lcb"])
+        task_to_env["lcb"] = lcb_env
+    
     if "llm_judge_async" in env_configs and env_configs["llm_judge_async"]["enable"]:
         # Extract max_concurrency from config, default to 16 if not specified
         max_concurrency = env_configs["llm_judge_async"].get("max_concurrency", 16)
