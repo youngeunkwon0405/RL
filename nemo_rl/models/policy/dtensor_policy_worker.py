@@ -107,151 +107,198 @@ def get_cpu_state_dict(
     return new_state_dict
 
 
-def get_attention_mask_for_packed_sequence(x, token_id, eos: bool = True):
-    B, T = x.shape
-    device = x.device
-    eos_idx = (x.view(-1) == token_id).nonzero(as_tuple=True)[0] + eos
-    eos_idx_expanded = (
-        torch.cat([eos_idx, torch.arange(0, B * T + 1, T, device=device)])
-        .unique()
-        .sort()[0]
+# TODO(ahmadki): move packing code to a different place
+
+
+def group_and_cat_tensors(
+    tensors: list[torch.Tensor], group_sizes: list[int], padding_value: int = 0
+) -> torch.Tensor:
+    """Groups and concatenates tensors according to group_sizes, then pads them to form a 2D tensor.
+
+    Each group of 1D tensors is concatenated into a single 1D tensor, and all resulting
+    group tensors are padded to the same length and stacked into a 2D tensor.
+
+    Args:
+        tensors: List of 1D tensors of varying lengths.
+        group_sizes: List of integers. Each integer specifies how many tensors to group.
+        padding_value: Integer used to pad shorter sequences.
+
+    Returns:
+        A 2D tensor where each row is a padded concatenation of the grouped tensors.
+
+    Example:
+        >>> tensors = [
+        ...     torch.tensor([1, 2]),
+        ...     torch.tensor([3]),
+        ...     torch.tensor([4, 5, 6]),
+        ...     torch.tensor([7])
+        ... ]
+        >>> group_sizes = [2, 2]
+        >>> group_and_cat_tensors(tensors, group_sizes, padding_value=-1)
+        tensor([[ 1,  2,  3, -1, -1],
+                [ 4,  5,  6,  7, -1]])
+    """
+    grouped = []
+    index = 0
+    for size in group_sizes:
+        group = tensors[index : index + size]
+        concat = torch.cat(group, dim=0)
+        grouped.append(concat)
+        index += size
+
+    # Compute the maximum length for padding
+    max_len = max(t.size(0) for t in grouped)
+
+    # Pad each tensor to max_len
+    padded = torch.stack(
+        [
+            torch.nn.functional.pad(t, (0, max_len - t.size(0)), value=padding_value)
+            for t in grouped
+        ]
     )
-    normalized_idx = eos_idx_expanded - (eos_idx_expanded // T) * T
-    normalized_idx = torch.where(normalized_idx == 0, T, normalized_idx)
-    reps = normalized_idx[1:] - normalized_idx[:-1]
-    reps = torch.where(reps < 1, normalized_idx[1:], reps)
-    repeated_idx = (
-        torch.repeat_interleave(normalized_idx[1:], reps)
-        .view(B, 1, T)
-        .expand(-1, T, -1)
+
+    return padded
+
+
+def pack_sequences(
+    input_ids: torch.Tensor,
+    input_lengths: torch.Tensor,
+    packed_sequence_size: list[int],
+    padding_value: int = 0,
+    return_attention_mask: bool = True,
+) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    """Packs sequences into rows where each row concatenates multiple sequences.
+
+    Useful for sequence packing in transformer models (e.g. for SFT training). Returns:
+    packed input_ids, packed position_ids, and optional attention_mask.
+
+    Args:
+        input_ids (torch.Tensor): Tensor of shape [num_sequences, max_seq_len]
+        input_lengths (torch.Tensor): Tensor of shape [num_sequences], containing true lengths
+        packed_sequence_size (List[int]): How many sequences to pack per row
+        padding_value (int): Pad value for input_ids
+        return_attention_mask (bool): Whether to return per-row causal attention mask
+
+    Returns:
+        Tuple:
+            input_ids_packed (torch.Tensor): [batch_size, max_packed_seq_len]
+            position_ids_packed (torch.Tensor): [batch_size, max_packed_seq_len]
+            attention_mask (Optional[torch.Tensor]): [batch_size, max_len, max_len] if requested
+
+    Example:
+        >>> input_ids = torch.tensor([
+        ...     [1, 2, 0, 0],   # len 2
+        ...     [3, 4, 5, 0],   # len 3
+        ...     [6, 0, 0, 0],   # len 1
+        ...     [7, 8, 9, 9],   # len 4
+        ...     [8, 7, 0, 0],   # len 2
+        ...     [6, 0, 0, 0],   # len 1
+        ...     [5, 4, 3, 0],   # len 3
+        ... ])
+        >>> input_lengths = torch.tensor([2, 3, 1, 4, 2, 1, 3])
+        >>> packed_sequence_size = [3, 4]
+        >>> input_ids_packed, position_ids_packed, attention_mask = pack_sequences(
+        ...     input_ids, input_lengths, packed_sequence_size, padding_value=-1, return_attention_mask=True
+        ... )
+        >>> input_ids_packed
+        tensor([
+            [ 1,  2,  3,  4,  5,  6, -1, -1, -1, -1],
+            [ 7,  8,  9,  9,  8,  7,  6,  5,  4,  3]
+        ])
+        >>> position_ids_packed
+        tensor([
+            [0, 1, 0, 1, 2, 0, 0, 0, 0, 0],
+            [0, 1, 2, 3, 0, 1, 0, 0, 1, 2]
+        ])
+        >>> attention_mask[0]
+        tensor([
+            [ True,  True, False, False, False, False, False, False, False, False],
+            [False, False,  True,  True,  True, False, False, False, False, False],
+            [False, False, False, False, False,  True, False, False, False, False],
+            [False, False, False, False, False, False, False, False, False, False],
+        ])
+        >>> attention_mask[1]
+        tensor([
+            [ True,  True,  True,  True, False, False, False, False, False, False],
+            [False, False, False, False,  True,  True,  True, False, False, False],
+            [False, False, False, False, False, False,  True,  True,  True,  True],
+            [False, False, False, False, False, False, False,  True,  True,  True],
+        ])
+    """
+    flat_input_ids = []
+    position_ids = []
+    flat_lengths = input_lengths.tolist()
+
+    for i, seq_len in enumerate(flat_lengths):
+        flat_input_ids.append(input_ids[i, :seq_len])
+        position_ids.append(
+            torch.arange(seq_len, dtype=torch.long, device=input_ids.device)
+        )
+
+    # Group and pad
+    input_ids_packed = group_and_cat_tensors(
+        flat_input_ids, packed_sequence_size, padding_value
     )
-    mask_indices = torch.arange(T, device=device).view(1, -1, 1).expand(B, -1, T)
-    mask = torch.ones(T, T, dtype=torch.bool, device=device).tril().expand(B, -1, -1)
-    mask = mask.masked_fill(mask_indices >= repeated_idx, False)
-    pos_ids = (
-        torch.arange(B * T, device=device)
-        - torch.repeat_interleave(eos_idx_expanded[:-1], reps)
-    ).view(B, T)
-    return mask, pos_ids
+    position_ids_packed = group_and_cat_tensors(
+        position_ids, packed_sequence_size, padding_value=0
+    )
+
+    # Compute max length
+    batch_size, max_seq_len = input_ids_packed.shape
+
+    attention_mask = None
+    if return_attention_mask:
+        attention_mask = torch.zeros(
+            (batch_size, max_seq_len, max_seq_len),
+            dtype=torch.bool,
+            device=input_ids.device,
+        )
+        index = 0
+        for i, group_size in enumerate(packed_sequence_size):
+            group_lengths = flat_lengths[index : index + group_size]
+            total_len = sum(group_lengths)
+            attention_mask[i, :total_len, :total_len] = torch.tril(
+                torch.ones(
+                    (total_len, total_len), dtype=torch.bool, device=input_ids.device
+                )
+            )
+            index += group_size
+
+    return input_ids_packed, position_ids_packed, attention_mask
 
 
-# def _pack_microbatch_ref(mb):
-#     # Build list of 1D position tensors
-#     orig_seqlen = self.cfg["max_total_sequence_length"]
-#     max_seqlen = self.cfg["dynamic_batching"]["train_mb_tokens"]
-#     position_ids = torch.cat([torch.arange(l) for l in mb["input_lengths"]])
-#     position_ids = torch.nn.functional.pad(
-#         position_ids,
-#         (0, max_seqlen - position_ids.shape[0]),
-#         mode="constant",
-#         value=0.0,
-#     )
-#     position_ids = torch.unsqueeze(position_ids, dim=0)
+# TODO(ahmadki): actually support 2D mode
+def unpack_tensor(tensor, input_lengths):
+    """Unpacks a packed tensor into individual sequences padded to the same length.
 
-#     input_ids_packed = []
-#     for idx in range(mb["input_lengths"].shape[0]):
-#         input_length = mb["input_lengths"][idx]
-#         input_ids = mb["input_ids"][idx][:input_length]
-#         input_ids_packed.append(input_ids)
+    Args:
+        tensor (torch.Tensor): Packed tensor of shape [batch_size, packed_seq_len].
+        packed_lengths (List[int]): Original sequence lengths in the order they were packed.
 
-#     input_ids_packed = torch.cat(input_ids_packed)
-#     input_ids_packed = torch.nn.functional.pad(
-#         input_ids_packed,
-#         (0, max_seqlen - input_ids_packed.shape[0]),
-#         mode="constant",
-#         value=0.0,
-#     )
-#     input_ids_packed = torch.unsqueeze(input_ids_packed, dim=0)
-#     input_ids = input_ids_packed
+    Returns:
+        torch.Tensor: [num_sequences, max_seq_len], each row is one unpacked and padded sequence.
 
-#     cu_seqlens = torch.cat(
-#         (torch.tensor([0]).cuda(), mb["input_lengths"].cumsum(dim=0)), dim=0
-#     )
-
-#     flash_attn_kwargs = {
-#         "cu_seq_lens_q": cu_seqlens,
-#         "cu_seq_lens_k": cu_seqlens,
-#         "max_length_q": max(mb["input_lengths"]).item(),
-#         "max_length_k": max(mb["input_lengths"]).item(),
-#     }
-#     return packed_input_ids, packed_position_ids, flash_attn_kwargs
-
-# def _unpack_tensor_ref(tensor, mb):
-#     packed_seqlen = tensor.shape[1]
-#     splitsizes = mb['input_lengths'].tolist()
-#     splitsizes.append(packed_seqlen - sum(splitsizes))
-#     tensor_split = torch.split(tensor, tuple(splitsizes), dim=1)
-
-#     tensor_stacked = []
-#     for t in tensor_split[0:-1]:
-#         padding_needed = orig_seqlen - t.shape[1]
-#         tensor_stacked.append(
-#             torch.nn.functional.pad(t, (0,0,0, padding_needed), mode='constant', value=0.0)
-#             )
-#     return torch.cat(tensor_stacked, dim=0)
-
-
-def _pack_microbatch(mb):
-    # Build list of 1D position tensors
-    max_seqlen = 2048
-
-    # mb = {
-    #     "input_lengths": torch.tensor([5, 3, 4], dtype=torch.int),
-    #     "input_ids": torch.tensor([[1, 2, 2, 1, 2], [1, 2, 1, 0, 0], [1, 1, 2, 2, 0]]),
-    # }
-    position_ids = torch.cat(
-        [torch.arange(l) for l in mb["input_lengths"]]
-    )  ## tensor([0, 1, 2, 3, 4, 0, 1, 2, 0, 1, 2, 3])
-    position_ids = torch.nn.functional.pad(
-        position_ids,
-        (0, max_seqlen - position_ids.shape[0]),
-        mode="constant",
-        value=0.0,
-    )  # tensor([0, 1, 2, 3, 4, 0, 1, 2, 0, 1, 2, 3, 0, 0, 0, 0, 0, ...]) # [1024]
-    position_ids = torch.unsqueeze(
-        position_ids, dim=0
-    )  # # tensor([[0, 1, 2, 3, 4, 0, 1, 2, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0 ...]] # [1, 1024]
-
-    input_ids_packed = []
-    for idx in range(mb["input_lengths"].shape[0]):
-        input_length = mb["input_lengths"][idx]
-        input_ids = mb["input_ids"][idx][:input_length]
-        input_ids_packed.append(input_ids)
-    # input_ids_packed == [tensor([1, 2, 2, 1, 2]), tensor([1, 2, 1]), tensor([1, 1, 2, 2])]
-    input_ids_packed = torch.cat(
-        input_ids_packed
-    )  # tensor([1, 2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2])
-    input_ids_packed = torch.nn.functional.pad(
-        input_ids_packed,
-        (0, max_seqlen - input_ids_packed.shape[0]),
-        mode="constant",
-        value=0.0,
-    )  # tensor([1, 2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...] # [1024]
-    input_ids_packed = torch.unsqueeze(
-        input_ids_packed, dim=0
-    )  # # tensor([[1, 2, 2, 1, 2, 1, 2, 1, 1, 1, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, ...]] # [1, 1024]
-    input_ids = input_ids_packed
-
-    cu_seqlens = torch.cat(
-        (torch.tensor([0]).cuda(), mb["input_lengths"].cumsum(dim=0)), dim=0
-    )  # tensor([ 0,  5,  8, 12])
-
-    flash_attn_kwargs = {
-        "cu_seq_lens_q": cu_seqlens,
-        "cu_seq_lens_k": cu_seqlens,
-        "max_length_q": max(mb["input_lengths"]).item(),
-        "max_length_k": max(mb["input_lengths"]).item(),
-    }
-    return input_ids, position_ids, flash_attn_kwargs
-
-
-def _unpack_tensor(tensor, mb):
+    Example:
+        >>> packed_tensor = torch.tensor([
+        ...     [1, 2, 3, 4, 5, 6, -1, -1],
+        ...     [7, 8, 9, 9, 8, 7, 6, -1]
+        ... ])
+        >>> packed_lengths = [2, 3, 1, 4, 2]
+        >>> unpack_tensor(packed_tensor, packed_lengths)
+        tensor([
+            [1, 2, 0, 0],
+            [3, 4, 5, 0],
+            [6, 0, 0, 0],
+            [7, 8, 9, 9],
+            [8, 7, 0, 0],
+        ])
+    """
     packed_seqlen = tensor.shape[1]
-    splitsizes = mb["input_lengths"].tolist()
+    splitsizes = input_lengths.tolist()
     splitsizes.append(packed_seqlen - sum(splitsizes))
     tensor_split = torch.split(tensor, tuple(splitsizes), dim=1)
 
-    max_len = max(mb["input_lengths"].tolist())  # max sequence length in the batch
+    max_len = max(input_lengths.tolist())  # max sequence length in the batch
 
     tensor_stacked = []
     for t in tensor_split[0:-1]:
@@ -262,54 +309,6 @@ def _unpack_tensor(tensor, mb):
             )
         )
     return torch.cat(tensor_stacked, dim=0)
-
-
-def pack_sequences(
-    input_ids: torch.Tensor,
-    input_lengths: torch.Tensor,
-    return_attention_mask: bool = True,
-) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
-    """Packs variable-length sequences into a flat input for transformer models.
-
-    Args:
-        input_ids (torch.Tensor): [batch_size, max_seq_len]
-        input_lengths (torch.Tensor): [batch_size] with actual lengths
-        return_attention_mask (bool): If True, returns block-diagonal causal attention mask
-
-    Returns:
-        Tuple:
-            input_ids_packed (torch.Tensor): [1, total_seq_len]
-            position_ids_packed (torch.Tensor): [1, total_seq_len]
-            attention_mask (Optional[torch.Tensor]): [1, total_seq_len, total_seq_len] (bool) or None
-    """
-    flat_input_ids = []
-    position_ids = []
-    for i, length in enumerate(input_lengths):
-        flat_input_ids.append(input_ids[i, :length])
-        position_ids.append(torch.arange(length, dtype=torch.long))
-
-    flat_input_ids = torch.cat(flat_input_ids)
-    position_ids = torch.cat(position_ids)
-    total_seq_len = flat_input_ids.size(0)
-
-    input_ids_packed = flat_input_ids.unsqueeze(0)  # [1, total_seq_len]
-    position_ids_packed = position_ids.unsqueeze(0)  # [1, total_seq_len]
-
-    attention_mask = None
-    if return_attention_mask:
-        attention_mask = torch.zeros((total_seq_len, total_seq_len), dtype=torch.bool)
-        start = 0
-        for length in input_lengths:
-            end = start + length.item()
-            attention_mask[start:end, start:end] = torch.tril(
-                torch.ones((length, length), dtype=torch.bool)
-            )
-            start = end
-        attention_mask = attention_mask.unsqueeze(
-            0
-        )  # [1, total_seq_len, total_seq_len]
-
-    return input_ids_packed, position_ids_packed, attention_mask
 
 
 def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> dict:
@@ -339,28 +338,6 @@ def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> dict:
         "max_seqlen_q": max_len,
         "max_seqlen_k": max_len,
     }
-
-
-def unpack_logits(
-    logits: torch.Tensor, input_lengths: torch.Tensor
-) -> list[torch.Tensor]:
-    """Unpacks packed logits into a list of tensors based on original input_lengths.
-
-    Args:
-        logits (torch.Tensor): Packed logits of shape [1, total_seq_len, vocab_size]
-        input_lengths (torch.Tensor): Tensor of shape [batch] containing original lengths
-
-    Returns:
-        List[torch.Tensor]: List of [seq_len_i, vocab_size] tensors
-    """
-    logits = logits.squeeze(0)  # [total_seq_len, vocab_size]
-    unpacked = []
-    start = 0
-    for length in input_lengths:
-        end = start + length.item()
-        unpacked.append(logits[start:end])
-        start = end
-    return unpacked
 
 
 @ray.remote(
@@ -406,7 +383,10 @@ class DTensorPolicyWorker:
             raise ValueError(f"Unknown precision: {self.cfg['precision']}")
 
         print(f"[Rank {rank}] Loading model {model_name} on CPU...")
-        self.packing_strategy = self.cfg.get("packing_strategy", None)
+        self.enable_seq_paccking = self.cfg.get("enable_seq_packing", False)
+        if self.enable_seq_paccking:
+            print(f"[Rank {rank}] Sequence packing is enabled for model {model_name}")
+            print(f"[Rank {rank}] Using FlashAttention2 for sequence packing")
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
@@ -419,7 +399,7 @@ class DTensorPolicyWorker:
                 model_name
             ),  # due to https://github.com/huggingface/transformers/issues/38002
             attn_implementation="flash_attention_2"
-            if self.packing_strategy == "flash_attention"
+            if self.enable_seq_paccking
             else None,
         )
         # caching since this property is not always preserved after FSDP
@@ -651,52 +631,23 @@ class DTensorPolicyWorker:
                     log_json("mb", mb.get_dict())
 
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
-                        # TODO(ahmadki): for now, with the model input with sequence packing is of batch of size 1.
-                        # a better is code can be found at: cae414c9f88d7ce8feac54b56b58fef50c0dc789, but needs some work
-                        if self.packing_strategy == "flash_attention":
-                            # input_ids, position_ids, flash_attn_kwargs = (
-                            #     _pack_microbatch(mb)
-                            # )
-
+                        if self.enable_seq_paccking:
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, _ = pack_sequences(
                                 input_ids=input_ids,
                                 input_lengths=mb["input_lengths"],
-                                # packed_sequence_size=mb.packed_sequence_size,
-                                # padding_value=self.tokenizer.eos_token_id,
+                                packed_sequence_size=[
+                                    len(mb["input_lengths"])
+                                ],  # flash attention 2 expects flattened input
+                                padding_value=self.tokenizer.eos_token_id,
                                 return_attention_mask=False,
                             )
                             attention_mask = None
                             flash_attn_kwargs = get_flash_attention_kwargs(
                                 input_lengths=mb["input_lengths"],
-                                # packed_sequence_size=mb.packed_sequence_size,
                             )
 
-                        elif self.packing_strategy == "vector":
-                            input_ids = mb.get("input_ids").cuda()
-                            input_ids, position_ids, flash_attn_kwargs = (
-                                _pack_microbatch(mb)
-                            )
-                            batch_size, seq_len = input_ids.shape
-                            attention_mask = torch.ones(
-                                (batch_size, seq_len),
-                                dtype=torch.long,
-                                device=input_ids.device,
-                            )
-                            flash_attn_kwargs = {}
-
-                        elif self.packing_strategy == "matrix":
-                            input_ids = mb.get("input_ids").cuda()
-                            input_ids, position_ids, attention_mask = pack_sequences(
-                                input_ids=input_ids,
-                                input_lengths=mb["input_lengths"],
-                                # packed_sequence_size=mb.packed_sequence_size,
-                                # padding_value=self.tokenizer.eos_token_id,
-                                return_attention_mask=True,
-                            )
-                            flash_attn_kwargs = {}
-
-                        elif self.packing_strategy is None:
+                        else:
                             input_ids = mb.get("input_ids").cuda()
                             batch_size, seq_len = input_ids.shape
 
@@ -709,10 +660,6 @@ class DTensorPolicyWorker:
                                 seq_len, device=input_ids.device
                             ).repeat(batch_size, 1)
                             flash_attn_kwargs = {}
-                        else:
-                            raise ValueError(
-                                f"Unknown packing strategy: {self.packing_strategy}"
-                            )
 
                         logging.debug("model inputs")
                         log_json("input_ids", input_ids)
@@ -738,18 +685,8 @@ class DTensorPolicyWorker:
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
 
-                    if self.packing_strategy == "flash_attention":
-                        logits = _unpack_tensor(logits, mb)
-                    elif self.packing_strategy == "vector":
-                        logits = _unpack_tensor(logits, mb)
-                    elif self.packing_strategy == "matrix":
-                        logits = _unpack_tensor(logits, mb)  # FIXME(ahmadki)
-                    elif self.packing_strategy is None:
-                        pass
-                    else:
-                        raise ValueError(
-                            f"Unknown packing strategy: {self.packing_strategy}"
-                        )
+                    if self.enable_seq_paccking:
+                        logits = unpack_tensor(logits, mb["input_lengths"])
 
                     loss, loss_metrics = loss_fn(
                         logits,
