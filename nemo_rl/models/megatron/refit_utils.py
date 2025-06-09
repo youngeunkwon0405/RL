@@ -147,6 +147,7 @@ def gather_params(
     named_modules_dict = dict(model.named_modules())
     state_dict = model.state_dict()
     gathered_params = {}
+    ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
     for local_key, _, _, _, shape, dtype in sorted(keys):
         if local_key in state_dict:
             param = state_dict[local_key]
@@ -184,20 +185,24 @@ def gather_params(
         torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
 
         # gather across EP group
-        ep_gathered_global_keys = [None] * ep_world_size
-        torch.distributed.all_gather_object(
-            ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
-        )
+        if ep_pattern.search(local_key):
+            ep_gathered_global_keys = [None] * ep_world_size
+            torch.distributed.all_gather_object(
+                ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
+            )
 
-        stacked_pp_gathered_params = torch.stack(pp_gathered_params)
-        ep_gathered_params = [
-            torch.empty(stacked_pp_gathered_params.shape, dtype=dtype, device=torch.cuda.current_device())
-            for _ in range(ep_world_size)
-        ]
-        torch.distributed.all_gather(ep_gathered_params, stacked_pp_gathered_params, group=ep_group)
+            stacked_pp_gathered_params = torch.stack(pp_gathered_params)
+            ep_gathered_params = [
+                torch.empty(stacked_pp_gathered_params.shape, dtype=dtype, device=torch.cuda.current_device())
+                for _ in range(ep_world_size)
+            ]
+            torch.distributed.all_gather(ep_gathered_params, stacked_pp_gathered_params, group=ep_group)
 
-        flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
-        flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
+            flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
+            flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
+        else:
+            flat_gathered_global_keys = pp_gathered_global_keys
+            flat_gathered_params = pp_gathered_params
 
         for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
             if k is not None:
