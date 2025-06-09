@@ -13,12 +13,12 @@
 # limitations under the License.
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, TypedDict
+from typing import Any, Optional, TypedDict, cast
 
 import numpy as np
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.loss_functions import (
@@ -45,10 +45,10 @@ from nemo_rl.experience.rollouts import run_multi_turn_rollout
 from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
-from nemo_rl.models.generation.vllm import VllmGeneration
-from nemo_rl.models.interfaces import PolicyInterface
+from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import (
     Logger,
@@ -60,17 +60,20 @@ from nemo_rl.utils.timer import Timer
 # ===============================================================================
 # Configuration
 # ===============================================================================
+TokenizerType = PreTrainedTokenizerBase
 
 
 class GRPOConfig(TypedDict):
     num_prompts_per_step: int
     num_generations_per_prompt: int
     max_num_steps: int
+    max_rollout_turns: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
     val_period: int
     val_batch_size: int
     val_at_start: bool
+    max_val_samples: int
     checkpoint_dir: str
 
 
@@ -88,13 +91,17 @@ def _default_grpo_save_state() -> GRPOSaveState:
     }
 
 
+class GRPOLoggerConfig(LoggerConfig):
+    num_val_samples_to_print: int  # number of val samples to print to stdout
+
+
 class MasterConfig(TypedDict):
     policy: PolicyConfig
     loss_fn: ClippedPGLossConfig
-    env_configs: Dict[str, Any]
+    env: dict[str, Any]
     data: DataConfig
     grpo: GRPOConfig
-    logger: LoggerConfig
+    logger: GRPOLoggerConfig
     cluster: ClusterConfig
     checkpointing: CheckpointingConfig
 
@@ -106,12 +113,12 @@ class MasterConfig(TypedDict):
 
 def setup(
     master_config: MasterConfig,
-    tokenizer: AutoTokenizer,
+    tokenizer: TokenizerType,
     dataset: AllTaskProcessedDataset,
     val_dataset: Optional[AllTaskProcessedDataset],
-) -> Tuple[
-    PolicyInterface,
-    GenerationInterface,
+) -> tuple[
+    ColocatablePolicyInterface,
+    Optional[GenerationInterface],
     RayVirtualCluster,
     StatefulDataLoader,
     Optional[StatefulDataLoader],
@@ -134,6 +141,10 @@ def setup(
     grpo_config = master_config["grpo"]
     logger_config = master_config["logger"]
     cluster_config = master_config["cluster"]
+
+    assert generation_config is not None, (
+        "A generation config in the PolicyConfig is required for GRPO"
+    )
 
     # ==========================
     #         Logger
@@ -183,9 +194,12 @@ def setup(
     print(f"  ✓ Training dataloader loaded with {len(dataset)} samples")
 
     # Load validation dataset if provided
-    val_dataloader = None
+    val_dataloader: Optional[StatefulDataLoader] = None
     # If validation is enabled, load the validation dataloader
     if grpo_config["val_period"] > 0 or grpo_config["val_at_start"]:
+        assert val_dataset is not None, (
+            "Validation dataset is required if validation is enabled"
+        )
         val_dataloader = StatefulDataLoader(
             val_dataset,
             batch_size=grpo_config["val_batch_size"],
@@ -222,6 +236,7 @@ def setup(
         policy_generation = None
         print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
     elif backend == "vllm":
+        generation_config = cast(VllmConfig, generation_config)
         policy_generation = VllmGeneration(cluster=cluster, config=generation_config)
         # Worker groups are not initialized until the first call to run something on workergroups.
         # vllm 0.8 fails in initialization if its called in the first training step since it has no clean view of the GPU memory (HF is sharing the same memory).
@@ -269,34 +284,35 @@ def setup(
 
 
 def refit_policy_generation(
-    policy: PolicyInterface,
+    policy: ColocatablePolicyInterface,
     policy_generation: GenerationInterface,
-    refit_buffer_size_gb: int,  # GB
-):
-    """Refit the policy generation interface with the latest policy weights."""
+    _refit_buffer_size_gb: Optional[int] = None,
+) -> None:
+    """Refit the policy generation interface with the latest policy weights.
+
+    Args:
+        policy: The policy to provide weights to the inference engine.
+        policy_generation: The inference engine to refit.
+        _refit_buffer_size_gb: The size of the buffer to use for refitting.
+            If it is None, the buffer size will be computed by the remaining memory.
+            This parameter is primarily used for testing.
+    """
     policy.offload_before_refit()
     policy_generation.prepare_for_generation(tags=["weights"])
-    # Streaming update weights to save memory
-    state_dict_info = policy.prepare_weights_for_ipc()
-    # group keys to save time
-    available_bytes = refit_buffer_size_gb * (1024**3)
-    split_keys, keys = [], []
-    for key, size_in_bytes in state_dict_info:
-        if size_in_bytes > available_bytes:
-            if keys:
-                split_keys.append(keys)
-                keys = []
-            available_bytes = refit_buffer_size_gb * (1024**3)
-
-        keys.append(key)
-        available_bytes -= size_in_bytes
-
-    if len(keys) > 0:
-        split_keys.append(keys)
+    # get model param keys, which is grouped by size
+    grouped_param_keys = policy.prepare_weights_for_ipc(
+        _refit_buffer_size_gb=_refit_buffer_size_gb
+    )
     # do update
-    for keys in split_keys:
+    for keys in grouped_param_keys:
         ipc_handles = policy.get_weights_ipc_handles(keys)
-        policy_generation.update_weights(ipc_handles)
+        if not policy_generation.update_weights(ipc_handles):
+            error_message = (
+                "❌ Error: Updating weights for the generation policy failed during refit.\n"
+                "This often indicates an issue with cuda-ipc or "
+                "a problem within the generation backend (e.g., vLLM worker).\n"
+            )
+            raise RuntimeError(error_message)
     policy.offload_after_refit()
     policy_generation.prepare_for_generation(tags=["kv_cache"])
 
@@ -307,40 +323,40 @@ def refit_policy_generation(
 
 
 def grpo_train(
-    policy: PolicyInterface,
+    policy: ColocatablePolicyInterface,
     policy_generation: Optional[GenerationInterface],
     dataloader: StatefulDataLoader,
     val_dataloader: Optional[StatefulDataLoader],
-    tokenizer,
+    tokenizer: TokenizerType,
     loss_fn: LossFunction,
-    task_to_env: Dict[str, EnvironmentInterface],
-    val_task_to_env: Optional[Dict[str, EnvironmentInterface]],
+    task_to_env: dict[str, EnvironmentInterface],
+    val_task_to_env: Optional[dict[str, EnvironmentInterface]],
     logger: Logger,
     checkpointer: CheckpointManager,
-    grpo_save_state: Optional[GRPOSaveState],
+    grpo_save_state: GRPOSaveState,
     master_config: MasterConfig,
-):
+) -> None:
     """Run GRPO training algorithm."""
     timer = Timer()
     NEED_REFIT = True
     # If policy_generation is None, use the policy as the generation interface (hf framework backend)
     if policy_generation is None:
-        policy_generation = policy
+        policy_generation = policy  # type: ignore
         NEED_REFIT = False
     POLICY_GENERATION_STALE = True  # tracks if generation needs a refit before running
+    assert policy_generation is not None  # for mypy type check
 
     # common config/state itmes
     step = grpo_save_state["step"]
     consumed_samples = grpo_save_state["consumed_samples"]
     val_period = master_config["grpo"]["val_period"]
     val_at_start = master_config["grpo"]["val_at_start"]
-    refit_buffer_size_gb = master_config["policy"]["refit_buffer_size_gb"]
 
     # Run validation at the start if configured
     if val_at_start and step == 0:
         print("\n🔍 Running initial validation...")
         if NEED_REFIT and POLICY_GENERATION_STALE:
-            refit_policy_generation(policy, policy_generation, refit_buffer_size_gb)
+            refit_policy_generation(policy, policy_generation)
             POLICY_GENERATION_STALE = False
         else:
             policy_generation.prepare_for_generation()
@@ -362,6 +378,7 @@ def grpo_train(
         print(
             f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
         )
+        val_metrics, validation_timings = None, None
 
         with timer.time("total_step_time"):
             # Prepare batch
@@ -382,11 +399,7 @@ def grpo_train(
             print(f"▶ Generating responses for batch of size {repeated_batch.size}...")
             with timer.time("prepare_for_generation"):
                 if NEED_REFIT and POLICY_GENERATION_STALE:
-                    refit_policy_generation(
-                        policy,
-                        policy_generation,
-                        refit_buffer_size_gb,
-                    )
+                    refit_policy_generation(policy, policy_generation)
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
@@ -491,14 +504,14 @@ def grpo_train(
             with timer.time("policy_training"):
                 train_results = policy.train(train_data, loss_fn)
 
+            is_last_step = step + 1 == min(
+                master_config["grpo"]["max_num_steps"], len(dataloader)
+            )
+
             # Run validation if it's a validation step
-            if val_period > 0 and (step + 1) % val_period == 0:
+            if is_last_step or (val_period > 0 and (step + 1) % val_period == 0):
                 if NEED_REFIT and POLICY_GENERATION_STALE:
-                    refit_policy_generation(
-                        policy,
-                        policy_generation,
-                        refit_buffer_size_gb,
-                    )
+                    refit_policy_generation(policy, policy_generation)
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
@@ -518,9 +531,9 @@ def grpo_train(
 
             ## Checkpointing
             consumed_samples += master_config["grpo"]["num_prompts_per_step"]
-            if (
-                master_config["checkpointing"]["enabled"]
-                and (step + 1) % master_config["checkpointing"]["save_period"] == 0
+            if master_config["checkpointing"]["enabled"] and (
+                is_last_step
+                or (step + 1) % master_config["checkpointing"]["save_period"] == 0
             ):  # +1 because step is 0-indexed
                 policy.prepare_for_training()
 
@@ -565,13 +578,13 @@ def grpo_train(
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k == "num_valid_samples":
-                metrics[k] = np.sum(v).item()
-            else:
+            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
                 metrics[k] = np.mean(v).item()
+            else:
+                metrics[k] = np.sum(v).item()
         metrics.update(rollout_metrics)
 
-        timing_metrics = timer.get_timing_metrics(reduction_op="sum")
+        timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore
 
         print(f"  • Loss: {metrics['loss']:.4f}")
         print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
@@ -603,16 +616,16 @@ def grpo_train(
 
 def validate(
     policy_generation: GenerationInterface,
-    val_dataloader: StatefulDataLoader,
+    val_dataloader: Optional[StatefulDataLoader],
     tokenizer,
-    val_task_to_env: Dict[str, EnvironmentInterface],
+    val_task_to_env: Optional[dict[str, EnvironmentInterface]],
     step: int,
     master_config: MasterConfig,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
         print("  ⚠️ No validation dataloader provided, skipping validation")
-        return
+        return {}, {}
 
     timer = Timer()
     with timer.time("total_validation_time"):
@@ -646,9 +659,13 @@ def validate(
             total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
 
             # Collect message logs for later display
-            to_env = get_keys_from_message_log(
-                val_batch["message_log"], ["role", "content"]
-            )
+            to_env = [
+                get_keys_from_message_log(
+                    val_batch["message_log"][i], ["role", "content"]
+                )
+                for i in range(len(val_batch["message_log"]))
+            ]
+
             all_message_logs.extend(to_env)
 
         # Calculate validation metrics
