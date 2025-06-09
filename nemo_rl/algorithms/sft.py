@@ -496,18 +496,6 @@ def sft_train(
                     )
                     train_data.packed_sequence_size = batch.packed_sequence_size
 
-                    # Create the base train data dictionary
-                    # # TODO(ahmadki): del me:
-                    # train_data_dict = {
-                    #     "input_ids": cat_and_padded["token_ids"],
-                    #     "input_lengths": input_lengths,
-                    #     "token_mask": cat_and_padded["token_loss_mask"],
-                    #     "sample_mask": batch["loss_multiplier"],
-                    # }
-
-                    # # Create the BatchedDataDict
-                    # train_data: BatchedDataDict = BatchedDataDict(train_data_dict)
-
                     num_samples = len(train_data["input_ids"])
                     num_tokens = sum(train_data["input_lengths"])
 
