@@ -28,17 +28,11 @@ from megatron.core.extensions.transformer_engine import (
     TERowParallelGroupedLinear,
 )
 from nemo.collections.llm.gpt.model.base import GPTConfig
-
 import nemo_rl.models.megatron.converters as model_converters
+from nemo_rl.models.megatron.converters.common import get_global_key_from_local_key
 
 
 def get_tp_dim(model, param_name, named_modules_dict):
-    # if param_name == "decoder.layers.3.mlp.shared_experts.linear_fc1.weight":
-    #     if torch.distributed.get_rank() == 0:
-    #         import pdb
-
-    #         pdb.set_trace()
-    #     torch.distributed.barrier()
     # pass in named_modules_dict so we can get it ahead of time instead
     # of once for each param
     pattern = re.compile(r"\.(?:weight|bias)\d*$")
@@ -63,28 +57,20 @@ def get_tp_dim(model, param_name, named_modules_dict):
             return 1
         else:
             return None
-    elif (
-        isinstance(module, VocabParallelEmbedding)
-        or isinstance(module, ColumnParallelLinear)
-        # for MoE, parallel_mode isn't set for these
-        or isinstance(
-            module,
+    elif isinstance(
+        module,
+        (
+            VocabParallelEmbedding,
+            ColumnParallelLinear,
             TEColumnParallelGroupedLinear,
-        )
-        or isinstance(module, TEColumnParallelLinear)
+            TEColumnParallelLinear,
+        ),
     ):
         return 0
-    elif (
-        isinstance(module, RowParallelLinear)
-        # for MoE, parallel_mode isn't set for these
-        or isinstance(
-            module,
-            TERowParallelGroupedLinear,
-        )
-        or isinstance(module, TERowParallelLinear)
+    elif isinstance(
+        module, (RowParallelLinear, TERowParallelGroupedLinear, TERowParallelLinear)
     ):
         return 1
-    # TODO(yifu): moe layers
     else:
         return None
 
@@ -92,16 +78,18 @@ def get_tp_dim(model, param_name, named_modules_dict):
 def find_global_rank_that_has_param(
     ep_rank,
     pp_rank,
-    ep_group, ## ep group that this rank belongs to
-    pp_group, ## pp group that this rank belongs to
-    all_ep_groups, ## global view of all groups
-    all_pp_groups
+    ep_group,  ## ep group that this rank belongs to
+    pp_group,  ## pp group that this rank belongs to
+    all_ep_groups,  ## global view of all groups
+    all_pp_groups,
 ):
     current_rank = torch.distributed.get_rank()
 
-    this_rank_has_param = (ep_group[ep_rank] == pp_group[pp_rank])
+    this_rank_has_param = ep_group[ep_rank] == pp_group[pp_rank]
     if this_rank_has_param:
-        assert ep_group[ep_rank] == current_rank ## TODO: should this always be true? I think so
+        assert (
+            ep_group[ep_rank] == current_rank
+        )  ## TODO: should this always be true? I think so
         return current_rank, "pp"
 
     ## keep track of the ranks that have the param,
@@ -141,231 +129,80 @@ def find_global_rank_that_has_param(
 
 
 @torch.no_grad()
-def get_global_param_key_to_local_key_map(
-    model, model_cfg: GPTConfig, keys: List[Tuple[str, str]]
-) -> Dict[str, Tuple[int, str]]:
-    """Get a mapping from global parameter keys to local parameter keys.
-
-    Args:
-        model: The model to get the mapping for.
-        model_cfg: The model configuration.
-        keys: The local_keys to get the mapping for.
-
-    Returns:
-        A dictionary mapping global parameter keys to a tuple of (rank, local parameter key).
-    """
-    # Initialize pipeline parallel group information.
-    pp_group = parallel_state.get_pipeline_model_parallel_group()
-    pp_world_size = torch.distributed.get_world_size(pp_group)
-    pp_global_rank_ids = model_converters.get_all_rank_ids_in_group(pp_group)
-
-    ep_group = parallel_state.get_expert_model_parallel_group()
-    ep_world_size = parallel_state.get_expert_model_parallel_world_size()
-    ep_global_rank_ids = model_converters.get_all_rank_ids_in_group(ep_group)
-
-    ## TODO: cache these?
-    all_ep_rank_ids = [None] * torch.distributed.get_world_size()
-    all_pp_rank_ids = [None] * torch.distributed.get_world_size()
-    torch.distributed.all_gather_object(all_ep_rank_ids, ep_global_rank_ids)
-    torch.distributed.all_gather_object(all_pp_rank_ids, pp_global_rank_ids)
-
-    # Build a mapping on each PP rank from a computed global key to the raw state dict key.
-    # The global key is computed by replacing the local layer number (after "layers.")
-    # with its corresponding global layer number (if applicable).
-    local_map = {}
-    state_dict = model.state_dict()
-    for local_key in keys:
-        if local_key not in state_dict:
-            continue
-        local_layer = model_converters.get_local_layer_num(local_key)
-        if local_layer is not None:
-            global_layer = model_converters.get_global_layer_num(local_key, model_cfg)
-            # Replace the first occurrence of the digits after "layers." with the global layer number.
-            global_key = re.sub(
-                r"(?<=layers\.)\d+", str(global_layer), local_key, count=1
-            )
-        else:
-            global_key = local_key
-        local_expert = model_converters.get_local_expert_num(global_key)
-        if local_expert is not None:
-            global_expert = model_converters.get_global_expert_num(global_key, model_cfg)
-            # Replace the last occurrence of the digits after "weight" with the global expert number.
-            global_key = re.sub(r"(?<=weight)\d+", str(global_expert), global_key)
-        local_map[global_key] = local_key
-
-    # Gather the local maps from all PP ranks (only lightweight key info is gathered).
-    all_maps_pp = [None] * pp_world_size
-    torch.distributed.all_gather_object(all_maps_pp, local_map, group=pp_group)
-
-    # then gather across EP Ranks
-    all_maps = [None] * ep_world_size
-    torch.distributed.all_gather_object(all_maps, all_maps_pp, group=ep_group)
-
-    # Build the union over global keys and assign an owner (the rank with the smallest PP rank).
-    union_global_map = {}
-    for ep_rank, item in enumerate(all_maps):
-        for pp_rank, omap in enumerate(item):
-            for gk, raw_key in omap.items():
-                #if (
-                #    gk not in union_global_map
-                #    or pp_global_rank_ids[pp_rank] < union_global_map[gk][0]
-                #):
-                if gk not in union_global_map:
-                    global_rank, pp_or_ep_gather = find_global_rank_that_has_param(
-                        ep_rank,
-                        pp_rank,
-                        ep_global_rank_ids,
-                        pp_global_rank_ids,
-                        all_ep_rank_ids,
-                        all_pp_rank_ids,
-                    )
-
-                    union_global_map[gk] = (global_rank, raw_key, pp_or_ep_gather)
-                else:
-                    print(
-                        f"WARNING: {gk} already in union_global_map when gathering keys",
-                        flush=True,
-                    )
-    return union_global_map
-
-
-@torch.no_grad()
 def gather_params(
     model,
-    param_name_to_rank_and_key,
+    keys,
 ):
     import time
 
     st = time.time()
-    
+
+    tp_group = parallel_state.get_tensor_model_parallel_group()
+    tp_world_size = torch.distributed.get_world_size(tp_group)
     pp_group = parallel_state.get_pipeline_model_parallel_group()
     ep_group = parallel_state.get_expert_model_parallel_group()
-    pp_global_rank_ids = torch.distributed.get_process_group_ranks(pp_group)
-    ep_global_rank_ids = torch.distributed.get_process_group_ranks(ep_group)
+    pp_world_size = torch.distributed.get_world_size(pp_group)
+    ep_world_size = torch.distributed.get_world_size(ep_group)
 
-    # Process each parameter (by its unique global key) one at a time.
-    gathered_params = {}
     named_modules_dict = dict(model.named_modules())
     state_dict = model.state_dict()
-    for gk in sorted(param_name_to_rank_and_key.keys()):
-        owner_global_rank, owner_raw_key, ep_or_pp_gather = param_name_to_rank_and_key[gk]
-
-        # Only the owner rank has the parameter locally.
-        if torch.distributed.get_rank() == owner_global_rank:
-            param = state_dict[owner_raw_key]
+    gathered_params = {}
+    for local_key, _, _, _, shape, dtype in sorted(keys):
+        if local_key in state_dict:
+            param = state_dict[local_key]
 
             # Check if param is TP-sharded
-            tp_dim = get_tp_dim(model, owner_raw_key, named_modules_dict)
+            tp_dim = get_tp_dim(model, local_key, named_modules_dict)
 
             # If the parameter is TP-sharded, gather its slices on GPU.
             if tp_dim is not None:
-                tp_group = parallel_state.get_tensor_model_parallel_group()
-                tp_world_size = torch.distributed.get_world_size(tp_group)
                 gathered_slices = [
                     torch.empty_like(param) for _ in range(tp_world_size)
                 ]
                 torch.distributed.all_gather(gathered_slices, param, group=tp_group)
-                full_param = torch.cat(gathered_slices, dim=tp_dim).to(torch.bfloat16)
+                # TODO: why cast to torch.bfloat16 instead of param.dtype?
+                full_param = torch.cat(gathered_slices, dim=tp_dim).to(param.dtype)
             else:
-                full_param = torch.clone(param).to(torch.bfloat16)
-
-            # Use the original parameter key without conversion
-            param_mapping = {gk: full_param}
+                # TODO: why do we need to clone?
+                full_param = torch.clone(param).to(param.dtype)
+            global_key = get_global_key_from_local_key(local_key, model.config)
         else:
-            param_mapping = None  # Non-owner ranks will receive the tensors.
+            #  params that may not be on every rank, e.g. the embedding layer
+            global_key = None
+            full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
 
-        # Broadcast the list of target parameter keys from the owner.
-        if torch.distributed.get_rank() == owner_global_rank:
-            target_keys = [list(param_mapping.keys())]
-        else:
-            target_keys = [None]  # Placeholder to be filled by broadcast.
-
-        if ep_or_pp_gather == "pp":
-            rank_to_broadcast = owner_global_rank
-        else:
-            ## we are getting the param from the ep gather, so just do a dummy broadcast here
-            rank_to_broadcast = pp_global_rank_ids[0]
-        torch.distributed.broadcast_object_list(
-            target_keys, src=rank_to_broadcast, group=pp_group
+        # gather across PP group
+        pp_gathered_global_keys = [None] * pp_world_size
+        torch.distributed.all_gather_object(
+            pp_gathered_global_keys, global_key, group=pp_group
         )
 
-        ## now do the ep broadcast
-        ## TODO: are there any cases where this will cause a hang?
-        ## like times where we would try to broadcast from two different ranks
-        ## in the same ep group?
-        if ep_or_pp_gather == "ep":
-            rank_to_broadcast = owner_global_rank
-        else:
-            ## the current rank already has the param from the pp gather
-            rank_to_broadcast = torch.distributed.get_rank()
-        torch.distributed.broadcast_object_list(
-            target_keys, src=rank_to_broadcast, group=ep_group
+        pp_gathered_params = [
+            torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
+            for _ in range(pp_world_size)
+        ]
+        torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
+
+        # gather across EP group
+        ep_gathered_global_keys = [None] * ep_world_size
+        torch.distributed.all_gather_object(
+            ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
         )
 
-        ## TODO
-        if "None" in target_keys[0]:
-            continue
+        stacked_pp_gathered_params = torch.stack(pp_gathered_params)
+        ep_gathered_params = [
+            torch.empty(stacked_pp_gathered_params.shape, dtype=dtype, device=torch.cuda.current_device())
+            for _ in range(ep_world_size)
+        ]
+        torch.distributed.all_gather(ep_gathered_params, stacked_pp_gathered_params, group=ep_group)
 
-        # For each tensor, broadcast it individually.
-        for target_key in target_keys[0]:
-            if torch.distributed.get_rank() == owner_global_rank:
-                tensor_to_send = param_mapping[target_key]
-            else:
-                tensor_to_send = None
-            # Broadcast tensor metadata (shape and dtype) to allocate GPU buffer on receiving ranks.
-            meta = [None]
-            if torch.distributed.get_rank() == owner_global_rank:
-                meta[0] = (tensor_to_send.shape, str(tensor_to_send.dtype))
+        flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
+        flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
 
-            if ep_or_pp_gather == "pp":
-                rank_to_broadcast = owner_global_rank
-            else:
-                ## we are getting the param from the ep gather, so just do a dummy broadcast here
-                rank_to_broadcast = pp_global_rank_ids[0]
-
-            torch.distributed.broadcast_object_list(
-                meta, src=rank_to_broadcast, group=pp_group
-            )
-
-            ## now do the ep broadcast
-            if ep_or_pp_gather == "ep":
-                rank_to_broadcast = owner_global_rank
-            else:
-                ## the current rank already has the param from the pp gather
-                rank_to_broadcast = torch.distributed.get_rank()
-
-            torch.distributed.broadcast_object_list(
-                meta, src=rank_to_broadcast, group=ep_group
-            )
-
-            shape, dtype_str = meta[0]
-            dtype = getattr(torch, dtype_str.split(".")[-1])
-            if torch.distributed.get_rank() != owner_global_rank:
-                tensor_to_send = torch.empty(
-                    *shape, dtype=dtype, device=torch.cuda.current_device()
-                )
-            if ep_or_pp_gather == "pp":
-                rank_to_broadcast = owner_global_rank
-            else:
-                ## we are getting the param from the ep gather, so just do a dummy broadcast here
-                rank_to_broadcast = pp_global_rank_ids[0]
-            torch.distributed.broadcast(
-                tensor_to_send, src=rank_to_broadcast, group=pp_group
-            )
-
-            ## now do the ep broadcast
-            if ep_or_pp_gather == "ep":
-                rank_to_broadcast = owner_global_rank
-            else:
-                ## the current rank already has the param from the pp gather
-                rank_to_broadcast = torch.distributed.get_rank()
-
-            torch.distributed.broadcast(
-                tensor_to_send, src=rank_to_broadcast, group=ep_group
-            )
-
-            gathered_params[target_key] = tensor_to_send
-
+        for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
+            if k is not None:
+                gathered_params[k] = p
+        
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
     print(f"Time taken to gather params: {time.time() - st}")

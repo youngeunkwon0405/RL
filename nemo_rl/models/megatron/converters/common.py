@@ -13,8 +13,14 @@
 # limitations under the License.
 
 from collections import defaultdict
+import re
+
 import einops
 import numpy as np
+import torch
+from transformers import AutoConfig, AutoModelForCausalLM
+from transformers.integrations.accelerate import init_empty_weights
+
 from megatron.core import parallel_state
 from nemo.lightning.io.state import (
     TransformCTX,
@@ -22,14 +28,9 @@ from nemo.lightning.io.state import (
     StateDictTransform,
     _match_keys,
 )
-import torch
-from transformers import AutoConfig, AutoModelForCausalLM
-from transformers.integrations.accelerate import init_empty_weights
-
 import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 import nemo_rl.models.megatron.converters.llama as llama_converter
 import nemo_rl.models.megatron.converters.deepseek as deepseek_converter
-from nemo_rl.models.megatron.refit_utils import get_global_param_key_to_local_key_map
 
 _GROUP_TO_RANKS_CACHE = {}
 
@@ -124,6 +125,23 @@ def get_global_expert_num(s, cfg):
         + local_expert_num
     )
     return global_expert_num
+
+def get_global_key_from_local_key(local_key, model_cfg):
+    local_layer = get_local_layer_num(local_key)
+    if local_layer is not None:
+        global_layer = get_global_layer_num(local_key, model_cfg)
+        # Replace the first occurrence of the digits after "layers." with the global layer number.
+        global_key = re.sub(
+            r"(?<=layers\.)\d+", str(global_layer), local_key, count=1
+        )
+    else:
+        global_key = local_key
+    local_expert = get_local_expert_num(global_key)
+    if local_expert is not None:
+        global_expert = get_global_expert_num(global_key, model_cfg)
+        # Replace the last occurrence of the digits after "weight" with the global expert number.
+        global_key = re.sub(r"(?<=weight)\d+", str(global_expert), global_key)
+    return global_key
 
 
 def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
@@ -237,22 +255,26 @@ class MegatronToHFConverter:
                 config, trust_remote_code=True
             )
 
-        # Get all local keys across PP ranks
         local_keys = list(megatron_model.state_dict().keys())
+        global_keys = [get_global_key_from_local_key(k, megatron_model.config) for k in local_keys]
+
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
-
-        all_local_keys_list = [None] * pp_world_size
+        pp_gathered_global_keys = [None] * pp_world_size
         torch.distributed.all_gather_object(
-            all_local_keys_list, local_keys, group=pp_group
+            pp_gathered_global_keys, global_keys, group=pp_group
         )
-        all_local_keys = list({k for l in all_local_keys_list for k in l})
+        pp_gathered_global_keys = list({k for l in pp_gathered_global_keys for k in l})
 
-        global_key_map = get_global_param_key_to_local_key_map(
-            megatron_model, megatron_model.config, all_local_keys
+        ep_group = parallel_state.get_expert_model_parallel_group()
+        ep_world_size = parallel_state.get_expert_model_parallel_world_size()
+        ep_gathered_global_keys = [None] * ep_world_size
+        torch.distributed.all_gather_object(
+            ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
         )
-        global_keys = list(global_key_map.keys())
+        ep_gathered_global_keys = list({k for l in ep_gathered_global_keys for k in l})
 
+        global_keys = ep_gathered_global_keys
         global_keys_map = {k: None for k in global_keys}
 
         # TODO(yifu): inheritence for this?
