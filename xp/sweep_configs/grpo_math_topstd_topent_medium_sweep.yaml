@@ -25,4 +25,4 @@ data.dataset_name: ["DAPOMath"]
 grpo.val_batch_size: [30]
 grpo.max_val_samples: [240] # 240 = 30 * 8, fit everything in one batch
 grpo.val_accuracy_at_k: [8]
-grpo.val_period: [1]
+grpo.val_period: [10]
