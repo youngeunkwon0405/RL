@@ -95,7 +95,11 @@ from nemo_rl.models.generation.interfaces import (
     GenerationOutputSpec,
     verify_right_padding,
 )
-from nemo_rl.models.megatron.converters.common import MegatronToHFConverter
+from nemo_rl.models.megatron.converters.common import (
+    get_all_rank_ids_in_group,
+    get_global_key_from_local_key,
+    MegatronToHFConverter,
+)
 from nemo_rl.models.megatron.common import (
     broadcast_tensor,
     forward_step_arbitrary_loss,
@@ -105,7 +109,6 @@ from nemo_rl.models.megatron.common import (
 from nemo_rl.models.megatron.community_import import import_model_from_hf_name
 from nemo_rl.models.megatron.refit_utils import (
     gather_params,
-    get_global_param_key_to_local_key_map,
     get_tp_dim,
 )
 from nemo_rl.models.policy import PolicyConfig
@@ -268,7 +271,7 @@ class MegatronPolicyWorker:
         # Check if the checkpoint already exists
         hf_model_subdir = hf_model_name
         if os.path.exists(hf_model_name):
-            hf_model_subdir = f"model-{hf_model_subdir.replace("/", "_")}"
+            hf_model_subdir = f"model-{hf_model_subdir.replace('/', '_')}"
 
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
@@ -1091,8 +1094,18 @@ class MegatronPolicyWorker:
         # Ensure model is in evaluation mode
         self.model.eval()
 
-        # Get tensor parallel info
-        tp_world_size = parallel_state.get_tensor_model_parallel_world_size()
+        # Get parallel info
+        tp_group = parallel_state.get_tensor_model_parallel_group()
+        tp_world_size = torch.distributed.get_world_size(tp_group)
+        tp_group_rank_ids = get_all_rank_ids_in_group(tp_group)
+
+        pp_group = parallel_state.get_pipeline_model_parallel_group()
+        pp_world_size = torch.distributed.get_world_size(pp_group)
+        pp_group_rank_ids = get_all_rank_ids_in_group(pp_group)
+
+        ep_group = parallel_state.get_expert_model_parallel_group()
+        ep_world_size = torch.distributed.get_world_size(ep_group)
+        ep_group_rank_ids = get_all_rank_ids_in_group(ep_group)
 
         # Collect parameter info
         param_info = []
@@ -1101,17 +1114,23 @@ class MegatronPolicyWorker:
         named_modules_dict = dict(self.model.named_modules())
 
         # Process each parameter in the model
+        # state_dict includes parameters and persistent buffers
         for name, param in self.model.state_dict().items():
             # Skip _extra_state entries (these are metadata, not actual weights)
             if "_extra_state" in name:
                 continue
 
+            shape = list(param.shape)
             tp_dim = get_tp_dim(self.model, name, named_modules_dict)
             if tp_dim is not None:
                 # TODO(yifu): take care of expert_tensor_parallel_size which may be different from tensor_model_parallel_size
-                tp = tp_world_size
+                tp_rank_ids = tuple(sorted(tp_group_rank_ids))
+                shape[tp_dim] *= len(tp_rank_ids)
             else:
-                tp = 1
+                tp_rank_ids = (torch.distributed.get_rank(),)
+
+            pp_rank_ids = tuple(sorted(pp_group_rank_ids))
+            ep_rank_ids = tuple(sorted(ep_group_rank_ids))
 
             # Calculate size for this parameter
             prec_to_bytes = {
@@ -1120,46 +1139,78 @@ class MegatronPolicyWorker:
                 torch.float32: 4,
             }
             scale = prec_to_bytes[self.dtype] / prec_to_bytes[param.dtype]
-            size_in_bytes = param.element_size() * param.numel() * tp * scale
-            param_info.append((name, size_in_bytes))
+            size_in_bytes = (
+                param.element_size()
+                * param.numel()
+                * len(tp_rank_ids)
+                * len(pp_rank_ids)
+                * len(ep_rank_ids)
+                * scale
+            )
+            global_key = get_global_key_from_local_key(
+                name, self.megatron_cfg.model_config
+            )
+            # global_key = get_global_key_from_local_key( "decoder.layers.6.mlp.experts.linear_fc2.weight63", self.megatron_cfg.model_config)
+            param_info.append(
+                (
+                    (
+                        name,
+                        tp_rank_ids,
+                        pp_rank_ids,
+                        ep_rank_ids,
+                        tuple(shape),
+                        param.dtype,
+                    ),
+                    size_in_bytes,
+                )
+            )
+            # param_info.append(((name, ""), size_in_bytes))
 
-        # Include buffers (non-parameter tensors)
-        for name, buffer in self.model.named_buffers():
-            if "_extra_state" in name:
-                continue
-
-            prec_to_bytes = {
-                torch.bfloat16: 2,
-                torch.float16: 2,
-                torch.float32: 4,
-            }
-            scale = prec_to_bytes[self.dtype] / prec_to_bytes[buffer.dtype]
-            size_in_bytes = buffer.element_size() * buffer.numel() * scale
-            param_info.append((name, size_in_bytes))
-
+        # if torch.distributed.get_rank() == 2:
+        #     import pdb; pdb.set_trace()
+        # torch.distributed.barrier()
         # Gather parameter info from all pipeline parallel ranks to ensure complete coverage
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
 
         # Gather all parameter info from all PP ranks
-        all_param_infos = [None] * pp_world_size
-        torch.distributed.all_gather_object(all_param_infos, param_info, group=pp_group)
+        pp_gathered_param_infos = [None] * pp_world_size
+        torch.distributed.all_gather_object(
+            pp_gathered_param_infos, param_info, group=pp_group
+        )
+        pp_gathered_param_infos = [x for y in pp_gathered_param_infos for x in y]
+
+        # Gather parameter info from all expert parallel ranks to ensure complete coverage
+        ep_group = parallel_state.get_expert_model_parallel_group()
+        ep_world_size = torch.distributed.get_world_size(ep_group)
+
+        # Gather all parameter info from all EP ranks
+        ep_gathered_param_infos = [None] * ep_world_size
+        torch.distributed.all_gather_object(
+            ep_gathered_param_infos, pp_gathered_param_infos, group=ep_group
+        )
+        all_param_infos = [x for y in ep_gathered_param_infos for x in y]
+
+        # if torch.distributed.get_rank() == 2:
+        #     import pdb
+        #     pdb.set_trace()
+        # torch.distributed.barrier()
 
         # Merge all parameter infos, keeping only unique parameter names
         merged_param_info = []
         seen_params = set()
 
-        for rank_param_info in all_param_infos:
-            for name, size in rank_param_info:
-                if name not in seen_params:
-                    merged_param_info.append((name, size))
-                    seen_params.add(name)
+        for name, size in all_param_infos:
+            if name not in seen_params:
+                merged_param_info.append((name, size))
+                seen_params.add(name)
 
         # Update param_info with the merged information
         param_info = merged_param_info
 
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         no_grad.__exit__(None, None, None)
+
         return param_info
 
     # Temporary fix, 'keys' is a kwarg due to some sort of ray bug
@@ -1171,12 +1222,9 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
-        param_name_to_rank_and_key = get_global_param_key_to_local_key_map(
-            self.model, self.megatron_cfg.model_config, keys
-        )
         gathered_megatron_params = gather_params(
             self.model,
-            param_name_to_rank_and_key,
+            keys,
         )
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
