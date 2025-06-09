@@ -122,7 +122,7 @@ logger:
   tensorboard_enabled: false
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
-    project: "grpo-dev"
+    project: "grpo-8020"
     name: "grpo-dev-logger"
   tensorboard: {}
   gpu_monitoring:

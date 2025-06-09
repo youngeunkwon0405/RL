@@ -15,6 +15,9 @@ grpo.top_p_std: [0.2, 0.5, 1.0]
 # Top P Ent
 grpo.top_p_ent: [0.2, 0.5, 1.0]
 
+# Small log prob batch size
+policy.logprob_batch_size: [1]
+
 # Validation
 grpo.val_batch_size: [30]
 grpo.max_val_samples: [240] # 240 = 30 * 8, fit everything in one batch
