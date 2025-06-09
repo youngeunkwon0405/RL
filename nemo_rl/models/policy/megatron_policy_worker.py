@@ -272,11 +272,7 @@ class MegatronPolicyWorker:
         # Check if the checkpoint already exists
         hf_model_subdir = hf_model_name
         if os.path.exists(hf_model_name):
-<<<<<<< HEAD
-            hf_model_subdir = f"model-{hf_model_subdir.replace('/', '_')}"
-=======
             hf_model_subdir = f"model_{hf_model_subdir.replace("/", "_")}"
->>>>>>> e818ae2 (Updates)
 
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
@@ -1104,7 +1100,6 @@ class MegatronPolicyWorker:
         self.model.eval()
 
         # Get parallel info
-<<<<<<< HEAD
         tp_group = parallel_state.get_tensor_model_parallel_group()
         tp_world_size = torch.distributed.get_world_size(tp_group)
         tp_group_rank_ids = get_all_rank_ids_in_group(tp_group)
@@ -1116,10 +1111,6 @@ class MegatronPolicyWorker:
         ep_group = parallel_state.get_expert_model_parallel_group()
         ep_world_size = torch.distributed.get_world_size(ep_group)
         ep_group_rank_ids = get_all_rank_ids_in_group(ep_group)
-=======
-        tp_world_size = parallel_state.get_tensor_model_parallel_world_size()
-        ep_world_size = parallel_state.get_expert_model_parallel_world_size()
->>>>>>> e818ae2 (Updates)
 
         # Collect parameter info
         param_info = []
@@ -1129,6 +1120,7 @@ class MegatronPolicyWorker:
 
         # Process each parameter in the model
         # state_dict includes parameters and persistent buffers
+        ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
         for name, param in self.model.state_dict().items():
             # Skip _extra_state entries (these are metadata, not actual weights)
             if "_extra_state" in name:
@@ -1146,13 +1138,11 @@ class MegatronPolicyWorker:
             pp_rank_ids = tuple(sorted(pp_group_rank_ids))
             ep_rank_ids = tuple(sorted(ep_group_rank_ids))
 
-            ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
             if ep_pattern.search(name):
-                ep = ep_world_size
+                ep_rank_ids = tuple(sorted(ep_group_rank_ids))
             else:
-                ep = 1
-
-
+                ep_rank_ids = (torch.distributed.get_rank(),)
+            
             # Calculate size for this parameter
             prec_to_bytes = {
                 torch.bfloat16: 2,
@@ -1243,16 +1233,24 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
+        st_gather_params = time.time()
         gathered_megatron_params = gather_params(
             self.model,
             keys,
         )
+        print(f"TIME gather_params: {time.time() - st_gather_params}")
+        st_convert_params = time.time()
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )
-        gc.collect()
-        torch.cuda.empty_cache()
+        print(f"TIME convert_params: {time.time() - st_convert_params}")
 
+        # st_gc = time.time()
+        # gc.collect()
+        # torch.cuda.empty_cache()
+        # print(f"TIME gc: {time.time() - st_gc}")
+
+        st_rest = time.time()
         # Get device UUID for IPC handles
         device_uuid = self.report_device_id()
         from torch.multiprocessing.reductions import reduce_tensor
@@ -1270,6 +1268,8 @@ class MegatronPolicyWorker:
         for key, tensor in gathered_hf_params.items():
             shapes[key] = tensor.shape
 
+        print(f"TIME rest: {time.time() - st_rest}")
+        print("TIME total get_weights_ipc_handles: ", time.time() - st_gather_params)
         return {device_uuid: all_handles}
 
     def prepare_for_lp_inference(self):
