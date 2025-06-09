@@ -18,7 +18,7 @@ policy:
   train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 2
-  max_total_sequence_length: 8192
+  max_total_sequence_length: 20480
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
@@ -72,4 +72,4 @@ policy:
 
 cluster:
   gpus_per_node: 8
-  num_nodes: 1
+  num_nodes: 16
