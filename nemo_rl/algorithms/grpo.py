@@ -205,7 +205,7 @@ def setup(
         )
         val_dataloader = StatefulDataLoader(
             val_dataset,
-            batch_size=grpo_config["val_batch_size"] // grpo_config["val_accuracy_at_k"],
+            batch_size=grpo_config["val_batch_size"],
             shuffle=False,
             collate_fn=rl_collate_fn,
         )
@@ -683,13 +683,11 @@ def validate(
         max_batches = (
             master_config["grpo"]["max_val_samples"]
             // master_config["grpo"]["val_batch_size"]
-            * master_config["grpo"]["val_accuracy_at_k"]
         )
         for batch_idx, val_batch in enumerate(val_dataloader):
             if batch_idx >= max_batches:
                 break
 
-            val_batch = val_batch.repeat_interleave(master_config["grpo"]["val_accuracy_at_k"])
             # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
             val_batch, gen_metrics = run_multi_turn_rollout(
                 policy_generation,

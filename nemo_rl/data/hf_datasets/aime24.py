@@ -40,7 +40,7 @@ def format_aime24(
 
 
 def prepare_aime24_dataset(
-    output_key: str = "solution",
+    output_key: str = "answer",
 ) -> dict[str, Dataset | None]:
     """Load and split the HuggingFaceH4/aime_2024 dataset into validation set."""
     print(
@@ -57,6 +57,12 @@ def prepare_aime24_dataset(
         fn_kwargs={"output_key": output_key},
     )
 
+    # Compute accuracy 16 times per sample (matching the DeepScaleR evaluation setting)
+    val_repeated = []
+    for _ in range(16):
+        val_repeated.extend(val_formatted)
+    val_formatted = val_formatted.from_list(val_repeated)
+
     return {
         "train": None,
         "validation": val_formatted,
@@ -66,7 +72,7 @@ def prepare_aime24_dataset(
 class AIME24Dataset:
     def __init__(
         self,
-        output_key: str = "solution",
+        output_key: str = "answer",
         prompt_file: Optional[str] = None,
     ):
         """Initialize the HuggingFaceH4/aime_2024 dataset.
