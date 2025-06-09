@@ -114,12 +114,12 @@ class ClippedPGLossFn(LossFunction):
         max_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
-        token_mask = data["token_mask"][:, 1:]
+        token_mask = data["token_mask"][:, 1:max_seq_len]
         sample_mask = data["sample_mask"]
-        advantages = data["advantages"][:, 1:]
-        prev_logprobs = data["prev_logprobs"][:, 1:]
-        generation_logprobs = data["generation_logprobs"][:, 1:]
-        reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
+        advantages = data["advantages"][:, 1:max_seq_len]
+        prev_logprobs = data["prev_logprobs"][:, 1:max_seq_len]
+        generation_logprobs = data["generation_logprobs"][:, 1:max_seq_len]
+        reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:max_seq_len]
 
         mask = token_mask * sample_mask.unsqueeze(-1)
 
@@ -137,7 +137,7 @@ class ClippedPGLossFn(LossFunction):
 
         if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"]
+                next_token_logits, data["input_ids"][:, :max_seq_len]
             )
         else:
             next_token_logits_wo_last = next_token_logits[
@@ -146,7 +146,7 @@ class ClippedPGLossFn(LossFunction):
             next_token_logprobs = torch.nn.functional.log_softmax(
                 next_token_logits_wo_last, dim=-1
             )
-            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
+            next_tokens = data["input_ids"][:, 1:max_seq_len].cuda()  # Skip first token
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
