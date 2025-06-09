@@ -2,8 +2,8 @@
 grpo:
   top_p_std: 0.20   # train on responses with top p variance
   top_p_ent: 0.20   # train on tokens with top p entropy
-  num_prompts_per_step: 128
-  num_generations_per_prompt: 8
+  num_prompts_per_step: 64
+  num_generations_per_prompt: 16
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
   max_num_steps: 1000000
   normalize_rewards: true
@@ -17,7 +17,7 @@ grpo:
 loss_fn:
   reference_policy_kl_penalty: 0.0
   ratio_clip_min: 0.2
-  ratio_clip_max: 0.2
+  ratio_clip_max: 0.28
   ratio_clip_c: null
   # (default off) loss formulation improvements (docs/guides/grpo.md#loss)
   use_on_policy_kl_approximation: false
