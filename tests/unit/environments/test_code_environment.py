@@ -26,7 +26,7 @@ from nemo_rl.environments.code_environment import (
     CodeEnvMetadata,
 )
 from nemo_rl.experience.rollouts import run_multi_turn_rollout
-from nemo_rl.models.generation.interfaces import configure_generation_config
+from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy.hf_policy import HfPolicy, PolicyConfig
 
@@ -50,9 +50,14 @@ basic_vllm_test_config: VllmConfig = {
     "stop_token_ids": None,
     "stop_strings": None,
     "vllm_cfg": {
+        "async_engine": False,
+        "precision": "bfloat16",
         "tensor_parallel_size": 1,
-        "gpu_memory_utilization": 0.3,
+        "pipeline_parallel_size": 1,
         "max_model_len": 1024,
+        "disable_log_stats": True,
+        "disable_log_requests": True,
+        "gpu_memory_utilization": 0.6,
     },
 }
 
@@ -89,6 +94,7 @@ basic_hf_test_config: PolicyConfig = {
         },
     },
     "dtensor_cfg": {"enabled": False},
+    "dynamic_batching": {"enabled": False},
 }
 
 
