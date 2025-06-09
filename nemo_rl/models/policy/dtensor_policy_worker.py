@@ -406,14 +406,7 @@ class DTensorPolicyWorker:
             raise ValueError(f"Unknown precision: {self.cfg['precision']}")
 
         print(f"[Rank {rank}] Loading model {model_name} on CPU...")
-        attn_implementation = (
-            "flash_attention_2"
-            if self.cfg.get("packing_strategy", None) == "flash_attention"
-            else None
-        )
-        print(
-            f"[Rank {rank}] Loading model {model_name} on CPU with attention implementation {attn_implementation}..."
-        )
+        self.packing_strategy = self.cfg.get("packing_strategy", None)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
             device_map="cpu",  # load weights onto CPU initially
@@ -425,7 +418,9 @@ class DTensorPolicyWorker:
             **sliding_window_overwrite(
                 model_name
             ),  # due to https://github.com/huggingface/transformers/issues/38002
-            attn_implementation=attn_implementation,
+            attn_implementation="flash_attention_2"
+            if self.packing_strategy == "flash_attention"
+            else None,
         )
         # caching since this property is not always preserved after FSDP
         self.num_tied_weights = len(find_tied_parameters(self.model))
@@ -658,8 +653,7 @@ class DTensorPolicyWorker:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         # TODO(ahmadki): for now, with the model input with sequence packing is of batch of size 1.
                         # a better is code can be found at: cae414c9f88d7ce8feac54b56b58fef50c0dc789, but needs some work
-                        packing_strategy = self.cfg.get("packing_strategy", "default")
-                        if packing_strategy == "flash_attention":
+                        if self.packing_strategy == "flash_attention":
                             # input_ids, position_ids, flash_attn_kwargs = (
                             #     _pack_microbatch(mb)
                             # )
@@ -678,7 +672,7 @@ class DTensorPolicyWorker:
                                 # packed_sequence_size=mb.packed_sequence_size,
                             )
 
-                        elif packing_strategy == "vector":
+                        elif self.packing_strategy == "vector":
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, flash_attn_kwargs = (
                                 _pack_microbatch(mb)
@@ -691,7 +685,7 @@ class DTensorPolicyWorker:
                             )
                             flash_attn_kwargs = {}
 
-                        elif packing_strategy == "matrix":
+                        elif self.packing_strategy == "matrix":
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, attention_mask = pack_sequences(
                                 input_ids=input_ids,
@@ -702,7 +696,7 @@ class DTensorPolicyWorker:
                             )
                             flash_attn_kwargs = {}
 
-                        elif packing_strategy == "default":
+                        elif self.packing_strategy is None:
                             input_ids = mb.get("input_ids").cuda()
                             batch_size, seq_len = input_ids.shape
 
@@ -717,7 +711,7 @@ class DTensorPolicyWorker:
                             flash_attn_kwargs = {}
                         else:
                             raise ValueError(
-                                f"Unknown packing strategy: {self.cfg['packing_strategy']}"
+                                f"Unknown packing strategy: {self.packing_strategy}"
                             )
 
                         logging.debug("model inputs")
@@ -744,17 +738,17 @@ class DTensorPolicyWorker:
                     if "generation" in self.cfg and self.cfg["generation"] is not None:
                         logits.div_(self.cfg["generation"]["temperature"])
 
-                    if packing_strategy == "flash_attention":
+                    if self.packing_strategy == "flash_attention":
                         logits = _unpack_tensor(logits, mb)
-                    elif packing_strategy == "vector":
+                    elif self.packing_strategy == "vector":
                         logits = _unpack_tensor(logits, mb)
-                    elif packing_strategy == "matrix":
+                    elif self.packing_strategy == "matrix":
                         logits = _unpack_tensor(logits, mb)  # FIXME(ahmadki)
-                    elif packing_strategy == "default":
+                    elif self.packing_strategy is None:
                         pass
                     else:
                         raise ValueError(
-                            f"Unknown packing strategy: {self.cfg['packing_strategy']}"
+                            f"Unknown packing strategy: {self.packing_strategy}"
                         )
 
                     loss, loss_metrics = loss_fn(
