@@ -59,8 +59,8 @@ def create_local_venv(py_executable: str, venv_name: str) -> str:
     venv_path = os.path.join(NEMO_RL_VENV_DIR, venv_name)
 
     # Create the virtual environment
-    uv_venv_cmd = ["uv", "venv", "--allow-existing", venv_path]
-    subprocess.run(uv_venv_cmd, check=True)
+    # uv_venv_cmd = ["uv", "venv", "--allow-existing", venv_path]
+    # subprocess.run(uv_venv_cmd, check=True)
 
     # Execute the command with the virtual environment
     env = os.environ.copy()
@@ -76,7 +76,7 @@ def create_local_venv(py_executable: str, venv_name: str) -> str:
     exec_cmd.extend(["echo", f"Finished creating venv {venv_path}"])
 
     # Always run uv sync first to ensure the build requirements are set (for --no-build-isolation packages)
-    subprocess.run(["uv", "sync"], env=env, check=True)
+    # subprocess.run(["uv", "sync"], env=env, check=True)
     subprocess.run(exec_cmd, env=env, check=True)
 
     # Return the path to the python executable in the virtual environment
