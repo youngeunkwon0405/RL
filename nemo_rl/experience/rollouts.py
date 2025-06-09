@@ -313,10 +313,16 @@ def run_multi_turn_rollout(
                 len(tokenized_obs) + len(generated_ids[i]) + active_input_lengths[i]
                 >= max_seq_len
             ):
+                tokens_left_for_obs = max_seq_len - (
+                    len(generated_ids[i]) + active_input_lengths[i]
+                )
+                # Clip it in case generation is beyond the max_seq_len
+                tokens_left_for_obs = max(tokens_left_for_obs, 0)
+                print(
+                    f"DEBUG TOO LONG obs={len(tokenized_obs)} inp={active_input_lengths[i]} gen={len(generated_ids[i])} inp+gen={len(generated_ids[i]) + active_input_lengths[i]} total={len(generated_ids[i]) + active_input_lengths[i] + len(tokenized_obs)} max_seq_len={max_seq_len}"
+                )
                 # truncate
-                tokenized_obs = tokenized_obs[
-                    : max_seq_len - (len(generated_ids[i]) + active_input_lengths[i])
-                ]
+                tokenized_obs = tokenized_obs[:tokens_left_for_obs]
                 truncation_mask[i] = True
                 # Record truncation
                 sample_truncated[active_indices[i]] = True
