@@ -299,15 +299,21 @@ def test_hf_execute_code(cluster, tokenizer, code_env):
 
     # Run rollout
     hf_policy.prepare_for_generation()
-    final_batch, _ = run_multi_turn_rollout(
-        policy_generation=hf_policy,
-        input_batch=initial_batch,
-        tokenizer=tokenizer,
-        task_to_env=task_to_env,
-        max_seq_len=256,
-        max_rollout_turns=2,
-        greedy=True,
-    )
+    output_batches = []
+    # Currently run_multi_turn_rollout only supports batch size = 1 for HFPolicy
+    # so we shard the batch here
+    for input_batch in initial_batch.shard_by_batch_size(shards=len(codes)):
+        output_batch, _ = run_multi_turn_rollout(
+            policy_generation=hf_policy,
+            input_batch=input_batch,
+            tokenizer=tokenizer,
+            task_to_env=task_to_env,
+            max_seq_len=256,
+            max_rollout_turns=2,
+            greedy=True,
+        )
+        output_batches.append(output_batch)
+    final_batch = BatchedDataDict.from_batches(output_batches)
     hf_policy.finish_generation()
 
     # Check results
