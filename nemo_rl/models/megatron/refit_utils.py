@@ -162,7 +162,7 @@ def gather_params(
                 ]
                 torch.distributed.all_gather(gathered_slices, param, group=tp_group)
                 # TODO: why cast to torch.bfloat16 instead of param.dtype?
-                full_param = torch.cat(gathered_slices, dim=tp_dim).to(param.dtype)
+                full_param = torch.cat(gathered_slices, dim=tp_dim)
             else:
                 # TODO: why do we need to clone?
                 full_param = param
