@@ -5,6 +5,10 @@ grpo:
   num_prompts_per_step: 64
   num_generations_per_prompt: 32
 
+checkpointing:
+  enabled: false
+  checkpoint_dir: "results/grpo_8b_megatron"
+
 policy:
   model_name: "meta-llama/Llama-3.1-8B-Instruct"
   tokenizer:
@@ -28,7 +32,7 @@ policy:
   
   megatron_cfg:
     enabled: true
-    empty_unused_memory_level: 1
+    empty_unused_memory_level: 0
     converter_type: "LlamaForCausalLM"
     tensor_model_parallel_size: 1
     pipeline_model_parallel_size: 1
@@ -63,7 +67,7 @@ policy:
     stop_strings: null
     vllm_cfg:
       tensor_parallel_size: 1
-      gpu_memory_utilization: 0.8
+      gpu_memory_utilization: 0.95
       max_model_len: ${policy.max_total_sequence_length}
 
 cluster:

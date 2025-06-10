@@ -47,6 +47,8 @@ from megatron.core.rerun_state_machine import get_rerun_state_machine
 from megatron.inference.text_generation.mcore_engine_server import (
     run_mcore_engine,
 )
+from megatron.core.distributed import DistributedDataParallel
+from megatron.core.distributed.custom_fsdp import FullyShardedDataParallel as custom_FSDP
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron import fault_tolerance
 from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint, save_checkpoint
@@ -78,10 +80,11 @@ from nemo.tron.utils.train_utils import (
 )
 from ray.util.queue import Queue
 from transformers import AutoTokenizer
+from megatron.core.transformer.enums import AttnMaskType
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
+from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs, from_parallel_logits_to_logprobs_packed_sequences
 from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
@@ -91,6 +94,8 @@ from nemo_rl.models.generation.interfaces import (
 from nemo_rl.models.megatron.common import (
     broadcast_tensor,
     forward_step_arbitrary_loss,
+    _pack_sequences_for_megatron,
+    _unpack_sequences_from_megatron,
 )
 from nemo_rl.models.megatron.community_import import import_model_from_hf_name
 from nemo_rl.models.megatron.refit_utils import (
@@ -161,6 +166,7 @@ def setup_megatron_model(
         cfg.model_config,
         cfg.ddp_config,
         use_torch_fsdp2=cfg.dist_config.use_torch_fsdp2,
+        use_custom_fsdp=cfg.ddp_config.use_custom_fsdp, # Not currently functional
         overlap_param_gather_with_optimizer_step=cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
         data_parallel_random_init=cfg.rng_config.data_parallel_random_init,
     )
@@ -256,7 +262,7 @@ class MegatronPolicyWorker:
             pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
                 os.path.join(pretrained_path, "iter_0000000")
             )
-            if get_rank_safe() == 0:
+            if int(os.environ.get("RANK", 0)) == 0:
                 if pt_checkpoint_exists:
                     print(
                         f"Checkpoint already exists at {pretrained_path}. Skipping import."
@@ -267,7 +273,6 @@ class MegatronPolicyWorker:
             else:
                 pre_init_communication_queue.get()
                 pre_init_communication_queue.put(True)
-                pass
 
             pretrained_run_config = os.path.join(
                 pretrained_path, "iter_0000000/run_config.yaml"
@@ -313,12 +318,13 @@ class MegatronPolicyWorker:
             fully_parallel_load=True,  # Enable fully parallel load
             load_rng=False,
         )
+        assert self.cfg["megatron_cfg"]["distributed_data_parallel_config"].get("use_custom_fsdp", False) == False, "Custom FSDP is not currently functional"
         self.megatron_cfg = ConfigContainer(
             model_config=model_cfg,
             checkpoint_config=checkpoint_config,
             logger_config=LoggerConfig(logging_level=0),
             train_config=TrainingConfig(
-                micro_batch_size=self.cfg["train_micro_batch_size"],  # ignored
+                micro_batch_size=1,     # ignored
                 global_batch_size=self.cfg["train_global_batch_size"],  # ignored
                 train_iters=1000,  # Default value for inference
             ),
@@ -332,6 +338,8 @@ class MegatronPolicyWorker:
                 overlap_param_gather=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_param_gather"],
                 average_in_collective=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["average_in_collective"],
                 use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"]["use_distributed_optimizer"],
+                use_custom_fsdp=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["use_custom_fsdp"],
+                data_parallel_sharding_strategy=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["data_parallel_sharding_strategy"],
             ),
             scheduler_config=SchedulerConfig(
                 **self.cfg["megatron_cfg"]["scheduler"],
@@ -353,6 +361,7 @@ class MegatronPolicyWorker:
             self.checkpointing_context,
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
         self.model = self.model[0]  # Get the first model from the list
+        
         self.model = self.move_model(self.model, "cpu")
 
         if init_reference_model:
@@ -361,6 +370,7 @@ class MegatronPolicyWorker:
                 self.megatron_cfg.model_config,
                 self.megatron_cfg.ddp_config,
                 use_torch_fsdp2=self.megatron_cfg.dist_config.use_torch_fsdp2,
+                use_custom_fsdp=self.megatron_cfg.ddp_config.use_custom_fsdp,
                 overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
                 data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
             )
@@ -433,7 +443,6 @@ class MegatronPolicyWorker:
         mbs: Optional[int] = None,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
-        torch.cuda.empty_cache()
         self.model.zero_grad_buffer()
         if hasattr(self.model, "inference_params"):
             self.model.inference_params = None
@@ -450,8 +459,9 @@ class MegatronPolicyWorker:
         if mbs is None:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
-        dataset_size = data.size
-        num_global_batches = dataset_size // local_gbs
+        total_dataset_size = torch.tensor(data.size, device="cuda")
+        torch.distributed.all_reduce(total_dataset_size, op=torch.distributed.ReduceOp.SUM, group=parallel_state.get_data_parallel_group())
+        num_global_batches = total_dataset_size.item() // gbs
 
         if eval_mode:
             ctx = torch.no_grad()
@@ -473,9 +483,8 @@ class MegatronPolicyWorker:
 
             forward_step = partial(forward_step_arbitrary_loss, loss_fn=loss_fn)
             all_mb_metrics = []
-            for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
-                num_microbatches = local_gbs // mbs
-                global_batch = data.slice(gb_start, gb_start + local_gbs)
+            for gb_idx in range(num_global_batches):
+                global_batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
 
                 assert "sample_mask" in global_batch, (
                     "sample_mask must be present in the data!"
@@ -508,12 +517,30 @@ class MegatronPolicyWorker:
                     )
 
                 batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
+                pack_seqs = False
+                seqlen_key = None
+                pad_factor = 1
+                pad_full_seq_to = None
                 if self.cfg["dynamic_batching"]["enabled"]:
                     data_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
                     data_iterator_len = batch.get_microbatch_iterator_dynamic_shapes_len()
+                    micro_batch_size = self.cfg["train_micro_batch_size"]
+                elif self.cfg["sequence_packing"]["enabled"]:
+                    data_iterator = batch.make_microbatch_iterator_for_packable_sequences()
+                    data_iterator_len, seq_dim_size = batch.get_microbatch_iterator_for_packable_sequences_len()
+                    micro_batch_size = 1
+                    pack_seqs = True
+                    seqlen_key = "input_lengths"
+                    tp_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
+                    cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
+                    pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
+                    if self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
+                        _, pad_full_seq_to = batch.get_microbatch_iterator_for_packable_sequences_len()
                 else:
                     data_iterator = batch.make_microbatch_iterator(mbs)
-                    data_iterator_len = num_microbatches
+                    data_iterator_len = local_gbs // mbs
+                    micro_batch_size = self.cfg["train_micro_batch_size"]
+
 
                 rerun_state_machine = get_rerun_state_machine()
                 while rerun_state_machine.should_run_forward_backward(data_iterator):
@@ -529,14 +556,19 @@ class MegatronPolicyWorker:
                             self.mcore_state,
                             global_valid_seqs,
                             global_valid_toks,
+                            pack_sequences=pack_seqs,
+                            seq_length_key=seqlen_key,
+                            pad_individual_seqs_to_multiple_of=pad_factor,
+                            pad_full_seq_to=pad_full_seq_to,
                         ),
                         data_iterator=data_iterator,
                         model=self.model,
                         num_microbatches=data_iterator_len,
                         seq_length=seq_dim_size,
-                        micro_batch_size=self.cfg["train_micro_batch_size"],
+                        micro_batch_size=micro_batch_size,
                         decoder_seq_length=seq_dim_size,
                         forward_only=False,
+                        do_not_average_loss=True,
                     )
 
                 # Empty unused memory.
@@ -563,9 +595,7 @@ class MegatronPolicyWorker:
                 # Update learning rate.
                 if update_successful:
                     increment = (
-                        num_microbatches
-                        * self.cfg["train_micro_batch_size"]
-                        * self.dp_size
+                        total_dataset_size.item()
                     )
                     self.scheduler.step(increment=increment)
                     skipped_iter = 0
@@ -671,42 +701,110 @@ class MegatronPolicyWorker:
         pp_rank = get_pipeline_model_parallel_rank()
         pp_grp = get_pipeline_model_parallel_group()
         pp_size = get_pipeline_model_parallel_world_size()
+        accum = 0
+        call_ctr = 0
+        time_taken_accum = 0
+        # if pp_size > 1, we need to pad the full sequence to the max sequence length to maintain a static PP buffer
+        if self.cfg["sequence_packing"]["enabled"] and self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
+            _, pad_full_seq_to = data.get_microbatch_iterator_for_packable_sequences_len()
+        else:
+            pad_full_seq_to = None
 
         def forward_step_fn(data_iterator: Iterable, model: GPTModel):
-            data_dict = next(data_iterator)
-            input_ids = data_dict["input_ids"].cuda()
-            attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
-                input_ids, 0, False, False, False
-            )
-            output_tensor = model(input_ids, position_ids, attention_mask)
+            nonlocal accum
+            nonlocal call_ctr
+            nonlocal time_taken_accum
+            nonlocal pad_full_seq_to
+            st = time.time()
+            data_dict = next(data_iterator).to("cuda")
+            if self.cfg["sequence_packing"]["enabled"]:
+                original_seq_length = data_dict["input_ids"].shape[1]
+                tp_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
+                pp_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
+                cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
+                pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
+                input_ids, packed_seq_params, cu_seqlens, cu_seqlens_padded = _pack_sequences_for_megatron(
+                    data_dict["input_ids"].clone(),
+                    data_dict["input_lengths"],
+                    pad_individual_seqs_to_multiple_of=pad_factor,
+                    pad_packed_seq_to=pad_full_seq_to,
+                )
+                accum += len(cu_seqlens) - 1
+                call_ctr += 1
+                input_ids = input_ids
+                attention_mask, position_ids = None, None
+                unpacked_input_ids = data_dict["input_ids"]
+            else:
+                input_ids = data_dict["input_ids"]
+                attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
+                    input_ids, 0, False, False, False
+                )
+                packed_seq_params = None
+                unpacked_input_ids = input_ids
+
+            print(f"pp rank: {get_pipeline_model_parallel_rank()}, cu_seqlens: {packed_seq_params.cu_seqlens_q}, cu_seqlens_padded: {packed_seq_params.cu_seqlens_q_padded}")
+            output_tensor = model(input_ids, position_ids, attention_mask, packed_seq_params=packed_seq_params)
 
             def collection_fn(output_tensor):
+                stc = time.time()
                 tp_grp = get_tensor_model_parallel_group()
                 tp_rank = get_tensor_model_parallel_rank()
-                token_logprobs = from_parallel_logits_to_logprobs(
-                    output_tensor.to(torch.float32),
-                    target=input_ids,
-                    vocab_start_index=tp_rank * output_tensor.shape[-1],
-                    vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
-                    group=tp_grp,
-                    inference_only=True,
-                )
+                if self.cfg["sequence_packing"]["enabled"]:
+                    token_logprobs = from_parallel_logits_to_logprobs_packed_sequences(
+                        output_tensor,
+                        target=input_ids,
+                        cu_seqlens=cu_seqlens_padded,
+                        unpacked_seqlen=original_seq_length,
+                        vocab_start_index=tp_rank * output_tensor.shape[-1],
+                        vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
+                        group=tp_grp,
+                        inference_only=True,
+                    )
+                else:
+                    token_logprobs = from_parallel_logits_to_logprobs(
+                        output_tensor.to(torch.float32),
+                        target=unpacked_input_ids,
+                        vocab_start_index=tp_rank * output_tensor.shape[-1],
+                        vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
+                        group=tp_grp,
+                        inference_only=True,
+                    )
 
                 # Prepend 0 logprob for first token to maintain same sequence length as input
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
+                # print(f"output_tensor: {output_tensor.shape}")
+                # print(f"unpacked_input_ids: {unpacked_input_ids.shape}")
+                # print(f"token_logprobs: {token_logprobs.shape}")
+                torch.cuda.synchronize()
+                collection_time = time.time() - stc
+                if torch.distributed.get_rank() == 0:
+                    print(f"collection_time: {collection_time}")
 
                 return torch.tensor(0.0), {"logprobs": token_logprobs}
 
+            if torch.distributed.get_rank() == 0:
+                torch.cuda.synchronize()
+                time_taken_accum += time.time() - st
+                print(f"time taken: {time.time() - st}, time_taken_accum: {time_taken_accum}")
+                print(f"accum: {accum}, call_ctr: {call_ctr}")
             return output_tensor, collection_fn
 
         if self.cfg["dynamic_batching"]["enabled"]:
             mb_iterator = data.make_microbatch_iterator_with_dynamic_shapes()
             data_iterator_len = data.get_microbatch_iterator_dynamic_shapes_len()
+            micro_batch_size = logprob_batch_size
+        elif self.cfg["sequence_packing"]["enabled"]:
+            mb_iterator = data.make_microbatch_iterator_for_packable_sequences()
+            data_iterator_len, _ = data.get_microbatch_iterator_for_packable_sequences_len()
+            micro_batch_size = 1
+            pack_seqs = True
+            seqlen_key = "input_lengths"
         else:
             mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
             data_iterator_len = max(1, data.size // logprob_batch_size)
+            micro_batch_size = logprob_batch_size
 
 
         forward_backward_func = get_forward_backward_func()
@@ -716,7 +814,7 @@ class MegatronPolicyWorker:
             model=self.model,
             num_microbatches=data_iterator_len,
             seq_length=seq_dim_size,
-            micro_batch_size=logprob_batch_size,
+            micro_batch_size=micro_batch_size,
             decoder_seq_length=seq_dim_size,
             forward_only=True,
         )
@@ -1149,7 +1247,7 @@ class MegatronPolicyWorker:
     @torch.no_grad()
     def move_model(self, model, device: str, move_params=True, move_grads=True):
         # move all param and grad buffers to the device
-        if hasattr(model, "buffers"):
+        if isinstance(model, DistributedDataParallel):
             # DDP case
             for buffer_idx in range(len(model.buffers)):
                 if device == "cpu":
@@ -1164,7 +1262,17 @@ class MegatronPolicyWorker:
                     raise ValueError(
                         f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported."
                     )
-            return model
+        elif isinstance(model, custom_FSDP):
+            if device == "cpu":
+                model.param_and_grad_buffer.offload_to_cpu(move_params, move_grads)
+            elif device == "cuda":
+                model.param_and_grad_buffer.reload_from_cpu(
+                    move_params=move_params, move_grads=move_grads
+                )
+            else:
+                raise ValueError(
+                    f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported."
+                )
         else:
             # Ordinary offload case
             if move_params:
@@ -1177,6 +1285,7 @@ class MegatronPolicyWorker:
                             )
                         new_state_dict[name] = item
                     model.load_state_dict(new_state_dict)
+        return model
 
     def save_checkpoint(
         self,
