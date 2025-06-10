@@ -313,8 +313,6 @@ def refit_policy_generation(
     if len(keys) > 0:
         split_keys.append(keys)
     # do update
-    print("LEN state_dict_info", len(state_dict_info))
-    print("LEN SPLIT KEYS", len(split_keys))
     for keys in split_keys:
         ipc_handles = policy.get_weights_ipc_handles(keys)
         if not policy_generation.update_weights(ipc_handles):
