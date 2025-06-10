@@ -333,7 +333,7 @@ def format_parameter_override(param_dict: Dict[str, Any]) -> str:
 
 def launch_eval_experiment(
     config: Optional[str],
-    model_path: str,
+    model_path: Optional[str],
     param_overrides: str,
     nodes: int,
     gpus_per_node: int,
@@ -359,17 +359,19 @@ def launch_eval_experiment(
     # Parse extra arguments into overrides
     all_args = list(extra_args) if extra_args else []
     
+    model_path_arg = None
     # If we have a conversion command, use the HF checkpoint path directly
     if conversion_cmd and hf_checkpoint_path:
         model_path_arg = f"generation.model_name={hf_checkpoint_path}"
-    else:
+    elif model_path:
         model_path_arg = f"generation.model_name={model_path}"
     
     default_args = [
-        model_path_arg,
         f"cluster.num_nodes={nodes}",
         f"cluster.gpus_per_node={gpus_per_node}",
     ]
+    if model_path_arg:
+        default_args.insert(0, model_path_arg)
     all_args.extend(default_args)
     extra_overrides = parse_extra_args(all_args)
     
@@ -503,15 +505,6 @@ def main():
         
     elif args.skip_conversion and args.hf_ckpt_path:
         model_path = args.hf_ckpt_path
-    else:
-        # Check if model path is provided in extra args
-        for arg in extra_args:
-            if arg.startswith("generation.model_name="):
-                model_path = arg.split("=", 1)[1].strip("'\"")
-                break
-    
-    if not model_path:
-        raise ValueError("Model path must be provided either through checkpoint conversion or generation.model_name parameter")
     
     # Determine the number of nodes and GPUs using the verified config path
     num_nodes = get_num_nodes(config_path, args.nodes)
