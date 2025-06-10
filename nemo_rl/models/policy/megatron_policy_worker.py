@@ -546,7 +546,7 @@ class MegatronPolicyWorker:
                         model=self.model,
                         num_microbatches=data_iterator_len,
                         seq_length=seq_dim_size,
-                        micro_batch_size=self.cfg["train_micro_batch_size"],
+                        micro_batch_size=mbs,
                         decoder_seq_length=seq_dim_size,
                         forward_only=eval_mode,
                     )
@@ -576,7 +576,7 @@ class MegatronPolicyWorker:
                 if update_successful:
                     increment = (
                         num_microbatches
-                        * self.cfg["train_micro_batch_size"]
+                        * mbs
                         * self.dp_size
                     )
                     self.scheduler.step(increment=increment)

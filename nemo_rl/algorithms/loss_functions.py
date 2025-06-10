@@ -474,7 +474,7 @@ class DPOLossFn(LossFunction):
                 group=vocab_parallel_group,
                 inference_only=False,
             )
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+        elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             token_logprobs = get_logprobs_from_vocab_parallel_logits(
                 next_token_logits, data["input_ids"]
             )
