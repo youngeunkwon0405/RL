@@ -133,10 +133,6 @@ def _pack_sequences_for_megatron(
         qkv_format='thd',
     )
  
-    print(cu_seqlens[-1], len(cu_seqlens) - 1)
-    if get_pipeline_model_parallel_rank() != 0:
-        print(f"cu_seqlens: {cu_seqlens} cu_seqlens_padded: {cu_seqlens_padded}")
-
     return packed_input_ids.contiguous(), packed_seq_params, cu_seqlens, cu_seqlens_padded
 
 

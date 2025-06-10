@@ -689,33 +689,28 @@ class MegatronPolicyWorker:
 
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
-        seq_dim_size = data.get("input_ids").shape[sequence_dim]
+        input_seq_dim_size = data.get("input_ids").shape[sequence_dim]
         for k, v in data.items():
             if torch.is_tensor(v) and len(v.shape) > 1:
-                assert v.shape[sequence_dim] == seq_dim_size, (
-                    f"Dim 1 must be the sequence dim, expected dim 1={seq_dim_size} but got shape {v.shape}"
+                assert v.shape[sequence_dim] == input_seq_dim_size, (
+                    f"Dim 1 must be the sequence dim, expected dim 1={input_seq_dim_size} but got shape {v.shape}"
                 )
 
         self.model.eval()
 
+        pp_seq_dim_size = input_seq_dim_size
         pp_rank = get_pipeline_model_parallel_rank()
         pp_grp = get_pipeline_model_parallel_group()
         pp_size = get_pipeline_model_parallel_world_size()
-        accum = 0
-        call_ctr = 0
-        time_taken_accum = 0
         # if pp_size > 1, we need to pad the full sequence to the max sequence length to maintain a static PP buffer
         if self.cfg["sequence_packing"]["enabled"] and self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
             _, pad_full_seq_to = data.get_microbatch_iterator_for_packable_sequences_len()
+            pp_seq_dim_size = pad_full_seq_to
         else:
             pad_full_seq_to = None
 
         def forward_step_fn(data_iterator: Iterable, model: GPTModel):
-            nonlocal accum
-            nonlocal call_ctr
-            nonlocal time_taken_accum
             nonlocal pad_full_seq_to
-            st = time.time()
             data_dict = next(data_iterator).to("cuda")
             if self.cfg["sequence_packing"]["enabled"]:
                 original_seq_length = data_dict["input_ids"].shape[1]
@@ -742,7 +737,6 @@ class MegatronPolicyWorker:
                 packed_seq_params = None
                 unpacked_input_ids = input_ids
 
-            print(f"pp rank: {get_pipeline_model_parallel_rank()}, cu_seqlens: {packed_seq_params.cu_seqlens_q}, cu_seqlens_padded: {packed_seq_params.cu_seqlens_q_padded}")
             output_tensor = model(input_ids, position_ids, attention_mask, packed_seq_params=packed_seq_params)
 
             def collection_fn(output_tensor):
@@ -774,21 +768,8 @@ class MegatronPolicyWorker:
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
-                # print(f"output_tensor: {output_tensor.shape}")
-                # print(f"unpacked_input_ids: {unpacked_input_ids.shape}")
-                # print(f"token_logprobs: {token_logprobs.shape}")
-                torch.cuda.synchronize()
-                collection_time = time.time() - stc
-                if torch.distributed.get_rank() == 0:
-                    print(f"collection_time: {collection_time}")
-
                 return torch.tensor(0.0), {"logprobs": token_logprobs}
 
-            if torch.distributed.get_rank() == 0:
-                torch.cuda.synchronize()
-                time_taken_accum += time.time() - st
-                print(f"time taken: {time.time() - st}, time_taken_accum: {time_taken_accum}")
-                print(f"accum: {accum}, call_ctr: {call_ctr}")
             return output_tensor, collection_fn
 
         if self.cfg["dynamic_batching"]["enabled"]:
@@ -799,8 +780,6 @@ class MegatronPolicyWorker:
             mb_iterator = data.make_microbatch_iterator_for_packable_sequences()
             data_iterator_len, _ = data.get_microbatch_iterator_for_packable_sequences_len()
             micro_batch_size = 1
-            pack_seqs = True
-            seqlen_key = "input_lengths"
         else:
             mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
             data_iterator_len = max(1, data.size // logprob_batch_size)
@@ -813,16 +792,16 @@ class MegatronPolicyWorker:
             data_iterator=mb_iterator,
             model=self.model,
             num_microbatches=data_iterator_len,
-            seq_length=seq_dim_size,
+            seq_length=pp_seq_dim_size,
             micro_batch_size=micro_batch_size,
-            decoder_seq_length=seq_dim_size,
+            decoder_seq_length=pp_seq_dim_size,
             forward_only=True,
         )
         if is_pipeline_last_stage(ignore_virtual=True):
             all_log_probs_padded = []
             all_logprobs = [l["logprobs"] for l in list_of_logprobs]
             for lp in all_logprobs:
-                padding_needed = seq_dim_size - lp.shape[1]
+                padding_needed = input_seq_dim_size - lp.shape[1]
                 if padding_needed > 0:
                     lp = torch.nn.functional.pad(
                         lp, (0, padding_needed), mode="constant", value=0.0

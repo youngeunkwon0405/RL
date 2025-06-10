@@ -589,15 +589,16 @@ class SequencePackingLossWrapper:
         """
         Wraps a loss function to handle sequence packing by doing one sequence at a time to avoid padding.
         """
+        unpadded_cu_seqlens = self.packed_seq_params.cu_seqlens_q
+        unpadded_seq_lengths = self.packed_seq_params.cu_seqlens_q[1:] - self.packed_seq_params.cu_seqlens_q[:-1]
         if self.packed_seq_params.cu_seqlens_q_padded is not None:
             padded_cu_seqlens = self.packed_seq_params.cu_seqlens_q_padded
             padded_seq_lengths = self.packed_seq_params.cu_seqlens_q_padded[1:] - self.packed_seq_params.cu_seqlens_q_padded[:-1]
         else:
-            padded_cu_seqlens = self.packed_seq_params.cu_seqlens_q
-            padded_seq_lengths = self.packed_seq_params.cu_seqlens_q[1:] - self.packed_seq_params.cu_seqlens_q[:-1]
+            padded_cu_seqlens = unpadded_cu_seqlens
+            padded_seq_lengths = unpadded_seq_lengths
         seq_starts = padded_cu_seqlens[:-1]
         seq_ends = padded_cu_seqlens[1:]
-        seq_lengths = padded_seq_lengths
         
         loss_accum = 0 
         metrics_accum = {}
@@ -611,12 +612,12 @@ class SequencePackingLossWrapper:
             for k, v in seq_data.items():
                 # print(f"k: {k}, v: {v.shape}")
                 if isinstance(v, torch.Tensor) and v.ndim > 1 and v.shape[1] > 1:
-                    unpadded_seq_data[k] = v[:, :seq_lengths[seq_idx]]
+                    unpadded_seq_data[k] = v[:, :unpadded_seq_lengths[seq_idx]]
                 else:
                     unpadded_seq_data[k] = v
 
             # get next_token_logits
-            next_token_logits_slice = next_token_logits[:, seq_start:seq_end, :]
+            next_token_logits_slice = next_token_logits[:, seq_start:seq_start + unpadded_seq_lengths[seq_idx], :]
             # print(f"seq_start: {seq_start}, seq_end: {seq_end}, next_token_logits: {next_token_logits_slice.shape}")
             
             loss, metrics = self.loss_fn(
