@@ -1098,9 +1098,6 @@ class MegatronPolicyWorker:
                 (
                     (
                         name,
-                        tp_rank_ids,
-                        pp_rank_ids,
-                        ep_rank_ids,
                         tuple(shape),
                         param.dtype,
                     ),
@@ -1165,31 +1162,20 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
-        st_gather_params = time.time()
         gathered_megatron_params = gather_params(
             self.model,
             keys,
         )
-        print(f"TIME gather_params: {time.time() - st_gather_params}")
-        st_convert_params = time.time()
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )
-        print(f"TIME convert_params: {time.time() - st_convert_params}")
 
-        # st_gc = time.time()
-        # gc.collect()
-        # torch.cuda.empty_cache()
-        # print(f"TIME gc: {time.time() - st_gc}")
-
-        st_rest = time.time()
         # Get device UUID for IPC handles
         device_uuid = self.report_device_id()
         from torch.multiprocessing.reductions import reduce_tensor
 
         # Create IPC handles for each parameter
         all_handles = []
-        st_reduce_tensor = time.time()
         for key, tensor in gathered_hf_params.items():
             handle = reduce_tensor(tensor.detach())
             all_handles.append((key, handle))
@@ -1200,8 +1186,6 @@ class MegatronPolicyWorker:
         for key, tensor in gathered_hf_params.items():
             shapes[key] = tensor.shape
 
-        print(f"TIME rest: {time.time() - st_rest}")
-        print("TIME total get_weights_ipc_handles: ", time.time() - st_gather_params)
         return {device_uuid: all_handles}
 
     def prepare_for_lp_inference(self):
