@@ -6,5 +6,5 @@
 [submodule "3rdparty/Megatron-LM"]
 	path = 3rdparty/Megatron-LM-workspace/Megatron-LM
 	url = https://github.com/terrykong/Megatron-LM.git
-	branch = sahilj/megatron-patch-offload
+	branch = sahilj/megatron-external-loss-norm
 	shallow = true

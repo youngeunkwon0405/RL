@@ -724,8 +724,6 @@ class MegatronPolicyWorker:
                     pad_individual_seqs_to_multiple_of=pad_factor,
                     pad_packed_seq_to=pad_full_seq_to,
                 )
-                accum += len(cu_seqlens) - 1
-                call_ctr += 1
                 input_ids = input_ids
                 attention_mask, position_ids = None, None
                 unpacked_input_ids = data_dict["input_ids"]
