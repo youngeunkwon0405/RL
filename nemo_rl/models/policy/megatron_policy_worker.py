@@ -1158,10 +1158,6 @@ class MegatronPolicyWorker:
                 * len(ep_rank_ids)
                 * scale
             )
-            global_key = get_global_key_from_local_key(
-                name, self.megatron_cfg.model_config
-            )
-            # global_key = get_global_key_from_local_key( "decoder.layers.6.mlp.experts.linear_fc2.weight63", self.megatron_cfg.model_config)
             param_info.append(
                 (
                     (
@@ -1172,11 +1168,6 @@ class MegatronPolicyWorker:
                     size_in_bytes,
                 )
             )
-            # param_info.append(((name, ""), size_in_bytes))
-
-        # if torch.distributed.get_rank() == 2:
-        #     import pdb; pdb.set_trace()
-        # torch.distributed.barrier()
         # Gather parameter info from all pipeline parallel ranks to ensure complete coverage
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
@@ -1198,11 +1189,6 @@ class MegatronPolicyWorker:
             ep_gathered_param_infos, pp_gathered_param_infos, group=ep_group
         )
         all_param_infos = [x for y in ep_gathered_param_infos for x in y]
-
-        # if torch.distributed.get_rank() == 2:
-        #     import pdb
-        #     pdb.set_trace()
-        # torch.distributed.barrier()
 
         # Merge all parameter infos, keeping only unique parameter names
         merged_param_info = []
