@@ -127,10 +127,11 @@ data:
     filter_long_samples: false
 
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
+  add_system_prompt: false
 
 env:
   math:
-    enable: true
+    enable: false
     num_workers: 8
   llm_judge_async: # Configuration for the LlmJudgeAsyncEnvironment
     enable: false
@@ -146,6 +147,79 @@ env:
   ifeval:
     num_workers: 8
     enable: false
+  reasoning_gym_task:
+    enable: false
+    num_workers: 8
+    tasks:
+      # - dataset_name: "chain_sum"
+      #   dataset_config:
+      #     min_terms: 2
+      #     max_terms: 6
+      #     min_digits: 1
+      #     max_digits: 4
+      #     allow_negation: false
+      #   weight: 0.1
+      # - dataset_name: "zebra_puzzles"
+      #   dataset_config:
+      #     num_people: 4
+      #     num_characteristics: 4
+      #   weight: 1
+      # - dataset_name: "sudoku"
+      #   dataset_config:
+      #     min_empty: 30
+      #     max_empty: 50
+      #   weight: 1
+      # - dataset_name: "simple_equations"
+      #   dataset_config:
+      #     min_terms: 2
+      #     max_terms: 4
+      #     min_value: 1
+      #     max_value: 100
+      #   weight: 1
+      # - dataset_name: "gcd"
+      #   dataset_config:
+      #     min_numbers: 2
+      #     max_numbers: 2
+      #     min_value: 1
+      #     max_value: 1000
+      #   weight: 1
+      # - dataset_name: "knights_knaves"
+      #   dataset_config:
+      #     n_people: 2
+      #     depth_constraint: 2
+      #     width_constraint: 2
+      #   weight: 1
+      # - dataset_name: "polynomial_equations"
+      #   dataset_config:
+      #     min_terms: 2
+      #     max_terms: 4
+      #     min_value: 1
+      #     max_value: 20
+      #     min_degree: 1
+      #     max_degree: 3
+      #   weight: 1
+      # - dataset_name: "n_queens"
+      #   dataset_config:
+      #     n: 8
+      #     min_remove: 1
+      #     max_remove: 7
+      #   weight: 1
+      # - dataset_name: "puzzle24"
+      #   dataset_config:
+      #     min_value: 1
+      #     max_value: 10
+      #   weight: 1
+      # - dataset_name: "prime_factorization" # this one was throwing errors on score_answer due to latex instead of unicode. Could preprocess answer, catch error, or not use this.
+      #   dataset_config:
+      #     min_value: 2
+      #     max_value: 1000
+      #   weight: 1
+      - dataset_name: "family_relationships"
+        dataset_config:
+          min_family_size: 4
+          max_family_size: 8
+        weight: 1
+    seed: 42
 
 logger:
   log_dir: "logs"  # Base directory for all logs

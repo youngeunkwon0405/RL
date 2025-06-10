@@ -13,23 +13,31 @@
 # limitations under the License.
 
 import argparse
+import itertools
 import os
 import pprint
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Any, Iterator
 
 import jsonlines
 from omegaconf import OmegaConf
+from torch.utils.data import IterableDataset
 from transformers import AutoTokenizer
 
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import DataConfig
-from nemo_rl.data.interfaces import DatumSpec
+from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType
 from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.environments.llm_judge_async_environment import LLMJudgeAsyncEnvironment
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.environments.ifeval_environment import IFEvalEnvironment
+from nemo_rl.environments.reasoning_gym_env import (
+    ReasoningGymEnv,
+    ReasoningGymGameLogic,
+    ReasoningGymMetadata,
+)
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -126,23 +134,141 @@ class JsonlinesDataset:
         return output
 
 
+def generate_reasoning_gym_datum(
+    tokenizer,
+    game_config: dict[str, Any],
+    task_name: str,
+    idx: int,
+    add_system_prompt: bool,
+) -> DatumSpec:
+    """Generate a single reasoning-gym puzzle datum (prompt and metadata)."""
+    
+    game_state = ReasoningGymGameLogic.generate(game_config)
+    puzzle_question = ReasoningGymGameLogic.init(game_state)
+    
+    prompt_instructions = (
+        f"{puzzle_question}\n\n"
+        f"Think carefully about this problem and provide your final answer.\n"
+        f"After reasoning, output your answer on a new line using this format:\n"
+        f"<answer>your_final_answer</answer>\n"
+    )
+    
+    initial_prompt_content = tokenizer.apply_chat_template(
+        [{"role": "user", "content": prompt_instructions}],
+        tokenize=False,
+        add_system_prompt=add_system_prompt,
+        add_generation_prompt=True,
+        add_special_tokens=False,
+    ).strip()
+    
+    # for length calculation
+    tokenized_prompt = tokenizer(
+        initial_prompt_content, return_tensors="pt", add_special_tokens=False
+    )["input_ids"][0]
+    
+    message_log: LLMMessageLogType = [
+        {
+            "role": "user",
+            "content": initial_prompt_content,
+            "token_ids": tokenized_prompt,
+        }
+    ]
+    
+    metadata = ReasoningGymMetadata(
+        puzzle_entry=game_state,
+        dataset_name=game_state["dataset_name"]
+    )
+    
+    datum: DatumSpec = {
+        "message_log": message_log,
+        "length": len(tokenized_prompt),
+        "extra_env_info": metadata,
+        "loss_multiplier": 1.0,
+        "idx": idx,
+        "task_name": task_name,
+        "stop_strings": ["</answer>"],
+    }
+    
+    return datum
+
+
+class IterableReasoningGymDataset(IterableDataset):
+    """An IterableDataset that generates reasoning-gym puzzle data indefinitely."""
+
+    def __init__(
+        self, tokenizer, game_config, task_name, add_system_prompt, length
+    ):
+        super().__init__()
+        self.tokenizer = tokenizer
+        self.game_config = game_config
+        self.task_name = task_name
+        self.add_system_prompt = add_system_prompt
+        self.length = length
+
+    def __iter__(self) -> Iterator[DatumSpec]:
+        if "tasks" in self.game_config:
+            num_tasks = len(self.game_config['tasks'])
+            dataset_info = f"{num_tasks} tasks: {', '.join([task['dataset_name'] for task in self.game_config['tasks']])}"
+        else:
+            dataset_info = "unknown configuration"
+            
+        print(f"Starting IterableReasoningGymDataset for {dataset_info} (indefinite generation).")
+        for i in itertools.count():
+            yield generate_reasoning_gym_datum(
+                tokenizer=self.tokenizer,
+                game_config=self.game_config,
+                task_name=self.task_name,
+                idx=i,
+                add_system_prompt=self.add_system_prompt,
+            )
+
+    def __len__(self):
+        return self.length
+
+
 def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
     print("\n▶ Setting up data...")
 
-    train_ds = JsonlinesDataset(
-        data_config["train"]["jsonl_path"],
-        data_config["train"]["seed"],
-        tokenizer,
-        max_seq_length=data_config["max_input_seq_length"],
-        filter_long_samples=data_config["train"]["filter_long_samples"],
-    )
-    val_ds = JsonlinesDataset(
-        data_config["val"]["jsonl_path"],
-        data_config["val"]["seed"],
-        tokenizer,
-        max_seq_length=data_config["max_input_seq_length"],
-        filter_long_samples=data_config["val"]["filter_long_samples"],
-    )
+    # if reasoning-gym is enabled, use it instead of jsonlines
+    if "reasoning_gym_task" in env_configs and env_configs["reasoning_gym_task"]["enable"]:
+        print("Reasoning Gym enabled - using IterableReasoningGymDataset")
+        
+        rg_config = env_configs["reasoning_gym_task"]
+        if "tasks" in rg_config:
+            game_config = {"tasks": rg_config["tasks"]}
+        else:
+            raise ValueError("reasoning_gym_task config must specify 'tasks'")
+        
+        train_ds = IterableReasoningGymDataset(
+            tokenizer=tokenizer,
+            game_config=game_config,
+            task_name="reasoning_gym_task",
+            add_system_prompt=data_config.get("add_system_prompt", False),
+            length=10000, # TODO: not sure how this is used, but following sliding puzzle example...
+        )
+        
+        val_ds = IterableReasoningGymDataset(
+            tokenizer=tokenizer,
+            game_config=game_config,
+            task_name="reasoning_gym_task", 
+            add_system_prompt=data_config.get("add_system_prompt", False),
+            length=1000,
+        )
+    else:
+        train_ds = JsonlinesDataset(
+            data_config["train"]["jsonl_path"],
+            data_config["train"]["seed"],
+            tokenizer,
+            max_seq_length=data_config["max_input_seq_length"],
+            filter_long_samples=data_config["train"]["filter_long_samples"],
+        )
+        val_ds = JsonlinesDataset(
+            data_config["val"]["jsonl_path"],
+            data_config["val"]["seed"],
+            tokenizer,
+            max_seq_length=data_config["max_input_seq_length"],
+            filter_long_samples=data_config["val"]["filter_long_samples"],
+        )
 
     task_to_env = {}
 
@@ -165,6 +291,17 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
             },
         ).remote(env_configs["ifeval"])
         task_to_env["ifeval"] = ifeval_env
+        
+    if "reasoning_gym_task" in env_configs and env_configs["reasoning_gym_task"]["enable"]:
+        rg_config = env_configs["reasoning_gym_task"]
+        if "tasks" in rg_config:
+            game_config = {"tasks": rg_config["tasks"]}
+        else:
+            raise ValueError("reasoning_gym_task config must specify 'tasks'")
+            
+        reasoning_gym_env = ReasoningGymEnv.options(num_gpus=0).remote(cfg=game_config)
+        task_to_env["reasoning_gym_task"] = reasoning_gym_env
+        
     if "llm_judge_async" in env_configs and env_configs["llm_judge_async"]["enable"]:
         # Extract max_concurrency from config, default to 16 if not specified
         max_concurrency = env_configs["llm_judge_async"].get("max_concurrency", 16)
