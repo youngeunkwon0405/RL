@@ -238,6 +238,8 @@ class VllmGenerationWorker:
             gpu_memory_utilization=self.gpu_memory_utilization,
             # enable_prefix_caching=torch.cuda.get_device_capability()[0] >= 8,
             enable_prefix_caching=False,
+            # for nm5
+            enable_chunked_prefill=False,
             dtype=self.cfg["vllm_cfg"]["precision"],
             seed=seed,
             # Don't use cuda-graph by default as it leads to convergence issues (see https://github.com/NVIDIA/NeMo-RL/issues/186)
