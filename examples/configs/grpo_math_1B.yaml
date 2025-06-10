@@ -98,7 +98,7 @@ policy:
     max_new_tokens: ${policy.max_total_sequence_length}
     temperature: 1.0
     top_p: 1.0
-    top_k: null
+    top_k: -1
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
@@ -111,7 +111,7 @@ policy:
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
-  prompt_file: "examples/prompts/cot.txt"
+  prompt_file: null
   system_prompt_file: null
   dataset_name: "OpenMathInstruct-2"
 
