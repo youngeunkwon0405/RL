@@ -314,6 +314,8 @@ class MegatronPolicyWorker:
         )
         ref_checkpoint_config = CheckpointConfig(
             pretrained_checkpoint=pretrained_path,  # This is the path to the pretrained ckpt for the SFT case
+            save=None,
+            load=None,
             fully_parallel_load=True,  # Enable fully parallel load
             load_rng=False,
         )
@@ -363,6 +365,24 @@ class MegatronPolicyWorker:
 
         if init_reference_model:
             ref_ckpt_context = _init_checkpointing_context(ref_checkpoint_config)
+            
+            # Create a separate megatron config for the reference model with the correct checkpoint config
+            ref_megatron_cfg = ConfigContainer(
+                model_config=self.megatron_cfg.model_config,
+                checkpoint_config=ref_checkpoint_config,  # Use the reference checkpoint config
+                logger_config=self.megatron_cfg.logger_config,
+                train_config=self.megatron_cfg.train_config,
+                optimizer_config=self.megatron_cfg.optimizer_config,
+                ddp_config=self.megatron_cfg.ddp_config,
+                scheduler_config=self.megatron_cfg.scheduler_config,
+                dataset_config=self.megatron_cfg.dataset_config,
+                tokenizer_config=self.megatron_cfg.tokenizer_config,
+            )
+            
+            # Create a separate state object for the reference model
+            ref_state = GlobalState()
+            ref_state.cfg = ref_megatron_cfg
+            
             reference_model = get_model_from_config(
                 self.megatron_cfg.model_config,
                 self.megatron_cfg.ddp_config,
@@ -370,12 +390,13 @@ class MegatronPolicyWorker:
                 overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
                 data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
             )
+            print(f"starting ref load")
             if (
                 ref_checkpoint_config.pretrained_checkpoint is not None
                 and checkpoint_exists(ref_checkpoint_config.pretrained_checkpoint)
             ):
                 load_checkpoint(
-                    self.mcore_state,
+                    ref_state,  # Use the separate state object with ref checkpoint config
                     reference_model,
                     None,  # no optimizer
                     None,  # no scheduler
