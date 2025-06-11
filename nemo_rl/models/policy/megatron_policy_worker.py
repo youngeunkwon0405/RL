@@ -449,11 +449,11 @@ class MegatronPolicyWorker:
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self._held_gather_buffer = None
+        self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
 
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 
-        self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
 
     def is_alive(self):
         return True
