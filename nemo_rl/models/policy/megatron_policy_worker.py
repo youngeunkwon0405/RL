@@ -484,6 +484,7 @@ class MegatronPolicyWorker:
         self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
 
         self.local_key_to_global_keys = self.get_local_key_to_global_keys()
+        self.state_dict_info = self.prepare_weights_for_ipc()
 
     def is_alive(self):
         return True
