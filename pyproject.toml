@@ -17,7 +17,7 @@ dynamic = [
     "readme",
 ]
 description = "NeMo RL: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
     "setuptools",
@@ -29,7 +29,7 @@ dependencies = [
     "transformers>=4.51.0",
     "wandb",
     "numpy",
-    "datasets",
+    "datasets>=3.6.0",
     "rich",
     "math-verify",
     "accelerate>=0.26",
@@ -110,7 +110,7 @@ members = [
 [tool.uv]
 # Currently, TE, flash-attn must be built with no build-isolation b/c it requires torch
 # no-build-isolation-package = ["transformer-engine", "flash-attn"]
-no-build-isolation-package = ["transformer-engine"]
+no-build-isolation-package = ["transformer-engine-torch", "transformer-engine"]
 # Always apply the build group since dependencies like TE/mcore/nemo-run require build dependencies
 # and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
 # avoid including these in the default dependency set, but for now it's required.
