@@ -31,6 +31,7 @@ from transformers.integrations.accelerate import find_tied_parameters
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.loss_functions import LossType
+from nemo_rl.algorithms.utils import compute_token_logprobs
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import (
     PY_EXECUTABLES,
@@ -40,7 +41,6 @@ from nemo_rl.models.dtensor.parallelize import (
     clip_grad_by_total_norm_,
     get_grad_norm,
     get_grad_sparsity,
-    get_logprobs_from_vocab_parallel_logits,
     to_local_if_dtensor,
 )
 from nemo_rl.models.huggingface.common import ModelFlag
@@ -597,29 +597,9 @@ class DTensorPolicyWorker:
                         position_ids=position_ids,
                         use_cache=False,
                     )
-
-                if isinstance(outputs.logits, DTensor):
-                    token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                        outputs.logits.to(torch.float32), input_ids
-                    )
-                else:
-                    # Extract logprobs for each token in the sequence by gathering the logprob
-                    # corresponding to the next token at each position
-                    # Input shapes:
-                    #   log_probs: [batch_size, sequence_length, vocab_size] - logits for each position
-                    #   token_ids: [batch_size, sequence_length] - actual tokens
-                    # Output shape: [batch_size, sequence_length] - logprob of each token given previous
-                    # We get logprob of token[t+1] from logits[t], prepending 0 to maintain sequence length
-
-                    log_probs = torch.nn.functional.log_softmax(
-                        outputs.logits.to(torch.float32), dim=-1
-                    )
-                    next_tokens = input_ids[:, 1:]
-                    log_probs = log_probs[:, :-1]
-                    token_logprobs = log_probs.gather(
-                        dim=-1, index=next_tokens.unsqueeze(-1)
-                    ).squeeze(-1)
-
+                token_logprobs = compute_token_logprobs(
+                    outputs.logits.to(torch.float32), input_ids
+                )
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )

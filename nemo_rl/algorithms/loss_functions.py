@@ -19,6 +19,8 @@ import torch
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.utils import (
     calculate_kl_penalty_joschu2020,
+    compute_token_level_entropy,
+    compute_token_logprobs,
     masked_mean,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -142,22 +144,7 @@ class ClippedPGLossFn(LossFunction):
         ).item()
 
         next_token_logits = next_token_logits.to(torch.float32)
-
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
-            curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"]
-            )
-        else:
-            next_token_logits_wo_last = next_token_logits[
-                :, :-1
-            ]  # Remove last position's logits
-            next_token_logprobs = torch.nn.functional.log_softmax(
-                next_token_logits_wo_last, dim=-1
-            )
-            next_tokens = data.get("input_ids")[:, 1:].cuda()  # Skip first token
-            curr_logprobs = next_token_logprobs.gather(
-                dim=-1, index=next_tokens.unsqueeze(-1)
-            ).squeeze(-1)
+        curr_logprobs = compute_token_logprobs(next_token_logits, data["input_ids"])
 
         # Calculate KL regularization.
         if self.use_on_policy_kl_approximation:
@@ -277,6 +264,11 @@ class ClippedPGLossFn(LossFunction):
         loss = actor_loss + kl_for_loss
 
         with torch.no_grad():
+            token_level_entropy = masked_mean(
+                compute_token_level_entropy(next_token_logits),
+                mask,
+                global_normalization_factor=global_valid_toks,
+            )
             probs_ratio = masked_mean(
                 ratios.detach(),
                 mask,
@@ -331,7 +323,8 @@ class ClippedPGLossFn(LossFunction):
                 "token_mult_prob_error": mult_prob_error,
                 "sampling_importance_ratio": sample_importance_ratio.item(),
                 "num_valid_samples": sample_mask.sum().item(),
-                "approx_entropy": seq_entropy_approx.item(),
+                "seq_approx_entropy": seq_entropy_approx.item(),
+                "token_level_entropy": token_level_entropy.item(),
             },
         )
 

@@ -38,7 +38,10 @@ from transformers.models.llama.modeling_llama import LlamaForCausalLM
 from transformers.models.qwen2.modeling_qwen2 import Qwen2ForCausalLM
 from transformers.models.qwen3.modeling_qwen3 import Qwen3ForCausalLM
 
-from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
+from nemo_rl.distributed.model_utils import (
+    DistributedLogprob,
+    DistributedTokenLevelEntropy,
+)
 
 
 class RotaryEmbedParallel(SequenceParallel):
@@ -563,6 +566,31 @@ def get_grad_norm(
     return total_norm
 
 
+def token_level_entropy_from_vocab_parallel_logits(
+    vocab_parallel_logits: DTensor,
+):
+    """Computes token-level entropy from vocabulary-parallel logits.
+
+    Args:
+        vocab_parallel_logits (DTensor): Logits distributed across tensor parallel workers,
+            with shape [batch_size, seq_len, vocab_size/tp_size].
+
+    Returns:
+        torch.Tensor: Token-level entropy tensor with shape [batch_size, seq_len-1].
+            The sequence dimension is reduced by 1 due to the target shifting.
+
+    NOTE: this function assumes the vocab dimension includes all valid tokens(no padding)
+    """
+    tp_mesh = vocab_parallel_logits.device_mesh
+
+    entropy = DistributedTokenLevelEntropy.apply(
+        vocab_parallel_logits.to_local(),
+        tp_mesh.get_group(),
+        inference_only=not torch.is_grad_enabled(),
+    ).contiguous()
+    return entropy[:, :-1]
+
+
 def get_logprobs_from_vocab_parallel_logits(
     vocab_parallel_logits: DTensor, input_ids: torch.Tensor
 ):
@@ -585,11 +613,13 @@ def get_logprobs_from_vocab_parallel_logits(
 
     vocab_interval_per_rank = vocab_parallel_logits.shape[-1] // tp_mesh.size()
 
-    return from_parallel_logits_to_logprobs(
+    target = input_ids.roll(shifts=-1, dims=-1)
+    probs = DistributedLogprob.apply(
         vocab_parallel_logits.to_local(),
-        input_ids,
+        target,
         vocab_interval_per_rank * tp_rank,
         (tp_rank + 1) * vocab_interval_per_rank,
         tp_mesh.get_group(),
         inference_only=not torch.is_grad_enabled(),
-    )
+    ).contiguous()
+    return probs[:, :-1]
