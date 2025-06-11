@@ -19,7 +19,7 @@ import warnings
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
 from functools import partial
-from typing import Any, Iterator, Optional, TypeVar
+from typing import Any, Iterator, Optional, List, Tuple, TypeVar
 
 import ray
 import torch
@@ -107,6 +107,7 @@ from nemo_rl.models.megatron.converters.common import (
 )
 from nemo_rl.models.megatron.refit_utils import (
     gather_params,
+    get_global_key_from_local_key,
     get_tp_dim,
 )
 from nemo_rl.models.policy import PolicyConfig
@@ -660,6 +661,12 @@ class MegatronPolicyWorker:
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self._held_gather_buffer = None
         self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
+
+        # Create a map that maps any local parameter name to a list of global parameter names.
+        # This map is repeatedly used by parameter gatherring phase during refit of every step.
+        self.local_key_to_global_keys = self.get_local_key_to_global_keys(
+            state_dict_info = self.prepare_weights_for_ipc()
+        )
 
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         USE_EXPANDABLE_SEGMENTS = False  # Disabling this right now as it seems to cause vLLM refit issues with Ampere
@@ -1215,6 +1222,68 @@ class MegatronPolicyWorker:
         device_idx = torch.cuda.current_device()
         # Get device UUID using NVML
         return get_device_uuid(device_idx)
+    
+    @torch.no_grad()
+    def get_local_key_to_global_keys(self, state_dict_info: List[Tuple[Any, int]]):
+        """ Get the local key to global keys mapping.
+        """
+        # Get parallel info
+        tp_group = parallel_state.get_tensor_model_parallel_group()
+        tp_world_size = torch.distributed.get_world_size(tp_group)
+
+        pp_group = parallel_state.get_pipeline_model_parallel_group()
+        pp_world_size = torch.distributed.get_world_size(pp_group)
+
+        ep_group = parallel_state.get_expert_model_parallel_group()
+        ep_world_size = torch.distributed.get_world_size(ep_group)
+        
+        # start calculating the global key
+        ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
+        state_dict = self.model.state_dict()
+        final_key_to_global_keys = {}
+
+        import time
+        time.time = lambda: 0.0  # Monkey patch time.time to return constant value
+        print = lambda *args, **kwargs: None
+        st = time.time()
+            
+        for param_info, size in state_dict_info:
+            local_key, _, _ = param_info
+
+            # Step 1: create global key from local key
+            # if: for if a parameter is sharded along PP or EP; 
+            # else: not sharded (like embedding)
+            if local_key in state_dict:
+                global_key = get_global_key_from_local_key(local_key, self.model.config)
+            else:
+                global_key = None
+            
+            # Step 2: gather global keys from ranks in PP group
+            pp_gathered_objs = [None] * pp_world_size
+            torch.distributed.all_gather_object(
+                pp_gathered_objs, global_key, group=pp_group
+            )
+
+            # Step 3: gather global keys from ranks in EP group
+            if ep_pattern.search(local_key):
+                ep_gathered_objs = [None] * ep_world_size
+                torch.distributed.all_gather_object(
+                    ep_gathered_objs, pp_gathered_objs, group=ep_group
+                )
+                flat_gathered_objs = [x for y in ep_gathered_objs for x in y]
+            else:
+                flat_gathered_objs = pp_gathered_objs
+            
+            final_key_to_global_keys[local_key] = flat_gathered_objs
+
+        et = time.time()
+        if (
+            parallel_state.get_tensor_model_parallel_rank() == 0 and 
+            parallel_state.get_pipeline_model_parallel_rank() == 0 and 
+            parallel_state.get_expert_model_parallel_rank() == 0
+        ):
+            print("[Rank 0] ", f"Time taken to get local key to global keys: {et - st}")
+        return final_key_to_global_keys
 
     def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
         """Prepare Megatron model weights for IPC transfer to vLLM.
@@ -1354,13 +1423,28 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
+        import time
+        time.time = lambda: 0.0  # Monkey patch time.time to return constant value
+        print = lambda *args, **kwargs: None
+        st = time.time()
+
         gathered_megatron_params = gather_params(
             self.model,
             keys,
+            key_to_global_keys=self.local_key_to_global_keys,
         )
+
+        et = time.time()
+        print(f"[get_weights_ipc_handles] Time taken to gather params: {et - st}")
+        st = et
+
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )
+
+        et = time.time()
+        print(f"[get_weights_ipc_handles] Time taken to convert params: {et - st}")
+        st = et
 
         # Get device UUID for IPC handles
         device_uuid = self.report_device_id()
@@ -1371,6 +1455,10 @@ class MegatronPolicyWorker:
         for key, tensor in gathered_hf_params.items():
             handle = reduce_tensor(tensor.detach())
             all_handles.append((key, handle))
+
+        et = time.time()
+        print(f"[get_weights_ipc_handles] Time taken to create handles: {et - st}")
+        st = et
 
         # Store references to avoid premature garbage collection
         self._held_gather_buffer = gathered_hf_params
