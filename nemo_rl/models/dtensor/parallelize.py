@@ -586,7 +586,7 @@ def token_level_entropy_from_vocab_parallel_logits(
     entropy = DistributedTokenLevelEntropy.apply(
         vocab_parallel_logits.to_local(),
         tp_mesh.get_group(),
-        inference_only=not torch.is_grad_enabled(),
+        not torch.is_grad_enabled(),
     ).contiguous()
     return entropy[:, :-1]
 
@@ -620,6 +620,6 @@ def get_logprobs_from_vocab_parallel_logits(
         vocab_interval_per_rank * tp_rank,
         (tp_rank + 1) * vocab_interval_per_rank,
         tp_mesh.get_group(),
-        inference_only=not torch.is_grad_enabled(),
+        not torch.is_grad_enabled(),
     ).contiguous()
     return probs[:, :-1]
