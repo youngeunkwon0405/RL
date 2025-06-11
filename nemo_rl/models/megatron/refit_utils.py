@@ -132,6 +132,7 @@ def find_global_rank_that_has_param(
 def gather_params(
     model,
     keys,
+    key_to_global_keys: Optional[Dict[str, List[str]]] = None,
 ):
     import time
 
@@ -144,10 +145,19 @@ def gather_params(
     pp_world_size = torch.distributed.get_world_size(pp_group)
     ep_world_size = torch.distributed.get_world_size(ep_group)
 
+    et = time.time()
+    print(f"get world size time: {et - st}")
+    st = et
+
     named_modules_dict = dict(model.named_modules())
     state_dict = model.state_dict()
     gathered_params = {}
     ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
+
+    et = time.time()
+    print(f"get state dict time: {et - st}")
+    st = et
+
     for local_key, shape, dtype in sorted(keys):
         if local_key in state_dict:
             param = state_dict[local_key]
@@ -163,22 +173,41 @@ def gather_params(
                 torch.distributed.all_gather(gathered_slices, param, group=tp_group)
                 # TODO: why cast to torch.bfloat16 instead of param.dtype?
                 full_param = torch.cat(gathered_slices, dim=tp_dim)
+                
+                et = time.time()
+                print(f"{local_key} {shape} gather tp time: {et - st}")
+                st = et
             else:
                 # TODO: why do we need to clone?
                 full_param = param
-            global_key = get_global_key_from_local_key(local_key, model.config)
+            if key_to_global_keys is None:
+                global_key = get_global_key_from_local_key(local_key, model.config)
+
+            et = time.time()
+            print(f"{local_key} {shape} get global key time: {et - st}")
+            st = et
         else:
             #  params that may not be on every rank, e.g. the embedding layer
-            global_key = None
+            if key_to_global_keys is None:
+                global_key = None
             full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
+        
+            et = time.time()
+            print(f"{local_key} {shape} create full param time: {et - st}")
+            st = et
 
         # gather across PP group
-        pp_gathered_global_keys = [None] * pp_world_size
-        torch.distributed.all_gather_object(
-            pp_gathered_global_keys, global_key, group=pp_group
-        )
-        # To test no gather:
-        # pp_gathered_global_keys = [global_key] * pp_world_size
+        if key_to_global_keys is None:
+            pp_gathered_global_keys = [None] * pp_world_size
+            torch.distributed.all_gather_object(
+                pp_gathered_global_keys, global_key, group=pp_group
+            )
+            # To test no gather:
+            # pp_gathered_global_keys = [global_key] * pp_world_size
+
+            et = time.time()
+            print(f"{local_key} {shape} gather pp global key time: {et - st}")
+            st = et
 
         pp_gathered_params = [
             torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
@@ -186,14 +215,23 @@ def gather_params(
         ]
         torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
 
+        et = time.time()
+        print(f"{local_key} {shape} gather pp params time: {et - st}")
+        st = et
+
         # gather across EP group
         if ep_pattern.search(local_key):
-            ep_gathered_global_keys = [None] * ep_world_size
-            torch.distributed.all_gather_object(
-                ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
-            )
-            # To test no gather:
-            # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
+            if key_to_global_keys is None:
+                ep_gathered_global_keys = [None] * ep_world_size
+                torch.distributed.all_gather_object(
+                    ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
+                )
+                # To test no gather:
+                # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
+
+                et = time.time()
+                print(f"{local_key} {shape} gather ep global keys time: {et - st}")
+                st = et
 
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
             ep_gathered_params = [
@@ -202,17 +240,30 @@ def gather_params(
             ]
             torch.distributed.all_gather(ep_gathered_params, stacked_pp_gathered_params, group=ep_group)
 
-            flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
+            if key_to_global_keys is None:
+                flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
             flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
+
+            et = time.time()
+            print(f"{local_key} {shape} gather ep params time: {et - st}")
+            st = et
         else:
-            flat_gathered_global_keys = pp_gathered_global_keys
+            if key_to_global_keys is None:
+                flat_gathered_global_keys = pp_gathered_global_keys
             flat_gathered_params = pp_gathered_params
+
+        if key_to_global_keys is not None:
+            flat_gathered_global_keys = key_to_global_keys[local_key]
 
         for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
             if k is not None:
                 gathered_params[k] = p
+
+        et = time.time()
+        print(f"{local_key} {shape} zip time: {et - st}")
+        st = et
         
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    # torch.cuda.empty_cache()
+    # torch.cuda.synchronize()
     print(f"Time taken to gather params: {time.time() - st}")
     return gathered_params
