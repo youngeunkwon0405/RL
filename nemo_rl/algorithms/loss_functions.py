@@ -11,7 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from typing import Any, TypedDict
+from dataclasses import dataclass
+from typing import Any, Optional, TypedDict, TypeVar
 
 import torch
 
@@ -21,11 +22,12 @@ from nemo_rl.algorithms.utils import (
     masked_mean,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 from nemo_rl.models.dtensor.parallelize import (
     get_logprobs_from_vocab_parallel_logits,
 )
 
-Tensor = torch.Tensor
+Tensor = TypeVar("Tensor", bound=torch.Tensor)
 
 
 class ClippedPGLossConfig(TypedDict):
@@ -112,6 +114,8 @@ class ClippedPGLossFn(LossFunction):
         global_valid_seqs: torch.Tensor,
         global_valid_toks: torch.Tensor,
         max_seq_len: int | None = None,
+        vocab_parallel_rank: Optional[int] = None,
+        vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
     ) -> tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
         token_mask = data["token_mask"][:, 1:max_seq_len]
@@ -135,7 +139,16 @@ class ClippedPGLossFn(LossFunction):
 
         next_token_logits = next_token_logits.to(torch.float32)
 
-        if isinstance(next_token_logits, torch.distributed.tensor.DTensor):
+        if vocab_parallel_group is not None:
+            curr_logprobs = from_parallel_logits_to_logprobs(
+                next_token_logits,
+                data["input_ids"],
+                vocab_start_index=vocab_parallel_rank * next_token_logits.shape[-1],
+                vocab_end_index=(vocab_parallel_rank + 1) * next_token_logits.shape[-1],
+                group=vocab_parallel_group,
+                inference_only=False,
+            )
+        elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
                 next_token_logits, data["input_ids"][:, :max_seq_len]
             )
@@ -549,3 +562,85 @@ class DPOLossFn(LossFunction):
             "rewards_rejected_mean": rewards_rejected_mean.item(),
             "num_valid_samples": num_valid_samples.item(),
         }
+
+
+@dataclass
+class PackedSeqParams:
+    cu_seqlens_q: Tensor
+    cu_seqlens_q_padded: Tensor
+    cu_seqlens_kv: Tensor
+    cu_seqlens_kv_padded: Tensor
+    max_seqlen_q: int
+    max_seqlen_kv: int
+    qkv_format: str
+
+
+class SequencePackingLossWrapper:
+    def __init__(self, loss_fn: LossFunction, packed_seq_params: PackedSeqParams):
+        self.loss_fn = loss_fn
+        self.packed_seq_params = packed_seq_params
+
+    def __call__(
+        self,
+        next_token_logits: Tensor,
+        data: BatchedDataDict[Any],
+        global_valid_seqs: Tensor | None,
+        global_valid_toks: Tensor | None,
+        vocab_parallel_rank: Optional[int] = None,
+        vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
+    ) -> tuple[Tensor, dict[str, Any]]:
+        """Wraps a loss function to handle sequence packing by doing one sequence at a time to avoid padding."""
+        unpadded_cu_seqlens = self.packed_seq_params.cu_seqlens_q
+        unpadded_seq_lengths = (
+            self.packed_seq_params.cu_seqlens_q[1:]
+            - self.packed_seq_params.cu_seqlens_q[:-1]
+        )
+        if self.packed_seq_params.cu_seqlens_q_padded is not None:
+            padded_cu_seqlens = self.packed_seq_params.cu_seqlens_q_padded
+            padded_seq_lengths = (
+                self.packed_seq_params.cu_seqlens_q_padded[1:]
+                - self.packed_seq_params.cu_seqlens_q_padded[:-1]
+            )
+        else:
+            padded_cu_seqlens = unpadded_cu_seqlens
+            padded_seq_lengths = unpadded_seq_lengths
+        seq_starts = padded_cu_seqlens[:-1]
+        seq_ends = padded_cu_seqlens[1:]
+
+        loss_accum = 0
+        metrics_accum = {}
+        for seq_idx in range(len(seq_starts)):
+            seq_start = seq_starts[seq_idx].item()
+            seq_end = seq_ends[seq_idx].item()
+
+            # get sequence and unpad all 'data' tensors. The data dict is a BatchedDataDict of unpacked tensors
+            seq_data = data.slice(seq_idx, seq_idx + 1)
+            unpadded_seq_data = {}
+            for k, v in seq_data.items():
+                # print(f"k: {k}, v: {v.shape}")
+                if isinstance(v, torch.Tensor) and v.ndim > 1 and v.shape[1] > 1:
+                    unpadded_seq_data[k] = v[:, : unpadded_seq_lengths[seq_idx]]
+                else:
+                    unpadded_seq_data[k] = v
+
+            # get next_token_logits
+            next_token_logits_slice = next_token_logits[
+                :, seq_start : seq_start + unpadded_seq_lengths[seq_idx], :
+            ]
+            # print(f"seq_start: {seq_start}, seq_end: {seq_end}, next_token_logits: {next_token_logits_slice.shape}")
+
+            loss, metrics = self.loss_fn(
+                next_token_logits_slice,
+                unpadded_seq_data,
+                global_valid_seqs,
+                global_valid_toks,
+                vocab_parallel_rank=vocab_parallel_rank,
+                vocab_parallel_group=vocab_parallel_group,
+            )
+            loss_accum += loss
+            for k, v in metrics.items():
+                if k not in metrics_accum:
+                    metrics_accum[k] = 0
+                metrics_accum[k] += v
+
+        return loss_accum, metrics_accum

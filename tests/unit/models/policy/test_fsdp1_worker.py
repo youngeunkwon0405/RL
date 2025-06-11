@@ -27,7 +27,7 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.lm_policy import Policy
 from tests.unit.test_utils import SimpleLoss, SimpleNLLLoss
 
 basic_llama_test_config: PolicyConfig = {
@@ -177,7 +177,7 @@ def policy_setup(tokenizer, num_gpus):
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating HfPolicy...")
-    policy = HfPolicy(cluster=cluster, config=config, tokenizer=tokenizer)
+    policy = Policy(cluster=cluster, config=config, tokenizer=tokenizer)
 
     yield policy, cluster
 
@@ -323,7 +323,7 @@ def training_setup(tokenizer, request, num_gpus):
             config.update(config_updates)
 
         print("Creating training HfPolicy...")
-        policy = HfPolicy(
+        policy = Policy(
             cluster=cluster,
             config=config,
             init_reference_model=False,
@@ -511,7 +511,7 @@ def generation_setup(request, test_input_data, tokenizer, num_gpus):
         )
 
         print("Creating generation HfPolicy...")
-        policy = HfPolicy(
+        policy = Policy(
             cluster=cluster,
             config=config,
             tokenizer=tokenizer,
@@ -732,7 +732,7 @@ def test_hf_policy_generation_with_stop(test_input_data, tokenizer):
     )
 
     # Create policy
-    policy = HfPolicy(cluster=cluster, config=config, tokenizer=tokenizer)
+    policy = Policy(cluster=cluster, config=config, tokenizer=tokenizer)
 
     # Call prepare_for_generation if available
     print("Preparing for generation...")
@@ -818,7 +818,7 @@ def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
     config = basic_llama_test_config
 
     print("Creating training HfPolicy...")
-    policy_mbs1 = HfPolicy(
+    policy_mbs1 = Policy(
         cluster=cluster,
         config=config,
         init_reference_model=False,
@@ -855,7 +855,7 @@ def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating training HfPolicy...")
-    policy_mbs2 = HfPolicy(
+    policy_mbs2 = Policy(
         cluster=cluster,
         config=config,
         init_reference_model=False,

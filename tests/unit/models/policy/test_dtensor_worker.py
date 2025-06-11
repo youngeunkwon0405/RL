@@ -30,7 +30,7 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
 from nemo_rl.models.generation import configure_generation_config
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.models.policy.hf_policy import HfPolicy
+from nemo_rl.models.policy.lm_policy import Policy
 from tests.unit.conftest import TEST_ASSETS
 from tests.unit.test_utils import SimpleLoss
 
@@ -140,9 +140,7 @@ def policy_setup(two_gpu_virtual_cluster):
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating HfPolicy...")
-    policy = HfPolicy(
-        cluster=two_gpu_virtual_cluster, config=config, tokenizer=tokenizer
-    )
+    policy = Policy(cluster=two_gpu_virtual_cluster, config=config, tokenizer=tokenizer)
 
     yield policy
 
@@ -245,7 +243,7 @@ def training_setup(request, two_gpu_virtual_cluster):
         print(
             f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
         )
-        policy = HfPolicy(
+        policy = Policy(
             cluster=two_gpu_virtual_cluster,
             config=config,
             tokenizer=tokenizer,
@@ -366,7 +364,7 @@ def logprob_setup(request, two_gpu_virtual_cluster):
         print(
             f"Creating logprob HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
         )
-        policy = HfPolicy(
+        policy = Policy(
             cluster=two_gpu_virtual_cluster,
             config=config,
             tokenizer=tokenizer,
@@ -478,7 +476,7 @@ def test_dtensor_tp_and_tied_model_with_custom_parallel_plan(two_gpu_virtual_clu
     )
     tokenizer = get_tokenizer(config["tokenizer"])
 
-    policy = HfPolicy(
+    policy = Policy(
         tokenizer=tokenizer,
         config=config,
         init_optimizer=False,
@@ -540,7 +538,7 @@ def test_dtensor_loss_independent_of_microbatch_size_two_gpus(two_gpu_virtual_cl
     tokenizer = get_tokenizer(config["tokenizer"])
 
     print("Creating training HfPolicy with mbs=1...")
-    policy_mbs1 = HfPolicy(
+    policy_mbs1 = Policy(
         cluster=two_gpu_virtual_cluster,
         config=config,
         init_reference_model=False,
@@ -577,7 +575,7 @@ def test_dtensor_loss_independent_of_microbatch_size_two_gpus(two_gpu_virtual_cl
     config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
     print("Creating training HfPolicy with mbs=2...")
-    policy_mbs2 = HfPolicy(
+    policy_mbs2 = Policy(
         cluster=two_gpu_virtual_cluster,
         config=config,
         init_reference_model=False,

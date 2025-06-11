@@ -27,7 +27,7 @@ from nemo_rl.distributed.ray_actor_environment_registry import (
     get_actor_python_env,
 )
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
-from nemo_rl.utils.venvs import create_local_venv_on_each_node
+from nemo_rl.utils.venvs import create_local_venv
 
 
 @dataclass
@@ -176,6 +176,28 @@ class RayWorkerBuilder:
                 placement_group_capture_child_tasks=True,
             )
             options["num_gpus"] = num_gpus
+            # If the user hasn't specified a py_executable, use the worker class's default
+            if not options.get("runtime_env", {}).get("py_executable", None):
+                if "runtime_env" not in options:
+                    options["runtime_env"] = {}
+                options["runtime_env"]["py_executable"] = get_actor_python_env(
+                    self.ray_actor_class_fqn
+                )
+
+            if (
+                options.get("runtime_env", {})
+                .get("py_executable", "n/a")
+                .startswith("uv")
+            ):
+                # If the py_executable begins with uv it signals that we need to create a
+                #  local venv first and then replace the py_executable with the local venv's python.
+                #  The directory the venv will be created in is controlled by the env var
+                #  NEMO_RL_VENV_DIR and defaults to $GIT_ROOT/venvs/.
+                venv_python = create_local_venv(
+                    py_executable=options["runtime_env"]["py_executable"],
+                    venv_name=self.ray_actor_class_fqn,
+                )
+                options["runtime_env"]["py_executable"] = venv_python
             worker = worker_class.options(**options).remote(
                 *self.init_args, **worker_kwargs
             )
@@ -212,6 +234,27 @@ class RayWorkerBuilder:
         """
         # Set up worker arguments and resources
         options = deepcopy(extra_options)
+
+        # If the user hasn't specified a py_executable, use the worker class's default
+        initializer_options = {}
+        if not options.get("runtime_env", {}).get("py_executable", None):
+            if "runtime_env" not in options:
+                options["runtime_env"] = {}
+            options["runtime_env"]["py_executable"] = get_actor_python_env(
+                self.ray_actor_class_fqn
+            )
+
+        if options.get("runtime_env", {}).get("py_executable", "n/a").startswith("uv"):
+            # If the py_executable begins with uv it signals that we need to create a
+            #  local venv first and then replace the py_executable with the local venv's python.
+            #  The directory the venv will be created in is controlled by the env var
+            #  NEMO_RL_VENV_DIR and defaults to $GIT_ROOT/venvs/.
+            venv_python = create_local_venv(
+                py_executable=options["runtime_env"]["py_executable"],
+                venv_name=self.ray_actor_class_fqn,
+            )
+            options["runtime_env"]["py_executable"] = venv_python
+
         initializer_options = {"runtime_env": options["runtime_env"]}
         isolated_initializer = self.IsolatedWorkerInitializer.options(  # type: ignore # @ray.remote call
             **initializer_options
@@ -392,21 +435,6 @@ class RayWorkerGroup:
             self.cluster.get_master_address_and_port()
         )
 
-        actor_python_env = get_actor_python_env(
-            remote_worker_builder.ray_actor_class_fqn
-        )
-        if actor_python_env.startswith("uv"):
-            # If the py_executable begins with uv it signals that we need to create a
-            #  local venv first and then replace the py_executable with the local venv's python.
-            #  The directory the venv will be created in is controlled by the env var
-            #  NEMO_RL_VENV_DIR and defaults to $GIT_ROOT/venvs/.
-            py_executable = create_local_venv_on_each_node(
-                py_executable=actor_python_env,
-                venv_name=remote_worker_builder.ray_actor_class_fqn,
-            )
-        else:
-            py_executable = actor_python_env
-
         # Count total workers
         self.world_size = sum(len(indices) for _, indices in bundle_indices_list)
         global_rank = 0
@@ -421,16 +449,14 @@ class RayWorkerGroup:
         for group_idx, (pg_idx, local_bundle_indices) in enumerate(bundle_indices_list):
             current_group = []
 
-            if len(placement_groups) == 1:
-                pg = placement_groups[0]
-            else:
-                pg = placement_groups[pg_idx]
-
+            pg = placement_groups[pg_idx]
             is_parallel_group = len(local_bundle_indices) > 1
 
             for local_rank, bundle_idx in enumerate(local_bundle_indices):
                 # Set up basic distributed environment variables
-                env_vars = dict(os.environ)
+                env_vars = dict(
+                    os.environ
+                )  # Pass thru all user environment variables (at the lowest precendence)
                 env_vars.update(
                     {
                         "RANK": str(global_rank),
@@ -441,7 +467,6 @@ class RayWorkerGroup:
                         "NODE_RANK": str(pg_idx),
                     }
                 )
-                env_vars.pop("RAY_EXPERIMENTAL_NOSET_CUDA_VISIBLE_DEVICES", None)
 
                 # Only the first worker in each group gets bundle_indices
                 # This ensures only one worker per group is the model owner
@@ -464,10 +489,7 @@ class RayWorkerGroup:
                 )
 
                 # Pass these options to the remote_worker_builder
-                runtime_env = {"env_vars": env_vars, "py_executable": py_executable}
-                runtime_env["env_vars"]["VIRTUAL_ENV"] = py_executable
-                runtime_env["env_vars"]["UV_PROJECT_ENVIRONMENT"] = py_executable
-
+                runtime_env = {"env_vars": env_vars}
                 extra_options = {"runtime_env": runtime_env, "name": name}
 
                 # start worker creation asynchronously
@@ -640,6 +662,7 @@ class RayWorkerGroup:
 
         return futures
 
+    # due to some sort of ray bug, when we pass 'data' to the workers, we do it as a kwarg instead of an arg
     def run_all_workers_sharded_data(
         self,
         method_name: str,
@@ -736,7 +759,7 @@ class RayWorkerGroup:
 
                 # Call the method on the worker with its data slice
                 future = getattr(worker, method_name).remote(
-                    worker_data, **common_kwargs
+                    data=worker_data, **common_kwargs
                 )
                 futures.append(future)
                 called_workers.append(worker_idx)
@@ -744,7 +767,9 @@ class RayWorkerGroup:
                 # If this worker doesn't need data:
                 if make_dummy_calls_to_free_axes:
                     # If make_dummy_calls_to_free_axes is True, just call the method with None
-                    future = getattr(worker, method_name).remote(None, **common_kwargs)
+                    future = getattr(worker, method_name).remote(
+                        data=None, **common_kwargs
+                    )
                     futures.append(future)
                     called_workers.append(worker_idx)
                 else:

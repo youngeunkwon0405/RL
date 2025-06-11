@@ -1,34 +1,15 @@
-ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:25.05-cuda12.9-devel-ubuntu24.04
+ARG BASE_IMAGE=nvcr.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 FROM ${BASE_IMAGE} AS base
 
 # It is more convenient for users to run as root
 USER root
 
-RUN <<"EOF" bash -exu -o pipefail
-export DEBIAN_FRONTEND=noninteractive
-export TZ=America/Los_Angeles
-
-apt-get update
-apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     git \
-    rsync \
-    wget \
-    less \
-    vim \
-
-# Nsight
-apt install -y --no-install-recommends gnupg
-echo "deb http://developer.download.nvidia.com/devtools/repos/ubuntu$(source /etc/lsb-release; echo "$DISTRIB_RELEASE" | tr -d .)/$(dpkg --print-architecture) /" | tee /etc/apt/sources.list.d/nvidia-devtools.list
-apt-key adv --fetch-keys http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/7fa2af80.pub
-apt update
-apt install -y nsight-systems-cli
-
-
-apt-get clean
-rm -rf /var/lib/apt/lists/*
-EOF
+    && rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
 # Install uv and python
 ARG UV_VERSION=0.7.2
@@ -40,8 +21,8 @@ RUN curl -LsSf https://astral.sh/uv/${UV_VERSION}/install.sh | sh && \
 # Disable usage stats by default for users who are sensitive to sharing usage.
 # Users are encouraged to enable if the wish.
 ENV RAY_USAGE_STATS_ENABLED=0
-ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
-
+ENV MAX_JOBS=1
+ENV NVTE_BUILD_THREADS_PER_JOB=1
 
 FROM base AS hermetic
 
@@ -53,8 +34,8 @@ COPY --link 3rdparty/ ./3rdparty/
 
 # Variables to control the build of TE. If there are issues with parallelization, consider
 # setting these to 1.
-ARG MAX_JOBS=4
-ARG NVTE_BUILD_THREADS_PER_JOB=1
+ARG MAX_JOBS
+ARG NVTE_BUILD_THREADS_PER_JOB
 
 ENV UV_PROJECT_ENVIRONMENT=/opt/nemo_rl_venv
 ENV UV_LINK_MODE=copy
@@ -69,24 +50,12 @@ uv venv ${UV_PROJECT_ENVIRONMENT}
 # Do everything in one layer to prevent large layers.
 
 # The venv is symlinked to avoid bloating the layer size
-uv sync --link-mode symlink --locked --no-install-project
 uv sync --link-mode symlink --locked --extra vllm --no-install-project
-uv sync --link-mode symlink --locked --extra mcore --no-install-project
+uv sync --link-mode symlink --locked --extra mcore --no-install-project --no-build-isolation
 uv sync --link-mode symlink --locked --all-groups --no-install-project
 EOF
 
 ENV PATH="/opt/nemo_rl_venv/bin:$PATH"
-ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
-
-# Prefetch all virtual environments
-# Copy entire source to temp location, run prefetch, then clean up
-COPY . /tmp/nemo-rl-prefetch
-RUN cd /tmp/nemo-rl-prefetch && \
-    UV_PROJECT_ENVIRONMENT="/tmp/nemo-rl-prefetch/.venv" uv run nemo_rl/utils/prefetch_venvs.py && \
-    cd / && \
-    rm -rf /tmp/nemo-rl-prefetch
-
-WORKDIR /opt/nemo-rl
 
 FROM hermetic AS release
 
@@ -98,8 +67,6 @@ ENV NVIDIA_BUILD_ID=${NVIDIA_BUILD_ID:-<unknown>}
 ENV NVIDIA_BUILD_REF=${NVIDIA_BUILD_REF:-<unknown>}
 LABEL com.nvidia.build.id="${NVIDIA_BUILD_ID}"
 LABEL com.nvidia.build.ref="${NVIDIA_BUILD_REF}"
-
-ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
 
 COPY . /opt/nemo-rl
 
