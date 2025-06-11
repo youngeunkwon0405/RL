@@ -141,7 +141,7 @@ class VllmGenerationWorker:
         env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
         # Skip vllm P2P check and rely on driver to report peer to peer capability.
         env_vars["VLLM_SKIP_P2P_CHECK"] = "1"
-        # Need to give each DP group its own vllm cache due to address:
+        # Need to give each DP group its own vllm cache to address:
         # https://github.com/vllm-project/vllm/issues/18851
         env_vars["VLLM_CACHE_ROOT"] = f"~/.cache/vllm_{seed}"
 
