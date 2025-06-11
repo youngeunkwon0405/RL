@@ -23,6 +23,7 @@ class DTensorConfig(TypedDict):
     sequence_parallel: bool
     activation_checkpointing: bool
     tensor_parallel_size: int
+    custom_parallel_plan: str
 
 
 class TokenizerConfig(TypedDict):
@@ -74,7 +75,6 @@ class PolicyConfig(TypedDict):
     max_grad_norm: Optional[Union[float, int]]
     fsdp_offload_enabled: bool
     activation_checkpointing_enabled: bool
-    refit_buffer_size_gb: int
     optimizer: NotRequired[PytorchOptimizerConfig] = None
     scheduler: NotRequired[list[SinglePytorchSchedulerConfig] | SchedulerMilestones] = (
         None

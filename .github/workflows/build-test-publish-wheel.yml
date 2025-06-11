@@ -11,17 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-name: Create PR to main with cherry-pick from release
+
+name: Build, test, and publish a PyPi wheel (to testpypi).
 
 on:
   push:
     branches:
       - main
+      - "r**"
+
+defaults:
+  run:
+    shell: bash -x -e -u -o pipefail {0}
 
 jobs:
-  cherry-pick:
-    uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_cherry_pick.yml@v0.31.0
+  build-test-publish-wheel:
+    uses: NVIDIA-NeMo/FW-CI-templates/.github/workflows/_build_test_publish_wheel.yml@v0.33.0
+    with:
+      dry-run: true
+      python-package: nemo_rl
+      packaging: uv
     secrets:
-      PAT: ${{ secrets.PAT }}
+      TWINE_USERNAME: ${{ secrets.TWINE_USERNAME }}
+      TWINE_PASSWORD: ${{ secrets.TWINE_PASSWORD }}
+      SLACK_WEBHOOK: ${{ secrets.SLACK_RELEASE_ENDPOINT }}
       SLACK_WEBHOOK_ADMIN: ${{ secrets.SLACK_WEBHOOK_ADMIN }}
-      SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

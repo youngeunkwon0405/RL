@@ -193,6 +193,7 @@ class DTensorPolicyWorker:
             activation_checkpointing=self.cfg["dtensor_cfg"][
                 "activation_checkpointing"
             ],
+            custom_parallel_plan=self.cfg["dtensor_cfg"]["custom_parallel_plan"],
         )
 
         if self.cpu_offload:
@@ -454,7 +455,8 @@ class DTensorPolicyWorker:
                 losses.append(torch.tensor(mb_losses).sum().item())
 
             # increment scheduler after all batches in rollout are processed
-            self.scheduler.step()
+            if not eval_mode:
+                self.scheduler.step()
             # dynamic batch and sequence dims causes alot of fragmentation, so clear
             # the memory allocator before moving on
             torch.cuda.empty_cache()
@@ -661,6 +663,9 @@ class DTensorPolicyWorker:
                 p.data.add_(noise)  # Add noise in-place
         torch.cuda.synchronize()
 
+    def return_state_dict(self):
+        return self.model.state_dict()
+
     def report_device_id(self) -> str:
         """Report the UUID of the current CUDA device using NVML.
 
@@ -675,18 +680,41 @@ class DTensorPolicyWorker:
         return get_device_uuid(device_idx)
 
     @torch.no_grad()
-    def prepare_weights_for_ipc(self) -> list[tuple[str, int]]:
+    def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
+        """Prepare the weights for IPC.
+
+        This function:
+        - Prepares the state_dict of the model.
+        - Collects the info for streaming multiple tensors.
+
+        Returns:
+            list: The list of parameters sizes.
+            float: The total available memory in bytes.
+        """
+        from nemo_rl.utils.nvml import get_free_memory_bytes
+
+        # Get state_dict
         self.model = self.move_to_cuda(self.model)
         self._held_sharded_state_dict_reference: dict[str, torch.Tensor] = (
             self.model.state_dict()
         )
+
         # Collect info for streaming multiple tensors
         state_dict_info = []
         for name, tensor in self._held_sharded_state_dict_reference.items():
             # dtensor's numel will return complete tensor instead of only local tensor
             size_in_bytes = tensor.element_size() * tensor.numel()
             state_dict_info.append((name, size_in_bytes))
-        return state_dict_info
+
+        # Collect current available memory for refit
+        ## Get current device index from torch
+        device_idx = torch.cuda.current_device()
+        ## Get device free memory using NVML
+        total_available_bytes = get_free_memory_bytes(device_idx)
+        ## Use 80% of the free memory for safety
+        total_available_bytes *= 0.8
+
+        return state_dict_info, total_available_bytes
 
     @torch.no_grad()
     def get_weights_ipc_handles(self, keys: Iterable[str]) -> dict[str, Any]:
@@ -695,6 +723,11 @@ class DTensorPolicyWorker:
         assert self._held_sharded_state_dict_reference is not None, (
             "prepare_weights_for_ipc must be called before get_weights_ipc_handles"
         )
+
+        # Clean up the held tensors to reduce peak memory
+        if self._held_streamed_param_reference is not None:
+            del self._held_streamed_param_reference
+            self._held_streamed_param_reference = None
 
         converted_params = {}
         for key in keys:

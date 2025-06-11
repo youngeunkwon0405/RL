@@ -51,7 +51,8 @@ def test_env_max_retries_invalid_value():
 
     with patch.dict(os.environ, env_vars, clear=True):
         with pytest.raises(AssertionError):
-            RayVirtualCluster(bundle_ct_per_node_list=[1])
+            cluster = RayVirtualCluster(bundle_ct_per_node_list=[1])
+            cluster._init_placement_groups()
 
 
 def test_env_max_retries_non_integer():
@@ -62,7 +63,8 @@ def test_env_max_retries_non_integer():
 
     with patch.dict(os.environ, env_vars, clear=True):
         with pytest.raises(ValueError):
-            RayVirtualCluster(bundle_ct_per_node_list=[1])
+            cluster = RayVirtualCluster(bundle_ct_per_node_list=[1])
+            cluster._init_placement_groups()
 
 
 def test_env_max_retries_default_value():
@@ -80,6 +82,7 @@ def test_env_max_retries_default_value():
 
         # Create cluster
         cluster = RayVirtualCluster(bundle_ct_per_node_list=[1])
+        cluster._init_placement_groups()
 
         # Default value should be 6 (as seen in the code)
         # We can't directly verify this, but we can check that initialization was attempted
@@ -96,7 +99,7 @@ def test_env_max_retries_exhausted():
     with (
         patch.dict(os.environ, env_vars, clear=True),
         patch(
-            "nemo_rl.distributed.virtual_cluster.RayVirtualCluster._init_placement_groups"
+            "nemo_rl.distributed.virtual_cluster.RayVirtualCluster._create_placement_groups_internal"
         ) as mock_init,
         patch("time.sleep") as mock_sleep,
     ):
@@ -105,7 +108,8 @@ def test_env_max_retries_exhausted():
 
         # Create cluster - should retry retry_count times and then fail
         with pytest.raises(ResourceInsufficientError):
-            RayVirtualCluster(bundle_ct_per_node_list=[1])
+            cluster = RayVirtualCluster(bundle_ct_per_node_list=[1])
+            cluster._init_placement_groups()
 
         # Verify _init_placement_groups was called exactly retry_count times
         assert mock_init.call_count == retry_count

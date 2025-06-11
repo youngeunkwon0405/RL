@@ -85,7 +85,7 @@ class HFVerifyWorker:
                         ret_score, _ = self.verify_func(
                             [ground_truth_parsable], [response]
                         )
-                    # It's possible to emit a TimeoutException and that wouldn't be caught sinceAdd commentMore actions
+                    # It's possible to emit a TimeoutException and that wouldn't be caught since
                     # it actually subclasses from BaseException and math-verify itself does not
                     # to catch it.
                     except (Exception, TimeoutException):
@@ -101,7 +101,7 @@ class MathEnvironmentMetadata(TypedDict):
     ground_truth: str
 
 
-@ray.remote
+@ray.remote(max_restarts=-1, max_task_retries=-1)
 class MathEnvironment(EnvironmentInterface):
     def __init__(self, cfg: MathEnvConfig):
         self.cfg = cfg

@@ -29,12 +29,13 @@ from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.lm_policy import Policy
 
+model_name = "Qwen/Qwen3-0.6B"
 # Define basic vLLM test config
 basic_vllm_test_config: VllmConfig = {
     "backend": "vllm",
-    "model_name": "Qwen/Qwen3-0.6B",  # Small model for testing
+    "model_name": model_name,
     "tokenizer": {
-        "name": "Qwen/Qwen3-0.6B",
+        "name": model_name,
     },
     "dtype": "bfloat16",
     "max_new_tokens": 5,
@@ -46,9 +47,14 @@ basic_vllm_test_config: VllmConfig = {
     "vllm_cfg": {
         "precision": "bfloat16",
         "tensor_parallel_size": 1,
-        "gpu_memory_utilization": 0.3,
+        "pipeline_parallel_size": 1,
+        "gpu_memory_utilization": 0.7,
         "max_model_len": 1024,
+        "async_engine": False,  # Default to False for synchronous tests
+        "skip_tokenizer_init": False,
+        "load_format": "auto",
     },
+    "vllm_kwargs": {},
 }
 
 
@@ -69,7 +75,6 @@ def get_basic_hf_test_config(enable_dtensor: bool = False) -> PolicyConfig:
         "precision": "float32",
         "fsdp_offload_enabled": False,
         "activation_checkpointing_enabled": False,
-        "refit_buffer_size_gb": 4,
         "optimizer": {
             "name": "torch.optim.AdamW",
             "kwargs": {
@@ -85,6 +90,7 @@ def get_basic_hf_test_config(enable_dtensor: bool = False) -> PolicyConfig:
             "sequence_parallel": False,
             "activation_checkpointing": False,
             "tensor_parallel_size": 1,
+            "custom_parallel_plan": None,
         },
         "dynamic_batching": {
             "enabled": enable_dtensor,  # Dynamic batching is only supported with DTensor
@@ -124,17 +130,15 @@ def tokenizer():
 
 @pytest.fixture(scope="function")
 def policy(cluster, tokenizer):
-    """Initialize the vLLM policy."""
-    # Create separate configs for each policy
-    vllm_config = basic_vllm_test_config.copy()
+    """Initialize the vLLM policy (synchronous by default)."""
+    vllm_config = deepcopy(basic_vllm_test_config)
+    # Ensure async_engine is False for the standard policy fixture
+    vllm_config["vllm_cfg"]["async_engine"] = False
     vllm_config = configure_generation_config(vllm_config, tokenizer)
-    policy = VllmGeneration(cluster, vllm_config)
-    yield policy
-
-    # Ensure policy is properly shutdown
+    p = VllmGeneration(cluster, vllm_config)
+    yield p
     try:
-        policy.shutdown()
-        # Force garbage collection to help release resources
+        p.shutdown()
         import gc
 
         gc.collect()
@@ -281,6 +285,75 @@ def test_vllm_policy_generation(policy, test_input_data, tokenizer):
     )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tensor_parallel_size,pipeline_parallel_size", [(2, 1), (1, 2)]
+)
+async def test_vllm_policy_generation_async(
+    cluster, test_input_data, tokenizer, tensor_parallel_size, pipeline_parallel_size
+):
+    """Test vLLM policy async generation capabilities."""
+    # Ensure the policy is configured for async generation
+    # Create separate configs for each policy
+    hf_policy = None
+    async_policy = None
+    try:
+        vllm_config = deepcopy(basic_vllm_test_config)
+        vllm_config["vllm_cfg"]["async_engine"] = True
+        vllm_config = configure_generation_config(vllm_config, tokenizer)
+        vllm_config["vllm_cfg"]["tensor_parallel_size"] = tensor_parallel_size
+        vllm_config["vllm_cfg"]["pipeline_parallel_size"] = pipeline_parallel_size
+        hf_config = get_basic_hf_test_config(enable_dtensor=True)
+        from nemo_rl.models.policy.hf_policy import HfPolicy
+
+        async_policy = VllmGeneration(cluster, vllm_config)
+        async_policy.finish_generation()
+        print("creating hf policy...")
+
+        hf_policy = HfPolicy(cluster, hf_config, tokenizer)
+        refit_policy_generation(hf_policy, async_policy)
+
+        outputs = async_policy.generate_async(test_input_data)
+        # Validate outputs format
+        assert "output_ids" in outputs, "output_ids not found in generation output"
+        assert "logprobs" in outputs, "logprobs not found in generation output"
+        assert "generation_lengths" in outputs, (
+            "generation_lengths not found in generation output"
+        )
+        assert "unpadded_sequence_lengths" in outputs, (
+            "unpadded_sequence_lengths not found in generation output"
+        )
+
+        # Validate outputs shape and content
+        assert outputs["output_ids"].shape[0] == len(test_input_data["input_ids"]), (
+            "Wrong batch size in output"
+        )
+        assert outputs["generation_lengths"].shape[0] == len(
+            test_input_data["input_ids"]
+        ), "Wrong batch size in generation_lengths"
+
+        # Decode and check outputs
+        generated_sequences = outputs["output_ids"]
+        generated_texts = tokenizer.batch_decode(
+            generated_sequences, skip_special_tokens=True
+        )
+
+        print(f"Generated texts: {generated_texts}")
+
+        # All texts should have a non-zero length and be longer than inputs
+        assert all(len(text) > 0 for text in generated_texts), (
+            "Some generated texts are empty"
+        )
+
+    finally:
+        # Clean up resources
+        print("Cleaning up resources...")
+        if async_policy:
+            async_policy.shutdown()
+        if hf_policy and hasattr(hf_policy, "shutdown"):
+            hf_policy.shutdown()
+
+
 @pytest.mark.skip(
     reason="Skipping for now, will be fixed in https://github.com/NVIDIA/NeMo-RL/issues/408"
 )
@@ -333,7 +406,7 @@ def test_vllm_worker_seed_behavior(cluster, tokenizer):
     hf_policy = Policy(cluster, hf_config, tokenizer)
 
     print("refitting vllm policy...")
-    refit_policy_generation(hf_policy, policy, hf_config["refit_buffer_size_gb"])
+    refit_policy_generation(hf_policy, policy)
 
     try:
         # Generate with duplicated prompts
@@ -425,8 +498,11 @@ def test_vllm_worker_seed_behavior(cluster, tokenizer):
 
 
 @pytest.mark.timeout(140)
+@pytest.mark.parametrize("async_engine", [True, False])
 @pytest.mark.parametrize("enable_dtensor", [True, False])
-def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
+def test_vllm_generation_with_hf_training(
+    cluster, tokenizer, enable_dtensor, async_engine
+):
     """1. Use vLLM for generation
     2. Use HF policy for training and logprob computation
 
@@ -437,6 +513,7 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
 
     # Create separate configs for each policy
     vllm_config = basic_vllm_test_config.copy()
+    vllm_config["vllm_cfg"]["async_engine"] = async_engine
     vllm_config = configure_generation_config(vllm_config, tokenizer)
 
     hf_config = get_basic_hf_test_config(enable_dtensor=enable_dtensor)
@@ -485,13 +562,16 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
         hf_policy = Policy(cluster, hf_config, tokenizer)
 
         print("refitting vllm policy...")
-        refit_policy_generation(
-            hf_policy, vllm_policy, hf_config["refit_buffer_size_gb"]
-        )
+        refit_policy_generation(hf_policy, vllm_policy)
 
         # Step 1: Use vLLM for generation
         print("Using vLLM policy for fast generation...")
-        generation_results = vllm_policy.generate(test_input_data, greedy=True)
+        if async_engine:
+            generation_results = vllm_policy.generate_async(
+                test_input_data, greedy=True
+            )
+        else:
+            generation_results = vllm_policy.generate(test_input_data, greedy=True)
         vllm_policy.finish_generation()
         # Validate generation outputs
         assert "output_ids" in generation_results, (
@@ -587,7 +667,11 @@ def test_vllm_generation_with_hf_training(cluster, tokenizer, enable_dtensor):
         # Step 4: Use vLLM for generation again to complete the workflow
         print("Using vLLM for generation again...")
         vllm_policy.prepare_for_generation()
-        final_generation = vllm_policy.generate(test_input_data)
+        if async_engine:
+            final_generation = vllm_policy.generate_async(test_input_data)
+        else:
+            final_generation = vllm_policy.generate(test_input_data)
+
         assert "output_ids" in final_generation, (
             "Final generation should contain output_ids"
         )
@@ -756,9 +840,9 @@ def test_vllm_weight_update_and_prefix_cache_reset(
         )
 
         print("Updating vLLM weights from HF policy...")
-        param_keys = hf_policy.prepare_weights_for_ipc()
-        for key, _ in param_keys:
-            ipc_handles = hf_policy.get_weights_ipc_handles([key])
+        grouped_param_keys = hf_policy.prepare_weights_for_ipc()
+        for keys in grouped_param_keys:
+            ipc_handles = hf_policy.get_weights_ipc_handles(keys)
             update_success = vllm_policy.update_weights(ipc_handles)
             assert update_success, "Weight update should succeed"
         print("vLLM weights successfully updated.")
@@ -830,7 +914,7 @@ def test_vllm_weight_update_memory(cluster, tokenizer, enable_dtensor):
     # reset peak memory stats before refit
     workers = hf_policy.worker_group.workers
     ray.get([w.reset_peak_memory_stats.remote() for w in workers])
-    refit_policy_generation(hf_policy, vllm_policy, refit_buffer_size_gb=1)
+    refit_policy_generation(hf_policy, vllm_policy, _refit_buffer_size_gb=1)
     gpu_infos = ray.get([w.get_gpu_info.remote() for w in workers])
 
     # Gather memory stats
@@ -897,11 +981,7 @@ def test_vllm_generation_with_stop(
         hf_policy = Policy(cluster, hf_config, tokenizer)
 
         print("refitting vllm policy...")
-        refit_policy_generation(
-            hf_policy,
-            vllm_generation,
-            hf_config["refit_buffer_size_gb"],
-        )
+        refit_policy_generation(hf_policy, vllm_generation)
 
     # test generate
     outputs = vllm_generation.generate(test_input_data, greedy=True)
@@ -1005,7 +1085,6 @@ def test_vllm_refit_non_collocated_handles_update_failure(
                 refit_policy_generation(
                     hf_policy_instance,
                     vllm_policy_instance,
-                    hf_config["refit_buffer_size_gb"],
                 )
         print("RuntimeError during refit correctly caught.")
 

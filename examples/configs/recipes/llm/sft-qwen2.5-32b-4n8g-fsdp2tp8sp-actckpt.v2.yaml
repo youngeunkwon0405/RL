@@ -31,6 +31,7 @@ policy:
     sequence_parallel: true
     activation_checkpointing: true
     tensor_parallel_size: 8
+    custom_parallel_plan: null
   dynamic_batching:
     enabled: False
   make_sequence_length_divisible_by: 8
@@ -51,6 +52,7 @@ data:
   dataset_name: squad
   add_bos: true
   add_eos: true
+  add_generation_prompt: false
 logger:
   log_dir: logs/sft-qwen2.5-32b-4n8g-fsdp2tp8sp-actckpt
   wandb_enabled: true
