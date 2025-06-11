@@ -514,6 +514,7 @@ class MegatronPolicyWorker:
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 
         self.local_key_to_global_keys = self.get_local_key_to_global_keys()
+        self.state_dict_info = self.prepare_weights_for_ipc()
 
     def is_alive(self):
         return True

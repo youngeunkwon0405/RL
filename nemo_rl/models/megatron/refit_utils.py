@@ -31,6 +31,9 @@ from nemo.collections.llm.gpt.model.base import GPTConfig
 import nemo_rl.models.megatron.converters as model_converters
 from nemo_rl.models.megatron.converters.common import get_global_key_from_local_key
 
+def single_rank_print(*args, **kwargs):
+    if parallel_state.get_tensor_model_parallel_rank() == 0 and parallel_state.get_pipeline_model_parallel_rank() == 0 and parallel_state.get_expert_model_parallel_rank() == 0:
+        print(*args, **kwargs)
 
 def get_tp_dim(model, param_name, named_modules_dict):
     # pass in named_modules_dict so we can get it ahead of time instead
@@ -47,7 +50,7 @@ def get_tp_dim(model, param_name, named_modules_dict):
     key = prefix + ".".join(param_name.split(".")[:-1])
     module = named_modules_dict.get(key)
     if module is None:
-        print(f"Module {key} not found in named_modules_dict")
+        single_rank_print(f"Module {key} not found in named_modules_dict")
         return None
     if hasattr(module, "parallel_mode") and module.parallel_mode is not None:
         # TE layers sometimes have parallel_mode we can check directly
@@ -93,7 +96,7 @@ def gather_params(
     ep_world_size = torch.distributed.get_world_size(ep_group)
 
     et = time.time()
-    print(f"get world size time: {et - st}")
+    single_rank_print(f"get world size time: {et - st}")
     st = et
 
     named_modules_dict = dict(model.named_modules())
@@ -102,7 +105,7 @@ def gather_params(
     ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
 
     et = time.time()
-    print(f"get state dict time: {et - st}")
+    single_rank_print(f"get state dict time: {et - st}")
     st = et
 
     for local_key, shape, dtype in sorted(keys):
@@ -122,7 +125,7 @@ def gather_params(
                 full_param = torch.cat(gathered_slices, dim=tp_dim)
                 
                 et = time.time()
-                print(f"{local_key} {shape} gather tp time: {et - st}")
+                single_rank_print(f"{local_key} {shape} gather tp time: {et - st}")
                 st = et
             else:
                 # TODO: why do we need to clone?
@@ -131,7 +134,7 @@ def gather_params(
                 global_key = get_global_key_from_local_key(local_key, model.config)
 
             et = time.time()
-            print(f"{local_key} {shape} get global key time: {et - st}")
+            single_rank_print(f"{local_key} {shape} get global key time: {et - st}")
             st = et
         else:
             #  params that may not be on every rank, e.g. the embedding layer
@@ -140,7 +143,7 @@ def gather_params(
             full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
         
             et = time.time()
-            print(f"{local_key} {shape} create full param time: {et - st}")
+            single_rank_print(f"{local_key} {shape} create full param time: {et - st}")
             st = et
 
         # gather across PP group
@@ -153,7 +156,7 @@ def gather_params(
             # pp_gathered_global_keys = [global_key] * pp_world_size
 
             et = time.time()
-            print(f"{local_key} {shape} gather pp global key time: {et - st}")
+            single_rank_print(f"{local_key} {shape} gather pp global key time: {et - st}")
             st = et
 
         pp_gathered_params = [
@@ -163,7 +166,7 @@ def gather_params(
         torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
 
         et = time.time()
-        print(f"{local_key} {shape} gather pp params time: {et - st}")
+        single_rank_print(f"{local_key} {shape} gather pp params time: {et - st}")
         st = et
 
         # gather across EP group
@@ -177,7 +180,7 @@ def gather_params(
                 # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
 
                 et = time.time()
-                print(f"{local_key} {shape} gather ep global keys time: {et - st}")
+                single_rank_print(f"{local_key} {shape} gather ep global keys time: {et - st}")
                 st = et
 
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
@@ -198,7 +201,7 @@ def gather_params(
             flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
 
             et = time.time()
-            print(f"{local_key} {shape} gather ep params time: {et - st}")
+            single_rank_print(f"{local_key} {shape} gather ep params time: {et - st}")
             st = et
         else:
             if key_to_global_keys is None:
@@ -213,10 +216,10 @@ def gather_params(
                 gathered_params[k] = p
 
         et = time.time()
-        print(f"{local_key} {shape} zip time: {et - st}")
+        single_rank_print(f"{local_key} {shape} zip time: {et - st}")
         st = et
         
-    # torch.cuda.empty_cache()
-    # torch.cuda.synchronize()
-    print(f"Time taken to gather params: {time.time() - st}")
+    torch.cuda.empty_cache()
+    torch.cuda.synchronize()
+    single_rank_print(f"Time taken to gather params: {time.time() - st}")
     return gathered_params
