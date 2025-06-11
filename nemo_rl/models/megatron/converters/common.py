@@ -126,14 +126,13 @@ def get_global_expert_num(s, cfg):
     )
     return global_expert_num
 
+
 def get_global_key_from_local_key(local_key, model_cfg):
     local_layer = get_local_layer_num(local_key)
     if local_layer is not None:
         global_layer = get_global_layer_num(local_key, model_cfg)
         # Replace the first occurrence of the digits after "layers." with the global layer number.
-        global_key = re.sub(
-            r"(?<=layers\.)\d+", str(global_layer), local_key, count=1
-        )
+        global_key = re.sub(r"(?<=layers\.)\d+", str(global_layer), local_key, count=1)
     else:
         global_key = local_key
     local_expert = get_local_expert_num(global_key)
@@ -255,7 +254,9 @@ class MegatronToHFConverter:
             )
 
         local_keys = list(megatron_model.state_dict().keys())
-        global_keys = [get_global_key_from_local_key(k, megatron_model.config) for k in local_keys]
+        global_keys = [
+            get_global_key_from_local_key(k, megatron_model.config) for k in local_keys
+        ]
 
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
@@ -288,7 +289,11 @@ class MegatronToHFConverter:
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )
-        elif "deepseek" in hf_model_name.lower() or "Moonlight-16B-A3B" in hf_model_name or hf_model_name in ("ByteDance-Seed/academic-ds-9B",):
+        elif (
+            "deepseek" in hf_model_name.lower()
+            or "Moonlight-16B-A3B" in hf_model_name
+            or hf_model_name in ("ByteDance-Seed/academic-ds-9B",)
+        ):
             self.export_mapping = deepseek_converter.get_export_mapping(
                 source=global_keys_map,
                 source_config=megatron_model.config.__dict__,
@@ -449,7 +454,9 @@ class MegatronToHFConverter:
                 )
 
         mapping_groups = [({k: v for k, v in main_mappings}, main_state_dict_keys)]
-        for (k, v), exception_state_dict_keys in zip( exception_mappings, exception_mappings_state_dict_keys_list):
+        for (k, v), exception_state_dict_keys in zip(
+            exception_mappings, exception_mappings_state_dict_keys_list
+        ):
             mapping_groups.append(({k: v}, exception_state_dict_keys))
         transform_groups = [(main_transforms, main_state_dict_keys)]
         for exception_transform, exception_state_dict_keys in zip(

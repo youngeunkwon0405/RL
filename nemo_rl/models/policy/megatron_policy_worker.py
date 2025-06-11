@@ -53,7 +53,9 @@ from megatron.inference.text_generation.mcore_engine_server import (
     run_mcore_engine,
 )
 from megatron.core.distributed import DistributedDataParallel
-from megatron.core.distributed.custom_fsdp import FullyShardedDataParallel as custom_FSDP
+from megatron.core.distributed.custom_fsdp import (
+    FullyShardedDataParallel as custom_FSDP,
+)
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron import fault_tolerance
 from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint, save_checkpoint
@@ -89,7 +91,10 @@ from megatron.core.transformer.enums import AttnMaskType
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs, from_parallel_logits_to_logprobs_packed_sequences
+from nemo_rl.distributed.model_utils import (
+    from_parallel_logits_to_logprobs,
+    from_parallel_logits_to_logprobs_packed_sequences,
+)
 from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
@@ -266,7 +271,7 @@ class MegatronPolicyWorker:
         # Check if the checkpoint already exists
         hf_model_subdir = hf_model_name
         if os.path.exists(hf_model_name):
-            hf_model_subdir = f"model_{hf_model_subdir.replace("/", "_")}"
+            hf_model_subdir = f"model_{hf_model_subdir.replace('/', '_')}"
 
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
@@ -364,7 +369,7 @@ class MegatronPolicyWorker:
             checkpoint_config=checkpoint_config,
             logger_config=LoggerConfig(logging_level=0),
             train_config=TrainingConfig(
-                micro_batch_size=1,     # ignored
+                micro_batch_size=1,  # ignored
                 global_batch_size=self.cfg["train_global_batch_size"],  # ignored
                 train_iters=1000,  # Default value for inference
             ),
@@ -373,12 +378,24 @@ class MegatronPolicyWorker:
             ),
             ddp_config=DistributedDataParallelConfig(
                 check_for_nan_in_grad=True,
-                grad_reduce_in_fp32=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["grad_reduce_in_fp32"],
-                overlap_grad_reduce=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_grad_reduce"],
-                overlap_param_gather=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_param_gather"],
-                average_in_collective=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["average_in_collective"],
-                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"]["use_distributed_optimizer"],
-                data_parallel_sharding_strategy=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["data_parallel_sharding_strategy"],
+                grad_reduce_in_fp32=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["grad_reduce_in_fp32"],
+                overlap_grad_reduce=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["overlap_grad_reduce"],
+                overlap_param_gather=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["overlap_param_gather"],
+                average_in_collective=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["average_in_collective"],
+                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"][
+                    "use_distributed_optimizer"
+                ],
+                data_parallel_sharding_strategy=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["data_parallel_sharding_strategy"],
             ),
             scheduler_config=SchedulerConfig(
                 **self.cfg["megatron_cfg"]["scheduler"],
@@ -470,7 +487,7 @@ class MegatronPolicyWorker:
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self._held_gather_buffer = None
-    
+
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 
@@ -509,7 +526,11 @@ class MegatronPolicyWorker:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
         total_dataset_size = torch.tensor(data.size, device="cuda")
-        torch.distributed.all_reduce(total_dataset_size, op=torch.distributed.ReduceOp.SUM, group=parallel_state.get_data_parallel_group())
+        torch.distributed.all_reduce(
+            total_dataset_size,
+            op=torch.distributed.ReduceOp.SUM,
+            group=parallel_state.get_data_parallel_group(),
+        )
         num_global_batches = total_dataset_size.item() // gbs
 
         if eval_mode:
@@ -572,11 +593,17 @@ class MegatronPolicyWorker:
                 pad_full_seq_to = None
                 if self.cfg["dynamic_batching"]["enabled"]:
                     data_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
-                    data_iterator_len = batch.get_microbatch_iterator_dynamic_shapes_len()
+                    data_iterator_len = (
+                        batch.get_microbatch_iterator_dynamic_shapes_len()
+                    )
                     micro_batch_size = self.cfg["train_micro_batch_size"]
                 elif self.cfg["sequence_packing"]["enabled"]:
-                    data_iterator = batch.make_microbatch_iterator_for_packable_sequences()
-                    data_iterator_len, seq_dim_size = batch.get_microbatch_iterator_for_packable_sequences_len()
+                    data_iterator = (
+                        batch.make_microbatch_iterator_for_packable_sequences()
+                    )
+                    data_iterator_len, seq_dim_size = (
+                        batch.get_microbatch_iterator_for_packable_sequences_len()
+                    )
                     micro_batch_size = 1
                     pack_seqs = True
                     seqlen_key = "input_lengths"
@@ -584,12 +611,16 @@ class MegatronPolicyWorker:
                     cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
                     pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
                     if self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
-                        _, pad_full_seq_to = batch.get_microbatch_iterator_for_packable_sequences_len()
+                        _, pad_full_seq_to = (
+                            batch.get_microbatch_iterator_for_packable_sequences_len()
+                        )
+                    data_iterator_len = (
+                        batch.get_microbatch_iterator_dynamic_shapes_len()
+                    )
                 else:
                     data_iterator = batch.make_microbatch_iterator(mbs)
                     data_iterator_len = local_gbs // mbs
                     micro_batch_size = self.cfg["train_micro_batch_size"]
-
 
                 rerun_state_machine = get_rerun_state_machine()
                 while rerun_state_machine.should_run_forward_backward(data_iterator):
@@ -643,9 +674,7 @@ class MegatronPolicyWorker:
 
                 # Update learning rate.
                 if update_successful:
-                    increment = (
-                        total_dataset_size.item()
-                    )
+                    increment = total_dataset_size.item()
                     self.scheduler.step(increment=increment)
                     skipped_iter = 0
                     curr_lr = self.scheduler.get_lr(self.optimizer.param_groups[0])
@@ -752,8 +781,13 @@ class MegatronPolicyWorker:
         pp_grp = get_pipeline_model_parallel_group()
         pp_size = get_pipeline_model_parallel_world_size()
         # if pp_size > 1, we need to pad the full sequence to the max sequence length to maintain a static PP buffer
-        if self.cfg["sequence_packing"]["enabled"] and self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
-            _, pad_full_seq_to = data.get_microbatch_iterator_for_packable_sequences_len()
+        if (
+            self.cfg["sequence_packing"]["enabled"]
+            and self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1
+        ):
+            _, pad_full_seq_to = (
+                data.get_microbatch_iterator_for_packable_sequences_len()
+            )
             pp_seq_dim_size = pad_full_seq_to
         else:
             pad_full_seq_to = None
@@ -767,11 +801,13 @@ class MegatronPolicyWorker:
                 pp_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
                 cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
                 pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
-                input_ids, packed_seq_params, cu_seqlens, cu_seqlens_padded = _pack_sequences_for_megatron(
-                    data_dict["input_ids"].clone(),
-                    data_dict["input_lengths"],
-                    pad_individual_seqs_to_multiple_of=pad_factor,
-                    pad_packed_seq_to=pad_full_seq_to,
+                input_ids, packed_seq_params, cu_seqlens, cu_seqlens_padded = (
+                    _pack_sequences_for_megatron(
+                        data_dict["input_ids"].clone(),
+                        data_dict["input_lengths"],
+                        pad_individual_seqs_to_multiple_of=pad_factor,
+                        pad_packed_seq_to=pad_full_seq_to,
+                    )
                 )
                 input_ids = input_ids
                 attention_mask, position_ids = None, None
@@ -784,7 +820,12 @@ class MegatronPolicyWorker:
                 packed_seq_params = None
                 unpacked_input_ids = input_ids
 
-            output_tensor = model(input_ids, position_ids, attention_mask, packed_seq_params=packed_seq_params)
+            output_tensor = model(
+                input_ids,
+                position_ids,
+                attention_mask,
+                packed_seq_params=packed_seq_params,
+            )
 
             def collection_fn(output_tensor):
                 stc = time.time()
@@ -828,13 +869,14 @@ class MegatronPolicyWorker:
             micro_batch_size = logprob_batch_size
         elif self.cfg["sequence_packing"]["enabled"]:
             mb_iterator = data.make_microbatch_iterator_for_packable_sequences()
-            data_iterator_len, _ = data.get_microbatch_iterator_for_packable_sequences_len()
+            data_iterator_len, _ = (
+                data.get_microbatch_iterator_for_packable_sequences_len()
+            )
             micro_batch_size = 1
         else:
             mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
             data_iterator_len = max(1, data.size // logprob_batch_size)
             micro_batch_size = logprob_batch_size
-
 
         forward_backward_func = get_forward_backward_func()
         list_of_logprobs = forward_backward_func(
@@ -1127,7 +1169,7 @@ class MegatronPolicyWorker:
                 ep_rank_ids = tuple(sorted(ep_group_rank_ids))
             else:
                 ep_rank_ids = (torch.distributed.get_rank(),)
-            
+
             # Calculate size for this parameter
             prec_to_bytes = {
                 torch.bfloat16: 2,

@@ -15,6 +15,7 @@
 from nemo.lightning import io
 from nemo.lightning.io.state import TransformFns
 
+
 def get_export_mapping(source):
     mapping = {
         "decoder.layers.*.self_attention.linear_proj.weight": "model.layers.*.self_attn.o_proj.weight",
@@ -27,6 +28,7 @@ def get_export_mapping(source):
         # small Qwen 2 models have shared input output embeddings
         del mapping["lm_head.weight"]
     return mapping
+
 
 def get_export_transforms():
     transforms = [
@@ -50,7 +52,10 @@ def get_export_transforms():
         ),
         io.state_transform(
             source_key="decoder.layers.*.mlp.linear_fc1.weight",
-            target_key=("model.layers.*.mlp.gate_proj.weight", "model.layers.*.mlp.up_proj.weight"),
+            target_key=(
+                "model.layers.*.mlp.gate_proj.weight",
+                "model.layers.*.mlp.up_proj.weight",
+            ),
             fn=TransformFns.split_fc1,
         ),
         io.state_transform(
