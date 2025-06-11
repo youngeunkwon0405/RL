@@ -166,7 +166,6 @@ def setup_megatron_model(
         cfg.model_config,
         cfg.ddp_config,
         use_torch_fsdp2=cfg.dist_config.use_torch_fsdp2,
-        use_custom_fsdp=cfg.ddp_config.use_custom_fsdp, # Not currently functional
         overlap_param_gather_with_optimizer_step=cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
         data_parallel_random_init=cfg.rng_config.data_parallel_random_init,
     )
@@ -318,7 +317,6 @@ class MegatronPolicyWorker:
             fully_parallel_load=True,  # Enable fully parallel load
             load_rng=False,
         )
-        assert self.cfg["megatron_cfg"]["distributed_data_parallel_config"].get("use_custom_fsdp", False) == False, "Custom FSDP is not currently functional"
         self.megatron_cfg = ConfigContainer(
             model_config=model_cfg,
             checkpoint_config=checkpoint_config,
@@ -338,7 +336,6 @@ class MegatronPolicyWorker:
                 overlap_param_gather=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_param_gather"],
                 average_in_collective=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["average_in_collective"],
                 use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"]["use_distributed_optimizer"],
-                use_custom_fsdp=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["use_custom_fsdp"],
                 data_parallel_sharding_strategy=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["data_parallel_sharding_strategy"],
             ),
             scheduler_config=SchedulerConfig(
@@ -370,7 +367,6 @@ class MegatronPolicyWorker:
                 self.megatron_cfg.model_config,
                 self.megatron_cfg.ddp_config,
                 use_torch_fsdp2=self.megatron_cfg.dist_config.use_torch_fsdp2,
-                use_custom_fsdp=self.megatron_cfg.ddp_config.use_custom_fsdp,
                 overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
                 data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
             )
