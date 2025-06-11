@@ -65,7 +65,6 @@ policy:
 
   megatron_cfg:
     enabled: true
-    freeze_moe_router: true
     activation_checkpointing: false
 
     empty_unused_memory_level: 1
@@ -75,11 +74,7 @@ policy:
     num_layers_in_last_pipeline_stage: null
     context_parallel_size: 1
     pipeline_dtype: ${policy.precision}
-    expert_model_parallel_size: 1
-    expert_tensor_parallel_size: 1
     sequence_parallel: false
-    moe_router_load_balancing_type: "none" # "seq_aux_loss" causes logprob error divergence
-    moe_router_bias_update_rate: 0.0 # by default, disable bias updates
 
     optimizer:
       optimizer: "adam"
