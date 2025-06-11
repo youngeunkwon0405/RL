@@ -419,7 +419,8 @@ class MegatronToHFConverter:
         # Most of the keys will be able to converted together (main)
         # For the keys that can't be converted together (exception), we need to handle them separately
         main_state_dict_keys = []
-        exception_state_dict_keys_list = []
+        exception_mappings_state_dict_keys_list = []
+        exception_transforms_state_dict_keys_list = []
 
         main_mappings = []
         exception_mappings = []
@@ -430,7 +431,7 @@ class MegatronToHFConverter:
                 (key, val),
                 main_state_dict_keys,
                 main_mappings,
-                exception_state_dict_keys_list,
+                exception_mappings_state_dict_keys_list,
                 exception_mappings,
             )
 
@@ -448,18 +449,16 @@ class MegatronToHFConverter:
                     transform,
                     main_state_dict_keys,
                     main_transforms,
-                    exception_state_dict_keys_list,
+                    exception_transforms_state_dict_keys_list,
                     exception_transforms,
                 )
 
         mapping_groups = [({k: v for k, v in main_mappings}, main_state_dict_keys)]
-        for (k, v), exception_state_dict_keys in zip(
-            exception_mappings, exception_state_dict_keys_list
-        ):
+        for (k, v), exception_state_dict_keys in zip( exception_mappings, exception_mappings_state_dict_keys_list):
             mapping_groups.append(({k: v}, exception_state_dict_keys))
         transform_groups = [(main_transforms, main_state_dict_keys)]
         for exception_transform, exception_state_dict_keys in zip(
-            exception_transforms, exception_state_dict_keys_list
+            exception_transforms, exception_transforms_state_dict_keys_list
         ):
             transform_groups.append(([exception_transform], exception_state_dict_keys))
 
@@ -506,7 +505,4 @@ class MegatronToHFConverter:
                 if v is not None:
                     converted_state_dict[k] = v
 
-        # if torch.distributed.get_rank() == 0:
-        #     import pdb; pdb.set_trace()
-        # torch.distributed.barrier()
         return converted_state_dict
