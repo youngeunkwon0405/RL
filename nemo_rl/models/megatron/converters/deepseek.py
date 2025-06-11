@@ -106,9 +106,7 @@ def get_export_transforms():
     return transforms
 
 
-def get_source_fn(
-    source: Dict[str, Any], source_config: Dict[str, Any]
-) -> _ModelState:
+def get_source_fn(source: Dict[str, Any], source_config: Dict[str, Any]) -> _ModelState:
     """
     In deepseek, HF weight `model.layers.*.post_attention_layernorm.weight` is mapped to mcore weight
     a) `decoder.layers.*.mlp.linear_fc1.layer_norm_weight`, if the layer is dense

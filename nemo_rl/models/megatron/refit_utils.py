@@ -170,7 +170,9 @@ def gather_params(
         else:
             #  params that may not be on every rank, e.g. the embedding layer
             global_key = None
-            full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
+            full_param = torch.empty(
+                *shape, dtype=dtype, device=torch.cuda.current_device()
+            )
 
         # gather across PP group
         pp_gathered_global_keys = [None] * pp_world_size
@@ -197,13 +199,21 @@ def gather_params(
 
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
             ep_gathered_params = [
-                torch.empty(stacked_pp_gathered_params.shape, dtype=dtype, device=torch.cuda.current_device())
+                torch.empty(
+                    stacked_pp_gathered_params.shape,
+                    dtype=dtype,
+                    device=torch.cuda.current_device(),
+                )
                 for _ in range(ep_world_size)
             ]
-            torch.distributed.all_gather(ep_gathered_params, stacked_pp_gathered_params, group=ep_group)
+            torch.distributed.all_gather(
+                ep_gathered_params, stacked_pp_gathered_params, group=ep_group
+            )
 
             flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
-            flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
+            flat_gathered_params = [
+                x for y in ep_gathered_params for x in torch.unbind(y)
+            ]
         else:
             flat_gathered_global_keys = pp_gathered_global_keys
             flat_gathered_params = pp_gathered_params
@@ -211,7 +221,7 @@ def gather_params(
         for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
             if k is not None:
                 gathered_params[k] = p
-        
+
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
     print(f"Time taken to gather params: {time.time() - st}")

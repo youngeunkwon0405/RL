@@ -261,7 +261,7 @@ class MegatronPolicyWorker:
         # Check if the checkpoint already exists
         hf_model_subdir = hf_model_name
         if os.path.exists(hf_model_name):
-            hf_model_subdir = f"model_{hf_model_subdir.replace("/", "_")}"
+            hf_model_subdir = f"model_{hf_model_subdir.replace('/', '_')}"
 
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
@@ -369,11 +369,21 @@ class MegatronPolicyWorker:
             ),
             ddp_config=DistributedDataParallelConfig(
                 check_for_nan_in_grad=True,
-                grad_reduce_in_fp32=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["grad_reduce_in_fp32"],
-                overlap_grad_reduce=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_grad_reduce"],
-                overlap_param_gather=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_param_gather"],
-                average_in_collective=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["average_in_collective"],
-                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"]["use_distributed_optimizer"],
+                grad_reduce_in_fp32=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["grad_reduce_in_fp32"],
+                overlap_grad_reduce=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["overlap_grad_reduce"],
+                overlap_param_gather=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["overlap_param_gather"],
+                average_in_collective=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["average_in_collective"],
+                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"][
+                    "use_distributed_optimizer"
+                ],
             ),
             scheduler_config=SchedulerConfig(
                 **self.cfg["megatron_cfg"]["scheduler"],
@@ -465,7 +475,7 @@ class MegatronPolicyWorker:
         self.final_padded_vocab_size = tokenizer_config.padded_vocab_size
         self.dp_size = worker_sharding_annotations.get_axis_size("data_parallel")
         self._held_gather_buffer = None
-    
+
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 
@@ -564,7 +574,9 @@ class MegatronPolicyWorker:
                 batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
                 if self.cfg["dynamic_batching"]["enabled"]:
                     data_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
-                    data_iterator_len = batch.get_microbatch_iterator_dynamic_shapes_len()
+                    data_iterator_len = (
+                        batch.get_microbatch_iterator_dynamic_shapes_len()
+                    )
                 else:
                     data_iterator = batch.make_microbatch_iterator(mbs)
                     data_iterator_len = num_microbatches
@@ -589,9 +601,7 @@ class MegatronPolicyWorker:
                         num_microbatches=data_iterator_len,
                         seq_length=seq_dim_size,
                         micro_batch_size=self.cfg["train_micro_batch_size"],
-                        decoder_seq_length=self.cfg[
-                            "max_total_sequence_length"
-                        ],
+                        decoder_seq_length=self.cfg["max_total_sequence_length"],
                         forward_only=eval_mode,
                     )
 
@@ -765,7 +775,6 @@ class MegatronPolicyWorker:
         else:
             mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
             data_iterator_len = max(1, data.size // logprob_batch_size)
-
 
         forward_backward_func = get_forward_backward_func()
         list_of_logprobs = forward_backward_func(
@@ -1058,7 +1067,7 @@ class MegatronPolicyWorker:
                 ep_rank_ids = tuple(sorted(ep_group_rank_ids))
             else:
                 ep_rank_ids = (torch.distributed.get_rank(),)
-            
+
             # Calculate size for this parameter
             prec_to_bytes = {
                 torch.bfloat16: 2,
