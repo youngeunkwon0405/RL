@@ -158,7 +158,6 @@ def setup_megatron_model(
     # Tokenizer
     build_tokenizer(
         cfg.tokenizer_config,
-        # TODO(yifu): should just pull the vocab size from HF config instead?
         make_vocab_size_divisible_by=cfg.model_config.make_vocab_size_divisible_by
         // cfg.model_config.tensor_model_parallel_size,
         tensor_model_parallel_size=cfg.model_config.tensor_model_parallel_size,
@@ -248,11 +247,6 @@ class MegatronPolicyWorker:
         megatron_checkpoint_home: Optional[str] = None,
         **kwargs: Any,
     ):
-        print("STARTING MEGATRON POLICY WORKER")
-        from transformers.dynamic_module_utils import init_hf_modules
-
-        init_hf_modules()
-
         self.cfg = config
         dtype_map = {
             "float32": torch.float32,
@@ -273,7 +267,6 @@ class MegatronPolicyWorker:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
         else:
             pretrained_path = f"/opt/checkpoints/tron/{hf_model_subdir}"
-        print("PRETRAINED PATH: ", pretrained_path)
         pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
             os.path.join(pretrained_path, "iter_0000000")
         )
@@ -335,12 +328,6 @@ class MegatronPolicyWorker:
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
         model_cfg.moe_router_dtype = "fp64"
-
-        model_cfg.apply_rope_fusion = False
-        model_cfg.bias_activation_fusion = False
-        model_cfg.bias_dropout_fusion = False
-        model_cfg.masked_softmax_fusion = False
-        model_cfg.gradient_accumulation_fusion = False
         model_cfg.moe_router_load_balancing_type = self.cfg["megatron_cfg"][
             "moe_router_load_balancing_type"
         ]
@@ -352,9 +339,6 @@ class MegatronPolicyWorker:
             model_cfg.activations_checkpoint_granularity = "full"
             model_cfg.activations_checkpoint_method = "uniform"
             model_cfg.activations_checkpoint_num_layers = 1
-
-        # model_cfg.moe_router_num_groups = 1
-        # model_cfg.moe_router_group_topk = 1
 
         checkpoint_config = CheckpointConfig(
             save_interval=100,
@@ -1061,7 +1045,7 @@ class MegatronPolicyWorker:
             shape = list(param.shape)
             tp_dim = get_tp_dim(self.model, name, named_modules_dict)
             if tp_dim is not None:
-                # TODO(yifu): take care of expert_tensor_parallel_size which may be different from tensor_model_parallel_size
+                # TODO: take care of expert_tensor_parallel_size which may be different from tensor_model_parallel_size
                 tp_rank_ids = tuple(sorted(tp_group_rank_ids))
                 shape[tp_dim] *= len(tp_rank_ids)
             else:

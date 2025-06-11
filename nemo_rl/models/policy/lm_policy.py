@@ -95,13 +95,11 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             layout=np.arange(cluster.world_size()).reshape(
                 pp_size,  # PP
                 -1,  # DP
-                #ep_size, # EP
                 tp_size,  # TP
             ),
             names=[
                 "pipeline_parallel",
                 "data_parallel",
-                #"expert_parallel",
                 "tensor_parallel",
             ],
         )
@@ -181,12 +179,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             in_sharded_axes=["data_parallel"],
             replicate_on_axes=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             output_is_replicated=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
         )
@@ -234,12 +230,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             in_sharded_axes=["data_parallel"],
             replicate_on_axes=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             output_is_replicated=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             common_kwargs={"micro_batch_size": micro_batch_size},
@@ -292,12 +286,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             in_sharded_axes=["data_parallel"],
             replicate_on_axes=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             output_is_replicated=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             common_kwargs={
@@ -344,12 +336,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             in_sharded_axes=["data_parallel"],
             replicate_on_axes=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             output_is_replicated=[
                 "tensor_parallel",
-                #"expert_parallel",
                 "pipeline_parallel",
             ],
             common_kwargs={"greedy": greedy},

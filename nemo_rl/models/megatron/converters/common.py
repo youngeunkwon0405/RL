@@ -151,7 +151,7 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
     # [ gate_tp1 ] --/ [  up_tp0  ] --/ (split  up)
     # [  up_tp1  ]     [  up_tp1  ]
     megatron_config = ctx.source.config
-    # TODO(yifu): handle expert_tensor_parallel_size
+    # TODO: handle expert_tensor_parallel_size
     tp = megatron_config.tensor_model_parallel_size
     linear_fc1 = einops.rearrange(linear_fc1, "(t c d) a1 ->  c (t d) a1", c=2, t=tp)
     mlp_gate_proj_weight = linear_fc1[0]
@@ -232,7 +232,6 @@ def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
 def update_transforms_for_nemorl(export_transforms):
     # In place update
     for transform in export_transforms:
-        # if transform.transform.__name__ == "split_fc1" and transform.source_key not in ("decoder.layers.*.mlp.experts.linear_fc1.weight", ):
         if transform.transform.__name__ == "split_fc1":
             # Need to modify this transform to take into account the TP size
             transform.transform = split_fc1_tp
@@ -277,9 +276,8 @@ class MegatronToHFConverter:
         global_keys = ep_gathered_global_keys
         global_keys_map = {k: None for k in global_keys}
 
-        # TODO(yifu): inheritence for this?
         if "qwen" in hf_model_name.lower():
-            self.export_mapping = qwen2_converter.get_export_mapping()
+            self.export_mapping = qwen2_converter.get_export_mapping(megatron_model)
             self.export_transforms = qwen2_converter.get_export_transforms()
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
@@ -326,9 +324,6 @@ class MegatronToHFConverter:
             if type(transform.target_key) == tuple:
                 for t in transform.target_key:
                     ctx = StateDictTransform(transform.source_key, t)(ctx)
-            elif type(transform.source_key) == tuple:
-                # TODO(yifu): handle many to one case with transform that just sets value as a list?
-                ...
             else:
                 ctx = StateDictTransform(transform.source_key, transform.target_key)(
                     ctx
