@@ -254,7 +254,7 @@ class MegatronPolicyWorker:
         init_reference_model: bool = True,
         worker_sharding_annotations: Optional[NamedSharding] = None,
         pre_init_communication_queue: Optional[Queue] = None,
-        megatron_checkpoint_home: Optional[str] = None,
+        megatron_checkpoint_home: Optional[str] = "/lustre/fsw/portfolios/coreai/users/yifuw/nemo_rl_checkpoints/tron",
         **kwargs: Any,
     ):
         self.cfg = config
@@ -513,6 +513,7 @@ class MegatronPolicyWorker:
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
 
+        self.local_key_to_global_keys = self.get_local_key_to_global_keys()
 
     def is_alive(self):
         return True
@@ -1135,6 +1136,70 @@ class MegatronPolicyWorker:
         device_idx = torch.cuda.current_device()
         # Get device UUID using NVML
         return get_device_uuid(device_idx)
+    
+    @torch.no_grad()
+    def get_local_key_to_global_keys(self):
+        """ Get the local key to global keys mapping.
+        """
+        # Get parallel info
+        tp_group = parallel_state.get_tensor_model_parallel_group()
+        tp_world_size = torch.distributed.get_world_size(tp_group)
+        tp_group_rank_ids = get_all_rank_ids_in_group(tp_group)
+
+        pp_group = parallel_state.get_pipeline_model_parallel_group()
+        pp_world_size = torch.distributed.get_world_size(pp_group)
+        pp_group_rank_ids = get_all_rank_ids_in_group(pp_group)
+
+        ep_group = parallel_state.get_expert_model_parallel_group()
+        ep_world_size = torch.distributed.get_world_size(ep_group)
+        ep_group_rank_ids = get_all_rank_ids_in_group(ep_group)
+
+        if parallel_state.get_tensor_model_parallel_rank() == 0 and parallel_state.get_pipeline_model_parallel_rank() == 0 and parallel_state.get_expert_model_parallel_rank() == 0:
+            print(f"[Rank 0] TP Group size: {tp_world_size}")
+            print(f"[Rank 0] PP Group size: {pp_world_size}")
+            print(f"[Rank 0] EP Group size: {ep_world_size}")
+        
+        # start calculating the global key
+        key_to_global_keys_local_obj = {}
+        ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
+        state_dict = self.model.state_dict()
+        named_modules_dict = dict(self.model.named_modules())
+        for name in state_dict.keys():
+            local_key = name
+            # if: for if a parameter is sharded along PP or EP; else: not sharded (like embedding)
+            if local_key in state_dict:
+                global_key = get_global_key_from_local_key(local_key, self.model.config)
+            else:
+                global_key = None
+            
+            key_to_global_keys_local_obj[local_key] = (ep_pattern.search(local_key), global_key)
+        
+        # gather along PP
+        pp_gathered_obj = [None] * pp_world_size
+        torch.distributed.all_gather_object(
+            pp_gathered_obj, key_to_global_keys_local_obj, group=pp_group
+        )
+        # gather along EP
+        ep_gathered_obj = [None] * ep_world_size
+        torch.distributed.all_gather_object(
+            ep_gathered_obj, pp_gathered_obj, group=ep_group
+        )
+
+        # post-processing
+        final_key_to_global_keys = {}
+        for name in key_to_global_keys_local_obj.keys():
+            is_ep_sharded = ep_gathered_obj[0][0][name][0]
+            gloabl_keys = []
+            if is_ep_sharded:
+                for ep_rank_id in ep_group_rank_ids:
+                    for pp_rank_id in pp_group_rank_ids:
+                        gloabl_keys.append(ep_gathered_obj[ep_rank_id][pp_rank_id][name][1])
+            else:
+                for pp_rank_id in pp_group_rank_ids:
+                    gloabl_keys.append(pp_gathered_obj[pp_rank_id][name][1])
+            final_key_to_global_keys[name] = gloabl_keys
+                
+        return final_key_to_global_keys
 
     def prepare_weights_for_ipc(self):
         """Prepare Megatron model weights for IPC transfer to vLLM.
@@ -1267,6 +1332,7 @@ class MegatronPolicyWorker:
         gathered_megatron_params = gather_params(
             self.model,
             keys,
+            key_to_global_keys=self.local_key_to_global_keys,
         )
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
