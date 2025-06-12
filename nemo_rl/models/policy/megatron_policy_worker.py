@@ -1124,9 +1124,6 @@ class MegatronPolicyWorker:
         Collects information about weight tensors (names and sizes).
         Returns a list of (parameter_name, size_in_bytes) tuples.
         """
-        # if pre-computed, use the cached version
-        if hasattr(self, "state_dict_info"):
-            return self.state_dict_info
             
         no_grad = torch.no_grad()
         no_grad.__enter__()
@@ -1239,7 +1236,6 @@ class MegatronPolicyWorker:
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         no_grad.__exit__(None, None, None)
 
-        self.state_dict_info = param_info
         return param_info
 
     # Temporary fix, 'keys' is a kwarg due to some sort of ray bug
