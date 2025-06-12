@@ -254,7 +254,7 @@ class MegatronPolicyWorker:
         init_reference_model: bool = True,
         worker_sharding_annotations: Optional[NamedSharding] = None,
         pre_init_communication_queue: Optional[Queue] = None,
-        megatron_checkpoint_home: Optional[str] = "/lustre/fsw/portfolios/coreai/users/yifuw/nemo_rl_checkpoints/tron",
+        megatron_checkpoint_home: Optional[str] = None,
         **kwargs: Any,
     ):
         self.cfg = config
@@ -510,8 +510,11 @@ class MegatronPolicyWorker:
         self._held_gather_buffer = None
         self.megatron_to_hf_converter = MegatronToHFConverter(hf_model_name, self.model)
 
-        self.state_dict_info = self.prepare_weights_for_ipc()
-        self.local_key_to_global_keys = self.get_local_key_to_global_keys()
+        # Create a map that maps any local parameter name to a list of global parameter names.
+        # This map is repeatedly used by parameter gatherring phase during refit of every step.
+        self.local_key_to_global_keys = self.get_local_key_to_global_keys(
+            state_dict_info = self.prepare_weights_for_ipc()
+        )
 
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
         return None, {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}, None
@@ -1139,90 +1142,45 @@ class MegatronPolicyWorker:
         return get_device_uuid(device_idx)
     
     @torch.no_grad()
-    def get_local_key_to_global_keys(self):
+    def get_local_key_to_global_keys(self, state_dict_info: List[Tuple[Any, int]]):
         """ Get the local key to global keys mapping.
         """
         # Get parallel info
         tp_group = parallel_state.get_tensor_model_parallel_group()
         tp_world_size = torch.distributed.get_world_size(tp_group)
-        tp_group_rank_ids = get_all_rank_ids_in_group(tp_group)
 
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
-        pp_group_rank_ids = get_all_rank_ids_in_group(pp_group)
 
         ep_group = parallel_state.get_expert_model_parallel_group()
         ep_world_size = torch.distributed.get_world_size(ep_group)
-        ep_group_rank_ids = get_all_rank_ids_in_group(ep_group)
-
-        if parallel_state.get_tensor_model_parallel_rank() == 0 and parallel_state.get_pipeline_model_parallel_rank() == 0 and parallel_state.get_expert_model_parallel_rank() == 0:
-            print(f"[Rank 0] TP Group size: {tp_world_size}")
-            print(f"[Rank 0] PP Group size: {pp_world_size}")
-            print(f"[Rank 0] EP Group size: {ep_world_size}")
         
         # start calculating the global key
-        key_to_global_keys_local_obj = {}
         ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
         state_dict = self.model.state_dict()
-        named_modules_dict = dict(self.model.named_modules())
+        final_key_to_global_keys = {}
 
         import time
         st = time.time()
-        gst = st
-
-        # local_keys = []
-        # for name, _ in self.state_dict_info:
-        #     local_key = name[0]
-        #     if local_key in state_dict:
-        #         global_key = get_global_key_from_local_key(local_key, self.model.config)
-        #     else:
-        #         global_key = None
-        #     local_keys.append((local_key, global_key))
-        
-        # # gather along PP
-        # pp_gathered_objs = [None] * pp_world_size
-        # torch.distributed.all_gather_object(
-        #     pp_gathered_objs, local_keys, group=pp_group
-        # )
-
-        # # gather along EP
-        # ep_gathered_objs = [None] * ep_world_size
-        # torch.distributed.all_gather_object(
-        #     ep_gathered_objs, pp_gathered_objs, group=ep_group
-        # )
-
-        # final_key_to_global_keys = {}
-        # self_pp_rank_id = parallel_state.get_pipeline_model_parallel_rank()
-        # self_ep_rank_id = parallel_state.get_expert_model_parallel_rank()
-        # for i, (name, _) in enumerate(self.state_dict_info):
-        #     local_key, _, _ = name
-        #     global_keys = []
-        #     if ep_pattern.search(local_key):
-        #         for ep_rank_id in range(ep_world_size):
-        #             for pp_rank_id in range(pp_world_size):
-        #                 global_keys.append(ep_gathered_objs[ep_rank_id][pp_rank_id][i][1])
-        #     else:
-        #         for pp_rank_id in range(pp_world_size):
-        #             global_keys.append(pp_gathered_objs[pp_rank_id][i][1])
             
-        #     final_key_to_global_keys[local_key] = global_keys
-            
-        final_key_to_global_keys = {}
-        for name, size in self.state_dict_info:
-            local_key, _, _ = name
-            # if: for if a parameter is sharded along PP or EP; else: not sharded (like embedding)
+        for param_info, size in state_dict_info:
+            local_key, _, _ = param_info
+
+            # Step 1: create global key from local key
+            # if: for if a parameter is sharded along PP or EP; 
+            # else: not sharded (like embedding)
             if local_key in state_dict:
                 global_key = get_global_key_from_local_key(local_key, self.model.config)
             else:
                 global_key = None
             
-            # gather along PP
+            # Step 2: gather global keys from ranks in PP group
             pp_gathered_objs = [None] * pp_world_size
             torch.distributed.all_gather_object(
                 pp_gathered_objs, global_key, group=pp_group
             )
 
-            # gather along EP
+            # Step 3: gather global keys from ranks in EP group
             if ep_pattern.search(local_key):
                 ep_gathered_objs = [None] * ep_world_size
                 torch.distributed.all_gather_object(
@@ -1234,50 +1192,13 @@ class MegatronPolicyWorker:
             
             final_key_to_global_keys[local_key] = flat_gathered_objs
 
-            et = time.time()
-            if parallel_state.get_tensor_model_parallel_rank() == 0 and parallel_state.get_pipeline_model_parallel_rank() == 0 and parallel_state.get_expert_model_parallel_rank() == 0:
-                print(f"{local_key} {size} gather time: {et - st}")
-            st = et
-            
-        #     is_ep_sharded = ep_pattern.search(local_key) is not None
-            
-        #     key_to_global_keys_local_obj[local_key] = (is_ep_sharded, global_key)
-        
-        # # gather along PP
-        # pp_gathered_obj = [None] * pp_world_size
-        # torch.distributed.all_gather_object(
-        #     pp_gathered_obj, key_to_global_keys_local_obj, group=pp_group
-        # )
-        # # gather along EP
-        # ep_gathered_obj = [None] * ep_world_size
-        # torch.distributed.all_gather_object(
-        #     ep_gathered_obj, pp_gathered_obj, group=ep_group
-        # )
-
-        # # post-processing
-        # final_key_to_global_keys = {}
-        # self_ep_rank_id = parallel_state.get_expert_model_parallel_rank()
-        # self_pp_rank_id = parallel_state.get_pipeline_model_parallel_rank()
-        # for name in key_to_global_keys_local_obj.keys():
-        #     is_ep_sharded = ep_gathered_obj[self_ep_rank_id][self_pp_rank_id][name][0]
-        #     gloabl_keys = []
-        #     if is_ep_sharded:
-        #         for ep_rank_id in range(ep_world_size):
-        #             for pp_rank_id in range(pp_world_size):
-        #                 gloabl_keys.append(ep_gathered_obj[ep_rank_id][pp_rank_id][name][1])
-        #     else:
-        #         try: 
-        #             for pp_rank_id in range(pp_world_size):
-        #                 gloabl_keys.append(pp_gathered_obj[pp_rank_id][name][1])
-        #             if parallel_state.get_tensor_model_parallel_rank() == 0 and parallel_state.get_pipeline_model_parallel_rank() == 0 and parallel_state.get_expert_model_parallel_rank() == 0:
-        #                 print(f"[Rank 0] Get global keys for local key: {name} -> {gloabl_keys}")
-        #         except:
-        #             pass
-        #     final_key_to_global_keys[name] = gloabl_keys
-
         et = time.time()
-        if parallel_state.get_tensor_model_parallel_rank() == 0 and parallel_state.get_pipeline_model_parallel_rank() == 0 and parallel_state.get_expert_model_parallel_rank() == 0:
-            print(f"Time taken to get local key to global keys: {et - gst}")
+        if (
+            parallel_state.get_tensor_model_parallel_rank() == 0 and 
+            parallel_state.get_pipeline_model_parallel_rank() == 0 and 
+            parallel_state.get_expert_model_parallel_rank() == 0
+        ):
+            print("[Rank 0] ", f"Time taken to get local key to global keys: {et - st}")
         return final_key_to_global_keys
 
     def prepare_weights_for_ipc(self):
@@ -1286,7 +1207,6 @@ class MegatronPolicyWorker:
         Collects information about weight tensors (names and sizes).
         Returns a list of (parameter_name, size_in_bytes) tuples.
         """
-            
         no_grad = torch.no_grad()
         no_grad.__enter__()
         # Ensure model is in evaluation mode
