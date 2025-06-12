@@ -89,6 +89,9 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
 
     # remap problem and solution keys
     if os.path.basename(data_config["dataset_name"]) == "gpqa":
+        seed = data_config.get("seed", 42)
+        print(f"Using seed {seed} for shuffle choices in GPQA")
+        random.seed(seed)
         remapped_dataset = base_dataset.map(map_answer_to_shuffled_options)
         task_data_processor = gpqa_data_processor
     else:

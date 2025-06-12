@@ -14,7 +14,7 @@ sft:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/Qwen2.5-7B-Instruct-sft-scp-16k-weight-decay-0.01"
+  checkpoint_dir: "results/Qwen2.5-7B-Instruct-sft-scp-16k"
   metric_name: "val_loss"
   higher_is_better: false
   keep_top_k: 3
@@ -47,7 +47,7 @@ policy:
     name: "torch.optim.AdamW"
     kwargs:
       lr: 5.0e-6
-      weight_decay: 0.01
+      weight_decay: 0.1
       betas: [0.9, 0.98]
       eps: 1e-5
       # when using Dtensor, we need to set foreach

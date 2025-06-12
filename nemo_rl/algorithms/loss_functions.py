@@ -239,6 +239,7 @@ class NLLLoss(LossFunction):
             if num_unmasked_tokens == 0:
                 # prevent division by zero
                 num_unmasked_tokens = torch.tensor(1)
+            # Zhaocheng: this is per-token micro average, which favors longer samples
             loss = -torch.sum(token_logprobs * mask) / num_unmasked_tokens
             num_unmasked_tokens = num_unmasked_tokens.item()
 
