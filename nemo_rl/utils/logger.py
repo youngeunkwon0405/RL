@@ -509,7 +509,14 @@ class Logger(LoggerInterface):
         self.wandb_tables = {}
         self.wandb_tables_df = defaultdict(
             lambda: pd.DataFrame(
-                columns=["step", "prompt", "response", "environment", "reward"]
+                columns=[
+                    "step",
+                    "prompt",
+                    "response",
+                    "environment",
+                    "reward",
+                    "dataset_name",
+                ]
             )
         )
 
@@ -523,7 +530,14 @@ class Logger(LoggerInterface):
             self.loggers.append(self.wandb_logger)
             self.wandb_tables = defaultdict(
                 lambda: wandb.Table(
-                    columns=["step", "prompt", "response", "environment", "reward"]
+                    columns=[
+                        "step",
+                        "prompt",
+                        "response",
+                        "environment",
+                        "reward",
+                        "dataset_name",
+                    ]
                 )
             )
 
@@ -611,7 +625,9 @@ class Logger(LoggerInterface):
 
         print(f"Logged data to {filepath}")
 
-    def log_table_contents(self, step, prompt, response, environment, reward, prefix):
+    def log_table_contents(
+        self, step, prompt, response, environment, reward, dataset_name, prefix
+    ):
         if self.wandb_logger is None:
             return
 
@@ -621,6 +637,7 @@ class Logger(LoggerInterface):
             "response": response,
             "environment": environment,
             "reward": reward,
+            "dataset_name": dataset_name,
         }
 
         self.wandb_tables_df[prefix] = pd.concat(
@@ -651,6 +668,7 @@ class Logger(LoggerInterface):
                     content[1],
                     content[2],
                     sample["rewards"][0],
+                    sample["dataset_names"][0],
                     prefix,
                 )
 

@@ -709,6 +709,8 @@ def grpo_train(
         log_data["generation_logprobs"] = train_data["generation_logprobs"].tolist()
         log_data["prev_logprobs"] = train_data["prev_logprobs"].tolist()
         log_data["input_lengths"] = input_lengths.tolist()
+        log_data["dataset_names"] = repeated_batch["dataset_names"]
+
         logger.log_batched_dict_as_jsonl(log_data, f"train_data_step{step}.jsonl")
         table = logger.log_batched_dict_as_table(log_data, prefix="train", step=step)
 
@@ -718,9 +720,6 @@ def grpo_train(
         timing_metrics = timer.get_timing_metrics(reduction_op="sum")
 
         print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
-        print(
-            f"  • Mean Generation Length: {rollout_metrics['mean_gen_tokens_per_sample']:.4f}"
-        )
 
         print("\n⏱️  Timing:")
         # Display total time first, separately
@@ -834,22 +833,32 @@ def validate(
                 sample_dict["eval_idx"] = f"{sample_dict['idx']}_{repeat_idx}"
                 data_for_saving.append(sample_dict)
 
-        for interaction in val_batch["message_log"][0]:
-            if interaction["role"] == "user":
-                prompt = interaction["content"]
-            elif interaction["role"] == "assistant":
-                response = interaction["content"]
-            else:
-                environment = interaction["content"]
+        # Log one example for each unique dataset
+        unique_datasets = list(set(val_batch["dataset_names"]))
 
-        reward = val_batch["total_reward"][0].item()
+        for dataset_name in unique_datasets:
+            dataset_idx = val_batch["dataset_names"].index(dataset_name)
 
-        table = None
-        if logger is not None:
-            # TODO: maybe log it once per dataset or something
-            table = logger.log_table_contents(
-                step, prompt, response, environment, reward, "validation"
-            )
+            for interaction in val_batch["message_log"][dataset_idx]:
+                if interaction["role"] == "user":
+                    prompt = interaction["content"]
+                elif interaction["role"] == "assistant":
+                    response = interaction["content"]
+                else:
+                    environment = interaction["content"]
+
+            reward = val_batch["total_reward"][dataset_idx].item()
+
+            if logger is not None:
+                table = logger.log_table_contents(
+                    step,
+                    prompt,
+                    response,
+                    environment,
+                    reward,
+                    dataset_name,
+                    f"validation/{dataset_name}",
+                )
 
         val_metrics = {
             "table": table,
