@@ -31,7 +31,7 @@ from nemo.collections.llm.gpt.model.base import GPTConfig
 import nemo_rl.models.megatron.converters as model_converters
 from nemo_rl.models.megatron.converters.common import get_global_key_from_local_key
 
-REFIT_TIME_DEBUG = False
+REFIT_TIME_DEBUG = True
 
 def _rank_0_print(*args, **kwargs):
     """ Utility function to print only on rank 0. """
@@ -259,8 +259,8 @@ def gather_params(
                 gathered_params[k] = p
     
     st = time.time()
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    # torch.cuda.empty_cache()
+    # torch.cuda.synchronize()
     _rank_0_print(f"Time taken to empty cuda cache and synchronize cuda: {time.time() - st}")
     _rank_0_print(f"Time taken to gather params: {time.time() - gather_params_start_time}")
     return gathered_params
