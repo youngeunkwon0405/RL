@@ -295,8 +295,7 @@ def refit_policy_generation(
     policy.offload_before_refit()
     policy_generation.prepare_for_generation(tags=["weights"])
     # Streaming update weights to save memory
-    # state_dict_info: list[tuple[str, int]] = policy.get_weights_for_ipc()
-    state_dict_info: list[tuple[str, int]] = policy.state_dict_info
+    state_dict_info: list[tuple[str, int]] = policy.prepare_weights_for_ipc()
     # group keys to save time
     available_bytes = refit_buffer_size_gb * (1024**3)
     split_keys: list[list[str]] = []

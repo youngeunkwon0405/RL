@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import re
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import torch
 from megatron.core import parallel_state
@@ -86,7 +86,8 @@ def gather_params(
 ):
     import time
 
-    st = time.time()
+    gst = time.time()
+    st = gst
 
     tp_group = parallel_state.get_tensor_model_parallel_group()
     tp_world_size = torch.distributed.get_world_size(tp_group)
@@ -221,5 +222,5 @@ def gather_params(
         
     torch.cuda.empty_cache()
     torch.cuda.synchronize()
-    single_rank_print(f"Time taken to gather params: {time.time() - st}")
+    single_rank_print(f"Time taken to gather params: {time.time() - gst}")
     return gathered_params
