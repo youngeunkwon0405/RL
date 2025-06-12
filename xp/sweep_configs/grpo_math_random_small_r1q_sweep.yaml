@@ -17,7 +17,7 @@ policy.max_total_sequence_length: [16384]
 policy.optimizer.kwargs.lr: [2.0e-6]
 
 # Top P Variance
-grpo.top_p_std: [0.2, 1.0]
+grpo.top_p_std: [1.0]
 
 # Random Entropy Mask
 grpo.random_entropy_mask: [true]

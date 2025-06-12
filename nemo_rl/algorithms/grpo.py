@@ -546,7 +546,10 @@ def grpo_train(
                         entropy_threshold = sorted_token_entropy[entropy_threshold_idx]
 
                         # Create mask for tokens with entropy >= threshold
-                        entropy_mask = fprop_token_entropy >= entropy_threshold
+                        if master_config["grpo"]["reverse_entropy_mask"]:
+                            entropy_mask = fprop_token_entropy <= entropy_threshold
+                        else:
+                            entropy_mask = fprop_token_entropy >= entropy_threshold
                         train_data["token_mask"] *= entropy_mask
 
             print("▶ Preparing for training...")

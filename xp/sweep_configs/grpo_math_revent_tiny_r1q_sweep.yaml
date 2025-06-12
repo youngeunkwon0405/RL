@@ -20,8 +20,8 @@ policy.logprob_batch_size: [1]
 # Top P Variance
 grpo.top_p_std: [1.0]
 
-# Random Entropy Mask
-grpo.random_entropy_mask: [true]
+# Reverse Entropy Mask
+grpo.reverse_entropy_mask: [true]
 
 # Training and Validation Dataset
 data.dataset_name: ["DAPOMath"]
