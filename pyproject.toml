@@ -28,7 +28,7 @@ dependencies = [
     "nvidia-ml-py",
     "hydra-core",
     "debugpy>=1.8.0",
-    "jsonlines",
+    "jsonlines"
 ]
 
 [tool.setuptools]
@@ -48,6 +48,10 @@ ifeval = [
     "langdetect",
     "nltk==3.9.1",
     "immutabledict",
+]
+
+bfcl = [
+    "python-Levenshtein",
 ]
 
 [dependency-groups]

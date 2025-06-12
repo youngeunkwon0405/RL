@@ -109,28 +109,26 @@ policy:
 
 data:
   train:
-    shuffle: False
-    seed: 420 # unused if shuffle is False
-    jsonl_path: ...
+    shuffle: True
+    seed: 42
+    jsonl_path: "data/bfcl_train.jsonl"
 
-    # checks if it's too long on init
     filter_long_samples: false
     drop_last: True
 
   val:
     shuffle: False
-    seed: 420 # unused if shuffle is False
-    jsonl_path: ...
+    seed: 42
+    jsonl_path: "data/bfcl_train.jsonl"
     drop_last: False
 
-    # checks if it's too long on init
     filter_long_samples: false
 
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
 
 env:
   math:
-    enable: true
+    enable: false
     num_workers: 8
   llm_judge_async: # Configuration for the LlmJudgeAsyncEnvironment
     enable: false
@@ -146,6 +144,9 @@ env:
   ifeval:
     num_workers: 8
     enable: false
+  bfcl:
+    enable: true
+    num_workers: 8
 
 logger:
   log_dir: "logs"  # Base directory for all logs

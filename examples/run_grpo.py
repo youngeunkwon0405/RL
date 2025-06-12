@@ -30,6 +30,7 @@ from nemo_rl.distributed.virtual_cluster import init_ray
 from nemo_rl.environments.llm_judge_async_environment import LLMJudgeAsyncEnvironment
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.environments.ifeval_environment import IFEvalEnvironment
+from nemo_rl.environments.bfcl_environment import BFCLEnvironment
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -177,6 +178,15 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
             },
         ).remote(env_configs["llm_judge_async"])
         task_to_env["llm_judge"] = llm_judge_async_env
+
+    if "bfcl" in env_configs and env_configs["bfcl"]["enable"]:
+        bfcl_env = BFCLEnvironment.options(
+            runtime_env={
+                "py_executable": BFCLEnvironment.DEFAULT_PY_EXECUTABLE,
+                "env_vars": dict(os.environ),
+            },
+        ).remote(env_configs["bfcl"])
+        task_to_env["bfcl"] = bfcl_env
 
     return train_ds, val_ds, task_to_env, task_to_env
 
