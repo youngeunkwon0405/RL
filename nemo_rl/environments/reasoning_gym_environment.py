@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List, Optional, Tuple, TypedDict, Any
+from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
 import ray
 import torch
@@ -31,9 +31,8 @@ except ImportError:  # pragma: no cover
 
 class ReasoningGymEnvConfig(TypedDict):
     """Configuration for the Reasoning Gym environment."""
+
     num_workers: int
-
-
 
 
 @ray.remote
@@ -65,10 +64,10 @@ class _ReasoningGymWorker:
                 continue
 
             score_fn = self._get_score_answer_fn(dataset_name)
-            assert 'ground_truth' in meta, f"ground_truth not found in meta: {meta}"
+            assert "ground_truth" in meta, f"ground_truth not found in meta: {meta}"
             entry = {}
-            entry['answer'] = meta['ground_truth']
-            entry['metadata'] = meta
+            entry["answer"] = meta["ground_truth"]
+            entry["metadata"] = meta
             score = score_fn(response, entry)
             results.append(float(score))
 
@@ -110,7 +109,6 @@ class ReasoningGymEnvironment(EnvironmentInterface):
                 assistant, environment) messages.
             metadata: List of metadata objects one per prompt used by reasoning gym grader.
         """
-
         assistant_response_batch: List[str] = []
         for conversation in message_log_batch:
             # There may be multiple assistant messages (multi-turn). We join
