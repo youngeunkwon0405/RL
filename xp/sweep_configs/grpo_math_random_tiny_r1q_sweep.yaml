@@ -1,0 +1,29 @@
+# Sample sweep configuration for GRPO math experiments
+# Each parameter can have a list of values to sweep over
+# The launcher will generate all possible combinations
+
+# Required parameter that must match the target script name
+script_path: "examples/run_grpo_math.py"
+
+# Optional: Path to the base YAML config file
+# Can be overridden by the --config command-line argument
+# If null and --config is not provided, no base config will be used
+config_path: "examples/configs/grpo-deepscaler-1.5b-8K.yaml" 
+
+# Cluster configuration
+cluster.num_nodes: [8]
+
+# Model configuration
+policy.model_name: ["deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"]
+
+# Top P Variance
+grpo.top_p_std: [0.2, 1.0]
+
+# Random Entropy Mask
+grpo.random_entropy_mask: [true]
+
+# Training and Validation Dataset
+data.dataset_name: ["DAPOMath"]
+grpo.val_batch_size: [32]
+grpo.max_val_samples: [480] # 480 = 30 * 16, fit everything in one batch
+grpo.val_period: [10]
