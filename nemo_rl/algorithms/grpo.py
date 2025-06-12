@@ -484,6 +484,33 @@ def grpo_train(
                 )
                 policy_generation.finish_generation()
 
+            # get dataset specific pass at k
+            prompt_based_reward_dict = defaultdict(list)
+            idx_dictionary = defaultdict(list)
+            for dataset, r, idx in zip(
+                repeated_batch["dataset_names"],
+                repeated_batch["total_reward"],
+                repeated_batch["idx"],
+            ):
+                prompt_based_reward_dict[dataset].append(r)
+                idx_dictionary[dataset].append(idx)
+
+            for dataset, idx in idx_dictionary.items():
+                idx_tensor = torch.as_tensor(idx).view(
+                    -1, master_config["grpo"]["num_generations_per_prompt"]
+                )
+                assert torch.allclose(
+                    idx_tensor.unique(dim=-1).flatten(), idx_tensor[:, 0].flatten()
+                ), f"idx is not unique for dataset {dataset}"
+
+            for dataset, rewards in prompt_based_reward_dict.items():
+                rewards_tensor = torch.as_tensor(rewards, dtype=torch.float32).view(
+                    -1, master_config["grpo"]["num_generations_per_prompt"]
+                )
+                rollout_metrics[
+                    f"{dataset}/pass_at_{master_config['grpo']['num_generations_per_prompt']}"
+                ] = (rewards_tensor > 0).any(-1).float().mean()
+
             # Calculate rewards & advantages
             print("▶ Processing rewards...")
             with timer.time("reward_calculation"):

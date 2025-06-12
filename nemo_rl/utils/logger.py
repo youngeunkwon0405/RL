@@ -652,8 +652,30 @@ class Logger(LoggerInterface):
         if not isinstance(to_log, BatchedDataDict):
             to_log = BatchedDataDict(to_log)
 
+        unique_datasets = list(set(to_log["dataset_names"]))
+
         if self.wandb_logger is None:
             return
+
+        table = None
+
+        for dataset in unique_datasets:
+            dataset_idx = to_log["dataset_names"].index(dataset)
+
+            content = to_log["content"][dataset_idx]
+            reward = to_log["rewards"][dataset_idx]
+
+            table = self.log_table_contents(
+                step,
+                content[0],
+                content[1],
+                content[2],
+                reward,
+                dataset,
+                prefix,
+            )
+
+        return table
 
         # Write to JSONL file
         for _, sample in enumerate(to_log.make_microbatch_iterator(1)):
