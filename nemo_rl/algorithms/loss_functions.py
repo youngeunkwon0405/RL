@@ -306,7 +306,7 @@ class RandomMaskClippedPGLossFn(ClippedPGLossFn):
         data: BatchedDataDict[ClippedPGLossDataDict],
         global_valid_seqs: torch.Tensor,
         global_valid_toks: torch.Tensor,
-    ) -> Tuple[torch.Tensor, dict]:
+    ) -> tuple[torch.Tensor, dict]:
         data = self.random_mask(data)
         return super().__call__(
             next_token_logits, data, global_valid_seqs, global_valid_toks
