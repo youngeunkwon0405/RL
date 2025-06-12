@@ -1,5 +1,6 @@
 # GRPO Algorithm Configuration
 grpo:
+  random_mask_prob: 0.0
   num_prompts_per_step: 128
   num_generations_per_prompt: 8
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
@@ -20,6 +21,7 @@ loss_fn:
   use_on_policy_kl_approximation: false
   use_importance_sampling_correction: false
   token_level_loss: true
+  random_mask_prob: ${grpo.random_mask_prob}
 
 checkpointing:
   enabled: true

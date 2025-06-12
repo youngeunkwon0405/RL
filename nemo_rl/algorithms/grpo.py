@@ -26,6 +26,9 @@ from nemo_rl.algorithms.loss_functions import (
     ClippedPGLossConfig,
     ClippedPGLossDataDict,
     ClippedPGLossFn,
+    RandomMaskClippedPGLossConfig,
+    RandomMaskClippedPGLossFn,
+    RandomMaskClippedPGLossDataDict,
 )
 from nemo_rl.algorithms.utils import calculate_baseline_and_std_per_prompt
 from nemo_rl.data import DataConfig
@@ -101,8 +104,8 @@ class GRPOLoggerConfig(LoggerConfig):
 
 class MasterConfig(TypedDict):
     policy: PolicyConfig
-    loss_fn: ClippedPGLossConfig
     env: dict[str, Any]
+    loss_fn: ClippedPGLossConfig | RandomMaskClippedPGLossConfig
     data: DataConfig
     grpo: GRPOConfig
     logger: GRPOLoggerConfig
@@ -126,7 +129,7 @@ def setup(
     Tuple[RayVirtualCluster, RayVirtualCluster],
     StatefulDataLoader,
     Optional[StatefulDataLoader],
-    ClippedPGLossFn,
+    ClippedPGLossFn | RandomMaskClippedPGLossFn,
     Logger,
     CheckpointManager,
     GRPOSaveState,
@@ -350,7 +353,11 @@ def setup(
         # wait for all futures to complete
         ray.get(futures_train + futures_inference)
 
-    loss_fn = ClippedPGLossFn(loss_config)
+    loss_fn = (
+        ClippedPGLossFn(loss_config)
+        if "random_mask_prob" not in loss_config or loss_config["random_mask_prob"] == 1.0
+        else RandomMaskClippedPGLossFn(loss_config)
+    )
 
     print("\n" + "=" * 60)
     print(" " * 18 + "SETUP COMPLETE")
@@ -591,7 +598,7 @@ def grpo_train(
                 )
 
                 # Create training data from flattened messages
-                train_data = BatchedDataDict[ClippedPGLossDataDict](
+                train_data = BatchedDataDict[ClippedPGLossDataDict | RandomMaskClippedPGLossDataDict](
                     {
                         "input_ids": flat_messages["token_ids"],
                         "input_lengths": input_lengths,
@@ -623,6 +630,9 @@ def grpo_train(
 
             print("▶ Training policy...")
             with timer.time("policy_training"):
+                if "random_mask_prob" in master_config["grpo"] and master_config["grpo"]["random_mask_prob"] < 1.0:
+                    train_data = train_data.repeat_interleave(int(1 / master_config["grpo"]["random_mask_prob"]))
+                list_of_train_metrics = policy.train(train_data, loss_fn)
                 train_results = policy.train(train_data, loss_fn)
 
             is_last_step = step + 1 == min(

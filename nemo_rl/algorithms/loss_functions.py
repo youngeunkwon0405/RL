@@ -51,6 +51,14 @@ class ClippedPGLossDataDict(TypedDict):
     __extra__: Any
 
 
+class RandomMaskClippedPGLossConfig(ClippedPGLossConfig):
+    random_mask_prob: float
+
+
+class RandomMaskClippedPGLossDataDict(ClippedPGLossDataDict):
+    pass
+
+
 class ClippedPGLossFn(LossFunction):
     """Generalized Clipped Policy Gradient loss function w/ KL regularization.
 
@@ -280,6 +288,28 @@ class ClippedPGLossFn(LossFunction):
                 "num_valid_samples": sample_mask.sum().item(),
                 "approx_entropy": seq_entropy_approx.item(),
             },
+        )
+
+class RandomMaskClippedPGLossFn(ClippedPGLossFn):
+    def __init__(self, cfg: RandomMaskClippedPGLossConfig):
+        super().__init__(cfg)
+        self.random_mask_prob = cfg["random_mask_prob"]
+
+    def random_mask(self, data: BatchedDataDict[ClippedPGLossDataDict]):
+        mask = torch.rand_like(data["token_mask"].float()) < self.random_mask_prob
+        data["token_mask"] = data["token_mask"] * mask
+        return data
+
+    def __call__(
+        self,
+        next_token_logits: torch.Tensor,
+        data: BatchedDataDict[ClippedPGLossDataDict],
+        global_valid_seqs: torch.Tensor,
+        global_valid_toks: torch.Tensor,
+    ) -> Tuple[torch.Tensor, dict]:
+        data = self.random_mask(data)
+        return super().__call__(
+            next_token_logits, data, global_valid_seqs, global_valid_toks
         )
 
 
