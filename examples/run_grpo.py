@@ -247,7 +247,6 @@ def main():
         grpo_state,
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
-    breakpoint()
     grpo_train(
         policy,
         policy_generation,

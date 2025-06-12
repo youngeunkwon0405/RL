@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Dict, List, Optional, Tuple, TypedDict
+from typing import Dict, List, Optional, Tuple, TypedDict, Any
 
 import ray
 import torch
@@ -31,19 +31,9 @@ except ImportError:  # pragma: no cover
 
 class ReasoningGymEnvConfig(TypedDict):
     """Configuration for the Reasoning Gym environment."""
-
     num_workers: int
 
 
-class ReasoningGymEnvironmentMetadata(TypedDict, total=False):
-    """Metadata expected by the environment.
-
-    The metadata comes directly from the dataset sample. At a minimum it must
-    contain the keys required by `reasoning_gym.get_score_answer_fn`.
-    """
-
-    source_dataset: str  # Name of the Reasoning Gym dataset (e.g. "letter_jumble")
-    ground_truth: str  # Ground-truth answer
 
 
 @ray.remote
@@ -53,7 +43,7 @@ class _ReasoningGymWorker:
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
 
     def __init__(self):
-        if get_score_answer_fn is None:  # pragma: no cover
+        if get_score_answer_fn is None:
             raise ImportError(
                 "Failed to import `reasoning_gym`. Please make sure the package is installed."
             )
@@ -63,7 +53,7 @@ class _ReasoningGymWorker:
     def verify(
         self,
         pred_responses: List[str],
-        metadatas: List[ReasoningGymEnvironmentMetadata],
+        metadatas: List[Dict[str, Any]],
     ) -> List[float]:
         """Return a float reward for every prediction."""
         results: List[float] = []
@@ -75,8 +65,11 @@ class _ReasoningGymWorker:
                 continue
 
             score_fn = self._get_score_answer_fn(dataset_name)
-
-            score = score_fn(response, meta)
+            assert 'ground_truth' in meta, f"ground_truth not found in meta: {meta}"
+            entry = {}
+            entry['answer'] = meta['ground_truth']
+            entry['metadata'] = meta
+            score = score_fn(response, entry)
             results.append(float(score))
 
         return results
@@ -87,10 +80,6 @@ class ReasoningGymEnvironment(EnvironmentInterface):
     """Environment used for tasks from the Reasoning Gym benchmark."""
 
     DEFAULT_PY_EXECUTABLE = PY_EXECUTABLES.SYSTEM
-
-    # ------------------------------------------------------------------
-    # Initialization / Shutdown
-    # ------------------------------------------------------------------
 
     def __init__(self, cfg: ReasoningGymEnvConfig):
         self.cfg = cfg
@@ -111,7 +100,7 @@ class ReasoningGymEnvironment(EnvironmentInterface):
     def step(
         self,
         message_log_batch: List[List[Dict[str, str]]],
-        metadata: List[ReasoningGymEnvironmentMetadata],
+        metadata: List[Dict[str, Any]],
     ) -> EnvironmentReturn:
         """Compute rewards for a batch of conversations.
 
@@ -119,9 +108,9 @@ class ReasoningGymEnvironment(EnvironmentInterface):
             message_log_batch: A batch of chat transcripts. Each element is the
                 full message log for a single prompt, containing (user,
                 assistant, environment) messages.
-            metadata: List of metadata objects – one per prompt – forwarded
-                unchanged from the dataset.
+            metadata: List of metadata objects one per prompt used by reasoning gym grader.
         """
+
         assistant_response_batch: List[str] = []
         for conversation in message_log_batch:
             # There may be multiple assistant messages (multi-turn). We join
