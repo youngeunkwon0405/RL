@@ -630,9 +630,8 @@ def grpo_train(
 
             print("▶ Training policy...")
             with timer.time("policy_training"):
-                if "random_mask_prob" in master_config["grpo"] and master_config["grpo"]["random_mask_prob"] < 1.0:
+                if "random_mask_prob" in master_config["grpo"] and master_config["grpo"]["random_mask_prob"] < 1.0 and master_config["grpo"]["enlarge_train_data"]:
                     train_data = train_data.repeat_interleave(int(1 / master_config["grpo"]["random_mask_prob"]))
-                list_of_train_metrics = policy.train(train_data, loss_fn)
                 train_results = policy.train(train_data, loss_fn)
 
             is_last_step = step + 1 == min(
