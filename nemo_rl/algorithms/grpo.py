@@ -414,7 +414,7 @@ def grpo_train(
             POLICY_GENERATION_STALE = False
         else:
             policy_generation.prepare_for_generation()
-        val_metrics, validation_timings, _ = validate(
+        val_metrics, validation_timings, _, val_batch = validate(
             policy_generation,
             val_dataloader,
             tokenizer,
@@ -423,8 +423,17 @@ def grpo_train(
             master_config=master_config,
             logger=logger,
             num_repeats=master_config["grpo"]["num_val_repeats"],
+            return_val_batch=True,
         )
         policy_generation.finish_generation()
+
+        policy.prepare_for_training()
+        val_entropy = policy.get_entropy(val_batch)["entropy"]
+        tok_mask = val_batch["token_mask"][:, 1:]
+        val_entropy = (val_entropy * tok_mask).sum() / tok_mask.sum()
+        val_metrics["entropy"] = val_entropy.item()
+        policy.offload_after_refit()
+
         logger.log_metrics(val_metrics, step, prefix="validation")
         logger.log_metrics(validation_timings, step, prefix="timing/validation")
 
@@ -679,7 +688,7 @@ def grpo_train(
                     POLICY_GENERATION_STALE = False
                 else:
                     policy_generation.prepare_for_generation()
-                val_metrics, validation_timings, _ = validate(
+                val_metrics, validation_timings, _, val_batch = validate(
                     policy_generation,
                     val_dataloader,
                     tokenizer,
@@ -688,8 +697,17 @@ def grpo_train(
                     master_config=master_config,
                     logger=logger,
                     num_repeats=master_config["grpo"]["num_val_repeats"],
+                    return_val_batch=True,
                 )
                 policy_generation.finish_generation()
+
+                policy.prepare_for_training()
+                val_entropy = policy.get_entropy(val_batch)["entropy"]
+                tok_mask = val_batch["token_mask"][:, 1:]
+                val_entropy = (val_entropy * tok_mask).sum() / tok_mask.sum()
+                val_metrics["entropy"] = val_entropy.item()
+                policy.offload_after_refit()
+
                 logger.log_metrics(
                     validation_timings, step + 1, prefix="timing/validation"
                 )
@@ -797,6 +815,7 @@ def validate(
     logger: Optional[Logger] = None,
     num_repeats: int = 1,
     return_data_for_saving: bool = False,
+    return_val_batch: bool = False,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
@@ -808,7 +827,6 @@ def validate(
         print(f"▶ Starting validation at step {step}...")
 
         total_rewards = []
-        total_lengths = []
         all_message_logs = []  # Collect all message logs
 
         data_for_saving = []
@@ -939,4 +957,32 @@ def validate(
 
     # Make sure to reset the timer after validation
     timer.reset()
-    return val_metrics, timing_metrics, data_for_saving
+    if return_val_batch:
+        # add token loss mask
+        for i, message_log in enumerate(val_batch["message_log"]):
+            for j, message in enumerate(message_log):
+                if message["role"] == "assistant":
+                    message["token_loss_mask"] = torch.ones_like(message["token_ids"])
+                else:
+                    message["token_loss_mask"] = torch.zeros_like(message["token_ids"])
+
+        flat_messages, input_lengths = batched_message_log_to_flat_message(
+            val_batch["message_log"],
+            pad_value_dict={"token_ids": tokenizer.pad_token_id},
+            make_sequence_length_divisible_by=master_config["policy"][
+                "make_sequence_length_divisible_by"
+            ],
+        )
+
+        # Create training data from flattened messages
+        val_data = BatchedDataDict[ClippedPGLossDataDict](
+            {
+                "input_ids": flat_messages["token_ids"],
+                "input_lengths": input_lengths,
+                "token_mask": flat_messages["token_loss_mask"],
+            }
+        )
+        val_data.to("cpu")
+        return val_metrics, timing_metrics, data_for_saving, val_data
+    else:
+        return val_metrics, timing_metrics, data_for_saving

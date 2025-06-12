@@ -643,7 +643,6 @@ class Logger(LoggerInterface):
         self.wandb_tables_df[prefix] = pd.concat(
             [self.wandb_tables_df[prefix], pd.DataFrame([new_row])], ignore_index=True
         )
-
         return wandb.Table(dataframe=self.wandb_tables_df[prefix])
 
     def log_batched_dict_as_table(
@@ -676,23 +675,6 @@ class Logger(LoggerInterface):
             )
 
         return table
-
-        # Write to JSONL file
-        for _, sample in enumerate(to_log.make_microbatch_iterator(1)):
-            for key, value in sample.items():
-                if isinstance(value, torch.Tensor):
-                    sample[key] = value.tolist()
-
-                content = sample["content"][0]
-                return self.log_table_contents(
-                    step,
-                    content[0],
-                    content[1],
-                    content[2],
-                    sample["rewards"][0],
-                    sample["dataset_names"][0],
-                    prefix,
-                )
 
     def __del__(self):
         """Clean up resources when the logger is destroyed."""
