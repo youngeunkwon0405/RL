@@ -375,15 +375,20 @@ class DTensorPolicyWorker:
                         # For right-padded sequence, set 1s at the beginning of the sequence
                         attention_mask[i, :length] = 1
 
+                    # explicitly create position ids for the input, otherwise the sharding
+                    # for DTensor will be incorrect
+                    position_ids = torch.arange(seq_len, device=input_ids.device).repeat(
+                        batch_size, 1
+                    )
+
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
+                        # DTensor requires the casual attention kernel to hit,
+                        # yet our attention mask above is not always all 1s
+                        # this is fine because we mask with the actual attention mask
+                        # later, but for input it has to be all 1s
                         attention_mask_input_all_ones = torch.ones(
-                            (batch_size, seq_len),
-                            dtype=torch.long,
-                            device=input_ids.device,
+                            (batch_size, seq_len), dtype=torch.long, device=input_ids.device
                         )
-                        position_ids = torch.arange(
-                            seq_len, device=input_ids.device
-                        ).repeat(batch_size, 1)
 
                         outputs = self.model(
                             input_ids=input_ids,

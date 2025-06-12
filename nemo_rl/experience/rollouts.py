@@ -76,10 +76,12 @@ def generate_responses(
     for i, (text, input_length, total_length) in enumerate(
         zip(generated_texts, input_lengths, unpadded_sequence_lengths)
     ):
+        output_ids_slice = generation_outputs["output_ids"][i, input_length:total_length]
+        
         message = {
             "role": "assistant",
             "content": text,
-            "token_ids": generation_outputs["output_ids"][i, input_length:total_length],
+            "token_ids": output_ids_slice,
         }
 
         if include_logprobs and "logprobs" in generation_outputs:
@@ -280,7 +282,7 @@ def run_multi_turn_rollout(
             active_input_lengths,
             greedy=greedy,
         )
-
+        
         # Record token usage - assistant
         for i, global_idx in enumerate(active_indices.tolist()):
             sample_assistant_token_counts[global_idx] += len(generated_ids[i])

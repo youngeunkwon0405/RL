@@ -1,0 +1,15 @@
+#!/bin/bash
+#SBATCH --nodes=1
+#SBATCH --account=llmservice_modelalignment_ppo
+#SBATCH --job-name=convert_checkpoints_hs3_max_len
+#SBATCH --partition=batch_block1,batch_block2,batch_block3,batch_block4
+#SBATCH --time=2:0:0
+#SBATCH --gres=gpu:1
+#SBATCH --output=/lustre/fs12/portfolios/llmservice/users/abukharin/reasoning/alignment/reward_model/results/hs3_max_len_8192_normalize_False_lr_1e-6_temp_1.0_kl_0.0_clip_min_0.2_clip_max_0.28_pps_16_rpp_4_tbsz_64/conversion_logs/convert_%j.out
+#SBATCH --error=/lustre/fs12/portfolios/llmservice/users/abukharin/reasoning/alignment/reward_model/results/hs3_max_len_8192_normalize_False_lr_1e-6_temp_1.0_kl_0.0_clip_min_0.2_clip_max_0.28_pps_16_rpp_4_tbsz_64/conversion_logs/convert_%j.err
+
+# Load environment
+export HF_HOME=/lustre/fs12/portfolios/llmservice/users/abukharin/hf_home
+
+# Run the conversion command
+eval "${COMMAND}"

@@ -218,15 +218,20 @@ def setup(
     # ==========================
     print("\n▶ Setting up compute cluster...")
     colocated_inference = generation_config["backend"] != "hf"
+    
+    # Use policy_nodes instead of num_nodes to avoid resource conflicts with reward model
+    policy_nodes = cluster_config.get("policy_nodes", cluster_config["num_nodes"])
+    print(f"Allocating {policy_nodes} nodes for policy, leaving {cluster_config['num_nodes'] - policy_nodes} for reward model")
+    
     cluster = RayVirtualCluster(
         name="grpo_policy_cluster",
         bundle_ct_per_node_list=[cluster_config["gpus_per_node"]]
-        * cluster_config["num_nodes"],
+        * policy_nodes,
         use_gpus=True,
         num_gpus_per_node=cluster_config["gpus_per_node"],
         max_colocated_worker_groups=2 if colocated_inference else 1,
     )
-    print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
+    print(f"  ✓ Ray cluster initialized with {policy_nodes} nodes for policy")
 
     # ==========================
     #   Training and Inference
@@ -412,11 +417,13 @@ def grpo_train(
                     master_config["grpo"]["num_generations_per_prompt"]
                 )
                 # Convert LLMMessageLogType to FlatMessagesType for generation
-                batched_flat, input_lengths = batched_message_log_to_flat_message(
-                    repeated_batch["message_log"],
-                    pad_value_dict={"token_ids": tokenizer.pad_token_id},
-                )
-                input_ids = batched_flat["token_ids"]
+                if policy_generation is not None:
+                    batched_flat, input_lengths = batched_message_log_to_flat_message(
+                        repeated_batch["message_log"],
+                        pad_value_dict={"token_ids": tokenizer.pad_token_id},
+                    )
+                    
+                    input_ids = batched_flat["token_ids"]
 
             # Generate responses - this updates the LLMMessageLogType in repeated_batch
             print(f"▶ Generating responses for batch of size {repeated_batch.size}...")
@@ -441,6 +448,7 @@ def grpo_train(
                     max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
                     greedy=False,
                 )
+                
                 policy_generation.finish_generation()
 
             # Calculate rewards & advantages
@@ -556,6 +564,7 @@ def grpo_train(
                         "sample_mask": repeated_batch["loss_multiplier"],
                     }
                 )
+                
                 train_data.to("cpu")
 
             print("▶ Preparing for logprob inference...")

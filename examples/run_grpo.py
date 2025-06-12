@@ -15,21 +15,28 @@
 import argparse
 import os
 import pprint
+import jsonlines
+import time  # Add time import for sleep
 from copy import deepcopy
 from dataclasses import dataclass
+from typing import Dict, List
 
-import jsonlines
-from omegaconf import OmegaConf
+import ray
+import ray.util.scheduling_strategies
+from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer
 
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.data import DataConfig
-from nemo_rl.data.interfaces import DatumSpec
-from nemo_rl.distributed.virtual_cluster import init_ray
+from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.virtual_cluster import init_ray, RayVirtualCluster
 from nemo_rl.environments.llm_judge_async_environment import LLMJudgeAsyncEnvironment
+from nemo_rl.environments.reward_model_env import RewardModelEnvironment
 from nemo_rl.environments.math_environment import MathEnvironment
 from nemo_rl.environments.ifeval_environment import IFEvalEnvironment
+from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.models.generation.interfaces import configure_generation_config
 from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
@@ -177,6 +184,19 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig, env_configs):
             },
         ).remote(env_configs["llm_judge_async"])
         task_to_env["llm_judge"] = llm_judge_async_env
+
+    if "reward_model" in env_configs and env_configs["reward_model"]["enable"]:
+        reward_model_env = RewardModelEnvironment.options(
+            runtime_env={
+                "py_executable": RewardModelEnvironment.DEFAULT_PY_EXECUTABLE,
+                "env_vars": dict(os.environ),
+            },
+        ).remote(env_configs["reward_model"])
+        task_to_env["reward_model"] = reward_model_env
+        # Add sleep to let reward model load before policy starts
+        print("⏳ Waiting 120 seconds for reward model to load...")
+        time.sleep(120)
+        print("✓ Sleep complete, continuing with policy setup")
 
     return train_ds, val_ds, task_to_env, task_to_env
 

@@ -146,7 +146,7 @@ def _pad_tensor(
     pad_side: str,
     pad_value: int = 0,
 ) -> torch.Tensor:
-    """Pad a tensor to the specified length.
+    """Pad a tensor to a specified length.
 
     Args:
         tensor: Tensor to pad
@@ -167,9 +167,12 @@ def _pad_tensor(
         dtype=tensor.dtype,
         device=tensor.device,
     )
-    return torch.cat(
+    
+    result = torch.cat(
         [padding, tensor] if pad_side == "left" else [tensor, padding], dim=0
     )
+    
+    return result
 
 
 def _validate_tensor_consistency(tensors: List[torch.Tensor]) -> None:
@@ -309,6 +312,7 @@ def batched_message_log_to_flat_message(
 
         # Filter out None values and validate consistency
         tensors = [t for t in values if t is not None]
+        
         _validate_tensor_consistency(tensors)
 
         # Create zero tensors for None values
@@ -323,8 +327,12 @@ def batched_message_log_to_flat_message(
 
         # Pad and stack tensors (always right padding)
         pad_value = pad_value_dict.get(key, 0) if pad_value_dict else 0
+        
         padded = [_pad_tensor(t, max_len, "right", pad_value) for t in values]
-        result[key] = torch.stack(padded)
+        
+        stacked = torch.stack(padded)
+        
+        result[key] = stacked
 
     return result, input_lengths_tensor
 

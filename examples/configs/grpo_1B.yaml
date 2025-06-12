@@ -130,22 +130,53 @@ data:
 
 env:
   math:
-    enable: true
-    num_workers: 8
-  llm_judge_async: # Configuration for the LlmJudgeAsyncEnvironment
     enable: false
-    num_workers: 2 # Number of parallel judge workers
-    model_name: "Qwen/Qwen2.5-32B-Instruct" # Judge model
-    tensor_parallel_size: 4 # TP size for the judge model
-    gpu_memory_utilization: 0.85 # For judge model
-    max_model_len: 16384 # Max sequence length for the judge model
-    temperature: 0.0 # Judge temperature (usually lower for more deterministic judging)
-    max_tokens: 512  # Max tokens for the judge's evaluation
-    stop: null # Stop strings for the judge's evaluation
-    max_concurrency: 16 # Maximum concurrent step calls for the environment actor (default: 16)
+    num_workers: 1
+    num_samples_per_worker: 1
+    max_turns: 1
+    max_new_tokens: 512
+    temperature: 1.0
+    top_p: 1.0
+    top_k: null
+    stop_token_ids: null
+    stop_strings: null
+    seed: 42
+    
   ifeval:
-    num_workers: 8
     enable: false
+    num_workers: 1
+    num_samples_per_worker: 1
+    max_turns: 1
+    max_new_tokens: 512
+    temperature: 1.0
+    top_p: 1.0
+    top_k: null
+    stop_token_ids: null
+    stop_strings: null
+    seed: 42
+    
+  llm_judge_async:
+    enable: false  # Disabled for reward model testing
+    num_workers: 1
+    num_samples_per_worker: 1
+    max_turns: 1
+    max_new_tokens: 512
+    temperature: 1.0
+    top_p: 1.0
+    top_k: null
+    stop_token_ids: null
+    stop_strings: null
+    seed: 42
+    
+  reward_model:
+    enable: true
+    num_workers: 1
+    model_name: "nvidia/Llama-3.1-Nemotron-70B-Reward-HF"
+    tensor_parallel_size: 2
+    dtype: "bfloat16"
+    batch_size: 2
+    gpu_memory_utilization: 0.8
+    max_model_len: 4096
 
 logger:
   log_dir: "logs"  # Base directory for all logs
@@ -163,4 +194,6 @@ logger:
 
 cluster:
   gpus_per_node: 8
-  num_nodes: 1
+  num_nodes: 2
+  policy_nodes: 1  # All nodes for policy
+  reward_model_nodes: 1  # Reward model shares same node
