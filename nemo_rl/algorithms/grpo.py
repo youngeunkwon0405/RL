@@ -292,8 +292,16 @@ def refit_policy_generation(
     refit_buffer_size_gb: int,  # GB
 ) -> None:
     """Refit the policy generation interface with the latest policy weights."""
+    import time
+    st = time.time()
+
     policy.offload_before_refit()
     policy_generation.prepare_for_generation(tags=["weights"])
+
+    et = time.time()
+    print(f"[Refit] Total time taken to offload_before_refit and prepare for generation: {et - st}")
+    st = et
+
     # Streaming update weights to save memory
     state_dict_info: list[tuple[str, int]] = policy.prepare_weights_for_ipc()
     # group keys to save time
@@ -322,8 +330,17 @@ def refit_policy_generation(
                 "a problem within the generation backend (e.g., vLLM worker).\n"
             )
             raise RuntimeError(error_message)
+    
+    et = time.time()
+    print(f"[Refit] Total time taken to update weights: {et - st}")
+    st = et
+
     policy.offload_after_refit()
     policy_generation.prepare_for_generation(tags=["kv_cache"])
+
+    et = time.time()
+    print(f"[Refit] Total time taken to offload_after_refit and prepare for generation: {et - st}")
+    st = et
 
 
 # ===============================================================================

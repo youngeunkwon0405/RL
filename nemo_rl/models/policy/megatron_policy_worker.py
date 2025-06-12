@@ -19,7 +19,7 @@ import warnings
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
 from functools import partial
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Optional, List, Tuple
 
 import ray
 import torch
