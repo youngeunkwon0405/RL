@@ -14,6 +14,7 @@
 import json
 import os
 import time
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
@@ -235,9 +236,13 @@ def setup(
     val_dataloader = None
     # If validation is enabled, load the validation dataloader
     if grpo_config["val_period"] > 0 or grpo_config["val_at_start"]:
+        val_batch_size = min(master_config["grpo"]["max_val_samples"], len(val_dataset))
+        if "val_batch_size" in master_config["grpo"]:
+            print("val batch size is specified but we don't actually use it anymore")
+
         val_dataloader = StatefulDataLoader(
             val_dataset,
-            batch_size=grpo_config["val_batch_size"],
+            batch_size=val_batch_size,
             shuffle=shuffle_val,
             collate_fn=rl_collate_fn,
             generator=val_data_generator,
@@ -417,6 +422,7 @@ def grpo_train(
             step=0,
             master_config=master_config,
             logger=logger,
+            num_repeats=master_config["grpo"]["num_val_repeats"],
         )
         policy_generation.finish_generation()
         logger.log_metrics(val_metrics, step, prefix="validation")
@@ -654,6 +660,7 @@ def grpo_train(
                     step=step + 1,
                     master_config=master_config,
                     logger=logger,
+                    num_repeats=master_config["grpo"]["num_val_repeats"],
                 )
                 policy_generation.finish_generation()
                 logger.log_metrics(
@@ -778,88 +785,99 @@ def validate(
         total_lengths = []
         all_message_logs = []  # Collect all message logs
 
-        max_batches = (
-            master_config["grpo"]["max_val_samples"]
-            // master_config["grpo"]["val_batch_size"]
-        )
         data_for_saving = []
 
-        for repeat_idx in range(num_repeats):
-            for batch_idx, val_batch in enumerate(val_dataloader):
-                if batch_idx >= max_batches:
-                    break
+        try:
+            val_batch = next(iter(val_dataloader)).repeat_interleave(num_repeats)
+        except StopIteration:
+            print("  No validation, skipping validation")
+            return
 
-                # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
-                val_batch, gen_metrics = run_multi_turn_rollout(
-                    policy_generation,
-                    val_batch,
-                    tokenizer,
-                    val_task_to_env,
-                    max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
-                    greedy=False,
-                )
+        # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
+        val_batch, gen_metrics = run_multi_turn_rollout(
+            policy_generation,
+            val_batch,
+            tokenizer,
+            val_task_to_env,
+            max_seq_len=master_config["policy"]["max_total_sequence_length"],
+            max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+            greedy=False,
+        )
 
-                rewards = val_batch["total_reward"]
+        # Collect message logs for later display
+        to_env = [
+            get_keys_from_message_log(val_batch["message_log"][i], ["role", "content"])
+            for i in range(len(val_batch["message_log"]))
+        ]
+        all_message_logs.extend(to_env)
 
-                total_rewards.extend(rewards.tolist())
-                total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
+        if return_data_for_saving:
+            # Transpose val_batch from batch-first to sample-first
+            batch_size = val_batch.size
+            repeat_idx_counter = defaultdict(int)
+            for i in range(batch_size):
+                sample_dict = {}
+                for k, v in val_batch.items():
+                    # hack to use the env stuff
+                    if k == "message_log":
+                        v = to_env
 
-                # Collect message logs for later display
-                to_env = [
-                    get_keys_from_message_log(
-                        val_batch["message_log"][i], ["role", "content"]
-                    )
-                    for i in range(len(val_batch["message_log"]))
-                ]
-                all_message_logs.extend(to_env)
+                    val = v[i]
+                    if torch.is_tensor(val):
+                        val = val.item()
+                    sample_dict[k] = val
 
-                if return_data_for_saving:
-                    # Transpose val_batch from batch-first to sample-first
-                    batch_size = val_batch.size
-                    for i in range(batch_size):
-                        sample_dict = {}
-                        for k, v in val_batch.items():
-                            # hack to use the env stuff
-                            if k == "message_log":
-                                v = to_env
+                    if k == "idx":
+                        repeat_idx = repeat_idx_counter[val]
+                        repeat_idx_counter[val] += 1
 
-                            val = v[i]
-                            if torch.is_tensor(val):
-                                val = val.item()
-                            sample_dict[k] = val
+                sample_dict["eval_idx"] = f"{sample_dict['idx']}_{repeat_idx}"
+                data_for_saving.append(sample_dict)
 
-                        sample_dict["eval_idx"] = f"{sample_dict['idx']}_{repeat_idx}"
-                        data_for_saving.append(sample_dict)
+        for interaction in val_batch["message_log"][0]:
+            if interaction["role"] == "user":
+                prompt = interaction["content"]
+            elif interaction["role"] == "assistant":
+                response = interaction["content"]
+            else:
+                environment = interaction["content"]
 
-                if batch_idx == 0:
-                    for interaction in val_batch["message_log"][0]:
-                        if interaction["role"] == "user":
-                            prompt = interaction["content"]
-                        elif interaction["role"] == "assistant":
-                            response = interaction["content"]
-                        else:
-                            environment = interaction["content"]
+        reward = val_batch["total_reward"][0].item()
 
-                    reward = val_batch["total_reward"][0].item()
-
-                    table = None
-                    if logger is not None:
-                        table = logger.log_table_contents(
-                            step, prompt, response, environment, reward, "validation"
-                        )
-
-        # Calculate validation metrics
-        accuracy = sum(total_rewards) / len(total_rewards)
-        avg_length = sum(total_lengths) / len(total_lengths)
+        table = None
+        if logger is not None:
+            # TODO: maybe log it once per dataset or something
+            table = logger.log_table_contents(
+                step, prompt, response, environment, reward, "validation"
+            )
 
         val_metrics = {
-            "accuracy": accuracy,
-            "avg_length": avg_length,
             "table": table,
         }
+        val_metrics.update(gen_metrics)
 
-        # Print sample conversations only once at the end of validation
+        prompt_based_reward_dict = defaultdict(list)
+        idx_dictionary = defaultdict(list)
+        for dataset, r, idx in zip(
+            val_batch["dataset_names"], val_batch["total_reward"], val_batch["idx"]
+        ):
+            prompt_based_reward_dict[dataset].append(r)
+            idx_dictionary[dataset].append(idx)
+
+        for dataset, idx in idx_dictionary.items():
+            idx_tensor = torch.as_tensor(idx).view(-1, num_repeats)
+            assert torch.allclose(
+                idx_tensor.unique(dim=-1).flatten(), idx_tensor[:, 0].flatten()
+            ), f"idx is not unique for dataset {dataset}"
+
+        for dataset, rewards in prompt_based_reward_dict.items():
+            rewards_tensor = torch.as_tensor(rewards, dtype=torch.float32).view(
+                -1, num_repeats
+            )
+            val_metrics[f"{dataset}/pass_at_{num_repeats}"] = (
+                (rewards_tensor > 0).any(-1).float().mean()
+            )
+
         try:
             print_message_log_samples(
                 all_message_logs,
@@ -878,12 +896,6 @@ def validate(
     timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     validation_time = timing_metrics.get("total_validation_time", 0)
 
-    # Print summary of validation results
-    print("\n📊 Validation Results:")
-    print(f"    • Accuracy: {accuracy:.4f}")
-    print(f"    • Average response length: {avg_length:.1f} tokens")
-    print(f"    • Samples processed: {len(total_rewards)}")
-
     # Print timing information
     print("\n  ⏱️  Validation Timing:")
     validation_time = timing_metrics.get("total_validation_time", 0)
@@ -891,5 +903,4 @@ def validate(
 
     # Make sure to reset the timer after validation
     timer.reset()
-
     return val_metrics, timing_metrics, data_for_saving

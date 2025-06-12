@@ -205,6 +205,7 @@ def rl_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
 
     # Extract stop_strings if present
     stop_strings = [datum.get("stop_strings", None) for datum in data_batch]
+    dataset_names = [datum.get("dataset", None) for datum in data_batch]
 
     output = BatchedDataDict(
         message_log=message_log,
@@ -215,6 +216,7 @@ def rl_collate_fn(data_batch: List[DatumSpec]) -> BatchedDataDict:
         idx=idx,
         batch_max_length=batch_max_length,
         stop_strings=stop_strings,
+        dataset_names=dataset_names,
     )
     return output
 
