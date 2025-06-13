@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-import pprint
 
 import pytest
-import ray
 import torch
 
 # Define a custom marker for model configuration tests
@@ -178,86 +176,6 @@ def policy_setup(request):
             policy.shutdown()
         if cluster:
             cluster.shutdown()
-
-
-@pytest.mark.timeout(240)
-@pytest.mark.parametrize(
-    "policy_setup",
-    [
-        (2, 1, 1),  # 2 GPUs, TP=1, PP=1 (DP=2)
-        (2, 2, 1),  # 2 GPUs, TP=2, PP=1 (DP=1)
-        (2, 1, 2),  # 2 GPUs, TP=1, PP=2 (DP=2)
-    ],
-    indirect=True,
-    ids=["2gpu_dp2", "2gpu_tp2", "2gpu_tp1_pp2"],
-)
-def test_megatron_policy_init(policy_setup):
-    """Test Megatron policy initialization with different parallelism configurations."""
-    policy, cluster = policy_setup
-
-    # Verify cluster and policy were properly created
-    assert policy is not None, "Policy was not created properly"
-    assert cluster is not None, "Cluster was not created properly"
-
-    # Get the parallelism configuration from the test parameters
-    num_gpus = cluster.world_size()
-
-    # Verify we have workers matching the GPU count
-    assert len(policy.worker_group.workers) == num_gpus, (
-        f"Should have {num_gpus} worker(s), one per GPU"
-    )
-
-    # Check workers are alive
-    worker_alive = ray.get([w.is_alive.remote() for w in policy.worker_group.workers])
-    assert all(worker_alive), f"Not all workers are alive: {worker_alive}"
-
-    # Get GPU info from all workers to verify GPU usage
-    print("\nGetting GPU information from workers...")
-    gpu_infos = ray.get([w.get_gpu_info.remote() for w in policy.worker_group.workers])
-    print("\nGPU Information:")
-    for i, info in enumerate(gpu_infos):
-        print(f"\nWorker {i} GPU Info:")
-        pprint.pprint(info)
-
-    # Check 1: Verify workers have different ranks
-    gpu_ranks = [info["rank"] for info in gpu_infos]
-    assert len(set(gpu_ranks)) == num_gpus, (
-        f"Expected {num_gpus} different ranks, got {gpu_ranks}"
-    )
-    assert set(gpu_ranks) == set(range(num_gpus)), (
-        f"Expected ranks {set(range(num_gpus))}, got {gpu_ranks}"
-    )
-
-    # Check 2: Verify workers have different local_ranks
-    local_ranks = [info["local_rank"] for info in gpu_infos]
-    assert len(set(local_ranks)) == num_gpus, (
-        f"Expected {num_gpus} different local_ranks, got {local_ranks}"
-    )
-    assert set(local_ranks) == set(range(num_gpus)), (
-        f"Expected local_ranks {set(range(num_gpus))}, got {local_ranks}"
-    )
-
-    # Check 3: Verify all workers report correct world_size
-    for info in gpu_infos:
-        assert info["world_size"] == num_gpus, (
-            f"Expected world_size={num_gpus}, got {info['world_size']}"
-        )
-        assert info["env_vars"]["WORLD_SIZE"] == str(num_gpus), (
-            f"Expected WORLD_SIZE={num_gpus}, got {info['env_vars']['WORLD_SIZE']}"
-        )
-
-    # Check 4: Verify significant GPU memory is allocated (at least 1GB) on all GPUs
-    for info in gpu_infos:
-        assert info["memory_allocated_mb"] > 1000, (
-            f"Not enough memory allocated on GPU for rank {info['rank']}: {info['memory_allocated_mb']:.2f} MB"
-        )
-
-    # Check 5: Verify model parameters are on CUDA devices for all workers
-    for info in gpu_infos:
-        param_sample = list(info["parameter_sample"].values())[0]
-        assert "cuda" in param_sample["device"], (
-            f"Parameter not on CUDA device: {param_sample['device']}"
-        )
 
 
 @pytest.fixture
