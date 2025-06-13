@@ -1021,12 +1021,14 @@ class MegatronPolicyWorker:
         # Get device UUID using NVML
         return get_device_uuid(device_idx)
 
-    def prepare_weights_for_ipc(self):
+    def prepare_weights_for_ipc(self) -> tuple[list[tuple[str, int]], float]:
         """Prepare Megatron model weights for IPC transfer to vLLM.
 
         Collects information about weight tensors (names and sizes).
         Returns a list of (parameter_name, size_in_bytes) tuples.
         """
+        from nemo_rl.utils.nvml import get_free_memory_bytes
+
         no_grad = torch.no_grad()
         no_grad.__enter__()
         # Ensure model is in evaluation mode
@@ -1116,7 +1118,15 @@ class MegatronPolicyWorker:
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         no_grad.__exit__(None, None, None)
 
-        return param_info
+        # Collect current available memory for refit
+        ## Get current device index from torch
+        device_idx = torch.cuda.current_device()
+        ## Get device free memory using NVML
+        total_available_bytes = get_free_memory_bytes(device_idx)
+        ## Use 80% of the free memory for safety
+        total_available_bytes *= 0.8
+
+        return param_info, total_available_bytes
 
     # Temporary fix, 'keys' is a kwarg due to some sort of ray bug
     def get_weights_ipc_handles(self, keys: list[str] = None) -> dict[str, Any]:
