@@ -46,11 +46,11 @@ class VllmInternalWorkerExtension:
 
         return get_device_uuid(self.device.index)
 
-    def update_weights_from_ipc_handles(self, data):
+    def update_weights_from_ipc_handles(self, ipc_handles):
         """Update weights from IPC handles.
 
         Args:
-            data (dict): Dictionary mapping device UUIDs to parameter IPC handles.
+            ipc_handles (dict): Dictionary mapping device UUIDs to parameter IPC handles.
 
         Returns:
             bool: True if weights were successfully updated.
@@ -58,7 +58,7 @@ class VllmInternalWorkerExtension:
         try:
             # Get handles for this device
             device_uuid = self.report_device_id()
-            handles = data[device_uuid]
+            handles = ipc_handles[device_uuid]
             device_id = self.device.index
             weights = []
 
