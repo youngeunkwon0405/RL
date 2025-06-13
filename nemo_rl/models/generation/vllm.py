@@ -1510,7 +1510,7 @@ class VllmGeneration(GenerationInterface):
             # Directly pass ipc_handles to the method
             futures = self.worker_group.run_all_workers_multiple_data(
                 method_name,
-                ipc_handles=ipc_handles_list,
+                ipc_handles_list,
                 run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
             )
             # Wait for all futures to complete
