@@ -84,8 +84,8 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             worker_builder_cls = (
                 "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker"
             )
-            tp_size = config["megatron_cfg"]["tensor_parallel_size"]
-            pp_size = config["megatron_cfg"]["pipeline_parallel_size"]
+            tp_size = config["megatron_cfg"]["tensor_model_parallel_size"]
+            pp_size = config["megatron_cfg"]["pipeline_model_parallel_size"]
             cp_size = config["megatron_cfg"]["context_parallel_size"]
             training_backend = "megatron"
         else:
