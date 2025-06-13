@@ -68,7 +68,14 @@ class PolicyInterface(ABC):
         pass
 
     @abstractmethod
-    def train(self, data: BatchedDataDict, loss_fn: LossFunction) -> dict[str, Any]:
+    def train(
+        self,
+        data: BatchedDataDict,
+        loss_fn: LossFunction,
+        eval_mode: bool = False,
+        gbs: int | None = None,
+        mbs: int | None = None,
+    ) -> dict[str, Any]:
         """Train the policy on a global batch of data.
 
         Args:
@@ -78,6 +85,10 @@ class PolicyInterface(ABC):
 
     @abstractmethod
     def prepare_for_training(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    @abstractmethod
+    def prepare_for_lp_inference(self, *args: Any, **kwargs: Any) -> None:
         pass
 
     @abstractmethod

@@ -21,6 +21,7 @@ from transformers import AutoModelForCausalLM
 from nemo_rl.algorithms.utils import get_tokenizer
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
+from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.utils.native_checkpoint import (
     ModelState,
@@ -32,7 +33,7 @@ from nemo_rl.utils.native_checkpoint import (
 from tests.unit.test_utils import SimpleLoss
 
 # Define basic test config
-simple_policy_config = {
+simple_policy_config: PolicyConfig = {
     "model_name": "Qwen/Qwen3-0.6B",  # "hf-internal-testing/tiny-random-Gemma3ForCausalLM",
     "tokenizer": {
         "name": "Qwen/Qwen3-0.6B",

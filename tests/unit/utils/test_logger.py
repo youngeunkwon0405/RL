@@ -21,6 +21,7 @@ import torch
 
 from nemo_rl.utils.logger import (
     Logger,
+    LoggerConfig,
     RayGpuMonitorLogger,
     TensorboardLogger,
     WandbLogger,
@@ -711,7 +712,7 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         monitor.is_running = True
 
         # Create a flag to only run one iteration
-        monitor.iteration_done = False
+        monitor.iteration_done = False  # ty: ignore[unresolved-attribute]
 
         def side_effect():
             if not monitor.iteration_done:
@@ -892,20 +893,21 @@ class TestLogger:
     @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_init_both_loggers(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test initialization with both loggers enabled."""
-        cfg = {
+        cfg: LoggerConfig = {
             "wandb_enabled": True,
             "tensorboard_enabled": True,
             "monitor_gpus": False,
-            "wandb": {"project": "test-project"},
+            "wandb": {"project": "test-project", "name": "test-run"},
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
+            "gpu_monitoring": {"collection_interval": 10.0, "flush_interval": 10.0},
         }
         logger = Logger(cfg)
 
         assert len(logger.loggers) == 2
         mock_wandb_logger.assert_called_once()
         wandb_cfg = mock_wandb_logger.call_args[0][0]
-        assert wandb_cfg == {"project": "test-project"}
+        assert wandb_cfg == {"project": "test-project", "name": "test-run"}
 
         mock_tb_logger.assert_called_once()
         tb_cfg = mock_tb_logger.call_args[0][0]
@@ -915,13 +917,14 @@ class TestLogger:
     @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_log_metrics(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test logging metrics to all enabled loggers."""
-        cfg = {
+        cfg: LoggerConfig = {
             "wandb_enabled": True,
             "tensorboard_enabled": True,
             "monitor_gpus": False,
-            "wandb": {"project": "test-project"},
+            "wandb": {"project": "test-project", "name": "test-run"},
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
+            "gpu_monitoring": {"collection_interval": 10.0, "flush_interval": 10.0},
         }
         logger = Logger(cfg)
 
@@ -941,13 +944,14 @@ class TestLogger:
     @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_log_hyperparams(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test logging hyperparameters to all enabled loggers."""
-        cfg = {
+        cfg: LoggerConfig = {
             "wandb_enabled": True,
             "tensorboard_enabled": True,
             "monitor_gpus": False,
-            "wandb": {"project": "test-project"},
+            "wandb": {"project": "test-project", "name": "test-run"},
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
+            "gpu_monitoring": {"collection_interval": 10.0, "flush_interval": 10.0},
         }
         logger = Logger(cfg)
 
@@ -969,7 +973,7 @@ class TestLogger:
         self, mock_gpu_monitor, mock_tb_logger, mock_wandb_logger, temp_dir
     ):
         """Test initialization with GPU monitoring enabled."""
-        cfg = {
+        cfg: LoggerConfig = {
             "wandb_enabled": True,
             "tensorboard_enabled": True,
             "monitor_gpus": True,
@@ -977,7 +981,7 @@ class TestLogger:
                 "collection_interval": 15.0,
                 "flush_interval": 45.0,
             },
-            "wandb": {"project": "test-project"},
+            "wandb": {"project": "test-project", "name": "test-run"},
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
         }

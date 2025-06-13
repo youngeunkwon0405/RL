@@ -29,7 +29,6 @@ from nemo_rl.algorithms.loss_functions import (
 from nemo_rl.algorithms.utils import set_seed
 from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset, dpo_collate_fn
-from nemo_rl.data.interfaces import TaskDataSpec
 from nemo_rl.distributed.virtual_cluster import ClusterConfig, RayVirtualCluster
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.hf_policy import HfPolicy
@@ -100,10 +99,10 @@ def setup(
     StatefulDataLoader,
     StatefulDataLoader,
     DPOLossFn,
-    MasterConfig,
     Logger,
-    TaskDataSpec,
-    DPOSaveState,
+    CheckpointManager,
+    DPOSaveState | None,
+    MasterConfig,
 ]:
     """Main entry point for running DPO algorithm.
 

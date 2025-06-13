@@ -15,7 +15,7 @@ import importlib
 import os
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional, Union
+from typing import Any, Optional, Sequence, Union
 
 import ray
 from ray.util.placement_group import PlacementGroup
@@ -643,7 +643,9 @@ class RayWorkerGroup:
     def run_all_workers_sharded_data(
         self,
         method_name: str,
-        data: Iterable[SlicedDataDict],  # arbitrary nested iterables of SlicedDataDicts
+        data: Sequence[
+            SlicedDataDict
+        ],  # must be random-access (e.g., list or tuple) of SlicedDataDicts
         in_sharded_axes: list[str] | None = None,
         replicate_on_axes: list[str] | None = None,
         output_is_replicated: list[str] | None = None,

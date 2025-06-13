@@ -197,6 +197,12 @@ class GenerationOutputSpec(TypedDict):
 class GenerationInterface(ABC):
     """Abstract base class defining the interface for RL policies."""
 
+    @property
+    @abstractmethod
+    def cfg(self) -> GenerationConfig:
+        """Configuration dictionary for the generation model."""
+        pass
+
     @abstractmethod
     def init_collective(
         self, ip: str, port: int, world_size: int
@@ -206,6 +212,12 @@ class GenerationInterface(ABC):
 
     @abstractmethod
     def generate(
+        self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
+    ) -> BatchedDataDict["GenerationOutputSpec"]:
+        pass
+
+    @abstractmethod
+    def generate_async(
         self, data: BatchedDataDict["GenerationDatumSpec"], greedy: bool
     ) -> BatchedDataDict["GenerationOutputSpec"]:
         pass

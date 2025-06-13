@@ -162,3 +162,11 @@ convention = "google"
 "*_test.py" = ["D"]
 # Ignore F401 (import but unused) in __init__.py
 "__init__.py" = ["F401"]
+
+[tool.ty.rules]
+# TODO: ignore until TypedDict is supported https://github.com/astral-sh/ty/issues/154
+invalid-argument-type = "ignore"
+# TODO: ignore until TypedDict is supported https://github.com/astral-sh/ty/issues/154
+invalid-assignment = "ignore"
+# Ignore since different environments have not be importable at any given time
+unresolved-import = "ignore"

@@ -228,8 +228,8 @@ class HfPolicy(ColocatablePolicyInterface, GenerationInterface):
         data: BatchedDataDict[Any],
         loss_fn: LossFunction,
         eval_mode: bool = False,
-        gbs: Optional[int] = None,
-        mbs: Optional[int] = None,
+        gbs: int | None = None,
+        mbs: int | None = None,
     ) -> dict[str, Any]:
         """Train the policy on a batch of data with a given loss function."""
         batch_size = gbs or self.cfg["train_global_batch_size"]

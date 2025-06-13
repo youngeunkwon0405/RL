@@ -399,7 +399,7 @@ def get_formatted_message_log(
         list[dict[str, str]], message_log
     )  # we just use the str:str parts here
 
-    if task_data_spec.prompt:
+    if task_data_spec.prompt is not None:
         message_log_strs = [
             {
                 "role": "user",

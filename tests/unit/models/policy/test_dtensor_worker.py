@@ -41,7 +41,7 @@ def create_test_config(
     sequence_parallel: bool = False,
     cpu_offload: bool = False,
     activation_checkpointing: bool = False,
-    custom_parallel_plan: str = None,
+    custom_parallel_plan: str | None = None,
 ) -> PolicyConfig:
     return {
         "model_name": model_name,

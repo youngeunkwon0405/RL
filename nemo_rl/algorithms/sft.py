@@ -93,10 +93,10 @@ def setup(
     StatefulDataLoader,
     StatefulDataLoader,
     NLLLoss,
-    MasterConfig,
     Logger,
-    TaskDataSpec,
-    SFTSaveState,
+    CheckpointManager,
+    SFTSaveState | None,
+    MasterConfig,
 ]:
     """Main entry point for running SFT algorithm.
 

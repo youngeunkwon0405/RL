@@ -35,7 +35,7 @@ class MockEnvironment(EnvironmentInterface):
         self, messages: list[LLMMessageLogType], env_info: list[dict]
     ) -> EnvironmentReturn:
         self._calls += 1
-        return (
+        return EnvironmentReturn(
             [{"role": "environment", "content": "observation"}] * len(messages),
             [{}] * len(messages),
             [[]] * len(messages),
@@ -60,7 +60,7 @@ def create_mock_batch(
     num_samples: int,
     task_names: list[str],
     message_logs: list[LLMMessageLogType],
-    extra_env_info: list[dict] = None,
+    extra_env_info: list[dict] | None = None,
 ) -> BatchedDataDict[DatumSpec]:
     """Helper function to create a mock batch for testing."""
     if extra_env_info is None:
