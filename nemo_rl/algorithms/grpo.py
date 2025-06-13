@@ -880,6 +880,7 @@ def validate(
 
         # Log one example for each unique dataset
         unique_datasets = list(set(val_batch["dataset_names"]))
+        table = None
 
         for dataset_name in unique_datasets:
             dataset_idx = val_batch["dataset_names"].index(dataset_name)
