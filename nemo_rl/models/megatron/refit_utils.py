@@ -12,21 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import re
-from typing import Dict, List, Tuple
 
 import torch
 from megatron.core import parallel_state
+from megatron.core.extensions.transformer_engine import (
+    TEColumnParallelGroupedLinear,
+    TEColumnParallelLinear,
+    TERowParallelGroupedLinear,
+    TERowParallelLinear,
+)
 from megatron.core.tensor_parallel.layers import (
-    VocabParallelEmbedding,
     ColumnParallelLinear,
     RowParallelLinear,
+    VocabParallelEmbedding,
 )
-from megatron.core.extensions.transformer_engine import (
-    TEColumnParallelLinear,
-    TERowParallelLinear,
-    TEColumnParallelGroupedLinear,
-    TERowParallelGroupedLinear,
-)
+
 from nemo_rl.models.megatron.converters.common import get_global_key_from_local_key
 
 

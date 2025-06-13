@@ -312,7 +312,9 @@ def setup(
 
     if backend in ("hf", "megatron"):
         policy_generation = None
-        print(f"  ✓ Using {backend} backend for generation with {policy_config['model_name']}")
+        print(
+            f"  ✓ Using {backend} backend for generation with {policy_config['model_name']}"
+        )
     elif backend == "vllm":
         generation_config = cast(VllmConfig, generation_config)
         policy_generation = VllmGeneration(
@@ -324,7 +326,7 @@ def setup(
         print(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
-    
+
     if last_checkpoint_path:
         weights_path = Path(last_checkpoint_path) / "policy" / "weights"
         optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"

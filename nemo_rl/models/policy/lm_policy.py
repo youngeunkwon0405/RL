@@ -69,7 +69,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         worker_builder_cls: str
         training_backend = None
-        if not config.get("megatron_cfg", {}).get("enabled", False): # Huggingface backend
+        if not config.get("megatron_cfg", {}).get(
+            "enabled", False
+        ):  # Huggingface backend
             if config["dtensor_cfg"]["enabled"]:
                 worker_builder_cls = (
                     "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
@@ -80,7 +82,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                     "nemo_rl.models.policy.fsdp1_policy_worker.FSDP1PolicyWorker"
                 )
             training_backend = "hf"
-        elif config["megatron_cfg"]["enabled"]: # Megatron backend
+        elif config["megatron_cfg"]["enabled"]:  # Megatron backend
             worker_builder_cls = (
                 "nemo_rl.models.policy.megatron_policy_worker.MegatronPolicyWorker"
             )
@@ -127,7 +129,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             assert config["dtensor_cfg"]["enabled"] or training_backend == "megatron", (
                 "Dynamic batch is only supported for DTensor or Megatron policy."
             )
-            assert pp_size == 1, "Dynamic batching is only supported for single pipeline parallel stage"
+            assert pp_size == 1, (
+                "Dynamic batching is only supported for single pipeline parallel stage"
+            )
             self.use_dynamic_batches = True
             self.dynamic_batching_args: DynamicBatchingArgs = {
                 "input_key": "input_ids",

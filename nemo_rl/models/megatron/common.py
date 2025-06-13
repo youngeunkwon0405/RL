@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from functools import partial
-from typing import Iterable, Optional
+from typing import Iterable
 
 import torch
 import torch.distributed as dist
@@ -20,9 +20,6 @@ from megatron.core.models.gpt import GPTModel
 from megatron.core.parallel_state import (
     get_tensor_model_parallel_group,
     get_tensor_model_parallel_rank,
-    get_context_parallel_world_size,
-    get_context_parallel_rank,
-    get_pipeline_model_parallel_rank
 )
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron.state import GlobalState
@@ -39,6 +36,7 @@ def forward_step_arbitrary_loss(
     loss_fn: LossFunction,
 ):
     """Forward training step with support for packed sequences and context parallelism.
+
     Args:
         state (GlobalState): Global state for the run
         global_valid_seqs: Global count of valid sequences
@@ -75,9 +73,11 @@ def broadcast_tensor(
     tensor: torch.Tensor | None, src_rank: int, group: dist.ProcessGroup
 ) -> torch.Tensor:
     """Broadcasts a tensor from src_rank to all ranks in the group using broadcast_object_list for metadata.
+
     Handles the case where the input tensor might be None on non-source ranks.
     If the input tensor is provided on non-source ranks, it must have the
     correct shape and dtype matching the tensor on the source rank.
+
     Args:
         tensor: The tensor to broadcast on the source rank. Can be None on
                 non-source ranks (will be created with correct shape/dtype).
@@ -85,9 +85,11 @@ def broadcast_tensor(
                 for the broadcast and must match the source tensor's metadata.
         src_rank (int): The global rank of the source process.
         group: The process group for communication.
+
     Returns:
         torch.Tensor: The broadcasted tensor. On non-source ranks, this will
                       be the tensor received from the source.
+
     Raises:
         ValueError: If the tensor is None on the source rank, or if a tensor
                     provided on a non-source rank has mismatched shape/dtype/device.

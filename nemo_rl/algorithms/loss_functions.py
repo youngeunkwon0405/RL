@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
 from typing import Any, Optional, TypedDict, TypeVar
 
 import torch
@@ -567,7 +566,13 @@ class DPOLossFn(LossFunction):
             accuracy,
             rewards_chosen_mean,
             rewards_rejected_mean,
-        ) = self._preference_loss(next_token_logits, data, global_valid_seqs, vocab_parallel_rank, vocab_parallel_group)
+        ) = self._preference_loss(
+            next_token_logits,
+            data,
+            global_valid_seqs,
+            vocab_parallel_rank,
+            vocab_parallel_group,
+        )
 
         dpo_loss = (
             self.sft_loss_weight * sft_loss_chosen

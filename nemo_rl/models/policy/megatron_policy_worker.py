@@ -13,7 +13,6 @@
 # limitations under the License.
 import gc
 import os
-import re
 import time
 import warnings
 from collections import defaultdict
@@ -25,6 +24,9 @@ import ray
 import torch
 from megatron.core import parallel_state
 from megatron.core.distributed import DistributedDataParallel
+from megatron.core.distributed.custom_fsdp import (
+    FullyShardedDataParallel as custom_FSDP,
+)
 from megatron.core.inference.engines import (
     StaticInferenceEngine,
 )
@@ -35,6 +37,7 @@ from megatron.core.inference.text_generation_controllers.text_generation_control
     TextGenerationController,
 )
 from megatron.core.models.gpt import GPTModel
+from megatron.core.optimizer import ChainedOptimizer
 from megatron.core.parallel_state import (
     get_pipeline_model_parallel_group,
     get_pipeline_model_parallel_last_rank,
@@ -46,12 +49,9 @@ from megatron.core.parallel_state import (
 )
 from megatron.core.pipeline_parallel import get_forward_backward_func
 from megatron.core.rerun_state_machine import get_rerun_state_machine
-from megatron.core.optimizer import ChainedOptimizer
 from megatron.inference.text_generation.mcore_engine_server import (
     run_mcore_engine,
 )
-from megatron.core.distributed import DistributedDataParallel
-from megatron.core.distributed.custom_fsdp import FullyShardedDataParallel as custom_FSDP
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron import fault_tolerance
 from nemo.tron.checkpointing import checkpoint_exists, load_checkpoint, save_checkpoint
@@ -76,35 +76,31 @@ from nemo.tron.setup import (
 from nemo.tron.state import GlobalState
 from nemo.tron.tokenizers.tokenizer import build_tokenizer
 from nemo.tron.utils.async_utils import maybe_finalize_async_save
-from nemo.tron.utils.common_utils import get_rank_safe
 from nemo.tron.utils.train_utils import (
     logical_and_across_model_parallel_group,
     reduce_max_stat_across_model_parallel_group,
 )
 from ray.util.queue import Queue
 from transformers import AutoTokenizer
-from megatron.core.transformer.enums import AttnMaskType
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs, from_parallel_logits_to_logprobs_packed_sequences
+from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
     GenerationOutputSpec,
     verify_right_padding,
 )
-from nemo_rl.models.megatron.converters.common import (
-    get_all_rank_ids_in_group,
-    MegatronToHFConverter,
-)
 from nemo_rl.models.megatron.common import (
     broadcast_tensor,
     forward_step_arbitrary_loss,
-    _pack_sequences_for_megatron,
-    _unpack_sequences_from_megatron,
 )
 from nemo_rl.models.megatron.community_import import import_model_from_hf_name
+from nemo_rl.models.megatron.converters.common import (
+    MegatronToHFConverter,
+    get_all_rank_ids_in_group,
+)
 from nemo_rl.models.megatron.refit_utils import (
     gather_params,
     get_tp_dim,
@@ -224,6 +220,7 @@ def setup_megatron_model(
 class MegatronPolicyWorker:
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
+
         This makes it easier to identify which worker is producing specific log messages.
         """
         if torch.distributed.is_initialized():
@@ -341,7 +338,7 @@ class MegatronPolicyWorker:
             checkpoint_config=checkpoint_config,
             logger_config=LoggerConfig(logging_level=0),
             train_config=TrainingConfig(
-                micro_batch_size=1,     # ignored
+                micro_batch_size=1,  # ignored
                 global_batch_size=self.cfg["train_global_batch_size"],  # ignored
                 train_iters=1000,  # Default value for inference
             ),
@@ -350,12 +347,24 @@ class MegatronPolicyWorker:
             ),
             ddp_config=DistributedDataParallelConfig(
                 check_for_nan_in_grad=True,
-                grad_reduce_in_fp32=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["grad_reduce_in_fp32"],
-                overlap_grad_reduce=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_grad_reduce"],
-                overlap_param_gather=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["overlap_param_gather"],
-                average_in_collective=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["average_in_collective"],
-                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"]["use_distributed_optimizer"],
-                data_parallel_sharding_strategy=self.cfg["megatron_cfg"]["distributed_data_parallel_config"]["data_parallel_sharding_strategy"],
+                grad_reduce_in_fp32=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["grad_reduce_in_fp32"],
+                overlap_grad_reduce=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["overlap_grad_reduce"],
+                overlap_param_gather=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["overlap_param_gather"],
+                average_in_collective=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["average_in_collective"],
+                use_distributed_optimizer=self.cfg["megatron_cfg"]["optimizer"][
+                    "use_distributed_optimizer"
+                ],
+                data_parallel_sharding_strategy=self.cfg["megatron_cfg"][
+                    "distributed_data_parallel_config"
+                ]["data_parallel_sharding_strategy"],
             ),
             scheduler_config=SchedulerConfig(
                 **self.cfg["megatron_cfg"]["scheduler"],
@@ -377,8 +386,13 @@ class MegatronPolicyWorker:
         ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
 
         # Set the param sync function for the model
-        if self.megatron_cfg.ddp_config.overlap_param_gather and self.megatron_cfg.ddp_config.align_param_gather:
-            self.megatron_cfg.param_sync_func = [model_chunk.start_param_sync for model_chunk in self.model]
+        if (
+            self.megatron_cfg.ddp_config.overlap_param_gather
+            and self.megatron_cfg.ddp_config.align_param_gather
+        ):
+            self.megatron_cfg.param_sync_func = [
+                model_chunk.start_param_sync for model_chunk in self.model
+            ]
             if len(self.model) == 1:
                 self.megatron_cfg.param_sync_func = self.megatron_cfg.param_sync_func[0]
 
@@ -412,7 +426,7 @@ class MegatronPolicyWorker:
                 overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
                 data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
             )
-            print(f"Loading the Reference Model")
+            print("Loading the Reference Model")
             if (
                 ref_checkpoint_config.pretrained_checkpoint is not None
                 and checkpoint_exists(ref_checkpoint_config.pretrained_checkpoint)
@@ -501,7 +515,11 @@ class MegatronPolicyWorker:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
         total_dataset_size = torch.tensor(data.size, device="cuda")
-        torch.distributed.all_reduce(total_dataset_size, op=torch.distributed.ReduceOp.SUM, group=parallel_state.get_data_parallel_group())
+        torch.distributed.all_reduce(
+            total_dataset_size,
+            op=torch.distributed.ReduceOp.SUM,
+            group=parallel_state.get_data_parallel_group(),
+        )
         num_global_batches = total_dataset_size.item() // gbs
 
         if eval_mode:
@@ -558,30 +576,16 @@ class MegatronPolicyWorker:
                     )
 
                 batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
-                pack_seqs = False
-                seqlen_key = None
-                pad_factor = 1
-                pad_full_seq_to = None
                 if self.cfg["dynamic_batching"]["enabled"]:
                     data_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
-                    data_iterator_len = batch.get_microbatch_iterator_dynamic_shapes_len()
+                    data_iterator_len = (
+                        batch.get_microbatch_iterator_dynamic_shapes_len()
+                    )
                     micro_batch_size = self.cfg["train_micro_batch_size"]
-                elif self.cfg["sequence_packing"]["enabled"]:
-                    data_iterator = batch.make_microbatch_iterator_for_packable_sequences()
-                    data_iterator_len, seq_dim_size = batch.get_microbatch_iterator_for_packable_sequences_len()
-                    micro_batch_size = 1
-                    pack_seqs = True
-                    seqlen_key = "input_lengths"
-                    tp_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
-                    cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
-                    pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
-                    if self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
-                        _, pad_full_seq_to = batch.get_microbatch_iterator_for_packable_sequences_len()
                 else:
                     data_iterator = batch.make_microbatch_iterator(mbs)
                     data_iterator_len = local_gbs // mbs
                     micro_batch_size = self.cfg["train_micro_batch_size"]
-
 
                 rerun_state_machine = get_rerun_state_machine()
                 while rerun_state_machine.should_run_forward_backward(data_iterator):
@@ -597,10 +601,6 @@ class MegatronPolicyWorker:
                             self.mcore_state,
                             global_valid_seqs,
                             global_valid_toks,
-                            pack_sequences=pack_seqs,
-                            seq_length_key=seqlen_key,
-                            pad_individual_seqs_to_multiple_of=pad_factor,
-                            pad_full_seq_to=pad_full_seq_to,
                         ),
                         data_iterator=data_iterator,
                         model=self.model,
@@ -635,9 +635,7 @@ class MegatronPolicyWorker:
 
                 # Update learning rate.
                 if update_successful:
-                    increment = (
-                        total_dataset_size.item()
-                    )
+                    increment = total_dataset_size.item()
                     self.scheduler.step(increment=increment)
                     skipped_iter = 0
                     curr_lr = self.scheduler.get_lr(self.optimizer.param_groups[0])
@@ -708,11 +706,13 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict[Any] = None, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[Any]:
         """Get the logprobs of the model for a batch of data.
+
         Uses the configured logprob_batch_size to do microbatching.
         Input data is assumed to be right-padded. The method internally converts to
         left-padded format for computation, and returns outputs in right-padded format.
         If micro_batch_size is provided, it will be used instead of the configured
         logprob_batch_size.
+
         Returns:
           a BatchedDataDict with key "logprobs" and shape [batch_size, sequence_length].
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
@@ -741,65 +741,31 @@ class MegatronPolicyWorker:
         pp_rank = get_pipeline_model_parallel_rank()
         pp_grp = get_pipeline_model_parallel_group()
         pp_size = get_pipeline_model_parallel_world_size()
-        # if pp_size > 1, we need to pad the full sequence to the max sequence length to maintain a static PP buffer
-        if self.cfg["sequence_packing"]["enabled"] and self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
-            _, pad_full_seq_to = data.get_microbatch_iterator_for_packable_sequences_len()
-            pp_seq_dim_size = pad_full_seq_to
-        else:
-            pad_full_seq_to = None
 
         def forward_step_fn(data_iterator: Iterable, model: GPTModel):
-            nonlocal pad_full_seq_to
             data_dict = next(data_iterator).to("cuda")
-            if self.cfg["sequence_packing"]["enabled"]:
-                original_seq_length = data_dict["input_ids"].shape[1]
-                tp_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
-                pp_size = self.cfg["megatron_cfg"]["pipeline_model_parallel_size"]
-                cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
-                pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
-                input_ids, packed_seq_params, cu_seqlens, cu_seqlens_padded = _pack_sequences_for_megatron(
-                    data_dict["input_ids"].clone(),
-                    data_dict["input_lengths"],
-                    pad_individual_seqs_to_multiple_of=pad_factor,
-                    pad_packed_seq_to=pad_full_seq_to,
-                )
-                input_ids = input_ids
-                attention_mask, position_ids = None, None
-                unpacked_input_ids = data_dict["input_ids"]
-            else:
-                input_ids = data_dict["input_ids"]
-                attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
-                    input_ids, 0, False, False, False
-                )
-                packed_seq_params = None
-                unpacked_input_ids = input_ids
+            input_ids = data_dict["input_ids"]
+            attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
+                input_ids, 0, False, False, False
+            )
 
-            output_tensor = model(input_ids, position_ids, attention_mask, packed_seq_params=packed_seq_params)
+            output_tensor = model(
+                input_ids,
+                position_ids,
+                attention_mask,
+            )
 
             def collection_fn(output_tensor):
-                stc = time.time()
                 tp_grp = get_tensor_model_parallel_group()
                 tp_rank = get_tensor_model_parallel_rank()
-                if self.cfg["sequence_packing"]["enabled"]:
-                    token_logprobs = from_parallel_logits_to_logprobs_packed_sequences(
-                        output_tensor,
-                        target=input_ids,
-                        cu_seqlens=cu_seqlens_padded,
-                        unpacked_seqlen=original_seq_length,
-                        vocab_start_index=tp_rank * output_tensor.shape[-1],
-                        vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
-                        group=tp_grp,
-                        inference_only=True,
-                    )
-                else:
-                    token_logprobs = from_parallel_logits_to_logprobs(
-                        output_tensor.to(torch.float32),
-                        target=unpacked_input_ids,
-                        vocab_start_index=tp_rank * output_tensor.shape[-1],
-                        vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
-                        group=tp_grp,
-                        inference_only=True,
-                    )
+                token_logprobs = from_parallel_logits_to_logprobs(
+                    output_tensor.to(torch.float32),
+                    target=input_ids,
+                    vocab_start_index=tp_rank * output_tensor.shape[-1],
+                    vocab_end_index=(tp_rank + 1) * output_tensor.shape[-1],
+                    group=tp_grp,
+                    inference_only=True,
+                )
 
                 # Prepend 0 logprob for first token to maintain same sequence length as input
                 token_logprobs = torch.cat(
@@ -813,15 +779,10 @@ class MegatronPolicyWorker:
             mb_iterator = data.make_microbatch_iterator_with_dynamic_shapes()
             data_iterator_len = data.get_microbatch_iterator_dynamic_shapes_len()
             micro_batch_size = logprob_batch_size
-        elif self.cfg["sequence_packing"]["enabled"]:
-            mb_iterator = data.make_microbatch_iterator_for_packable_sequences()
-            data_iterator_len, _ = data.get_microbatch_iterator_for_packable_sequences_len()
-            micro_batch_size = 1
         else:
             mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
             data_iterator_len = max(1, data.size // logprob_batch_size)
             micro_batch_size = logprob_batch_size
-
 
         forward_backward_func = get_forward_backward_func()
         list_of_logprobs = forward_backward_func(
@@ -859,6 +820,7 @@ class MegatronPolicyWorker:
     @contextmanager
     def use_reference_model(self):
         """Context manager that temporarily swaps the reference model and active model.
+
         On entry: Moves model to CPU, moves reference_model to CUDA. Swaps the references
         On exit: Restores original references and re-flips cuda/cpu
         """
@@ -901,8 +863,10 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict[Any] = None, micro_batch_size: Optional[int] = None
     ) -> BatchedDataDict[Any]:
         """Get the logprobs from thereference policy for a batch of data.
+
         If micro_batch_size is provided, it will be used instead of the configured
         logprob_batch_size.
+
         Returns:
           a BatchedDataDict with key "reference_logprobs" and shape [batch_size, sequence_length].
           We use the convention that the logprob of the first token is 0 so that the sequence length is maintained.
@@ -919,6 +883,7 @@ class MegatronPolicyWorker:
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
         """Generate a batch of data using huggingface framework generation.
+
         Args:
             data: BatchedDataDict containing input_ids and input_lengths tensors
         Returns:
@@ -1045,6 +1010,7 @@ class MegatronPolicyWorker:
 
     def report_device_id(self) -> str:
         """Report the UUID of the current CUDA device using NVML.
+
         Returns:
             str: UUID of the device in the format "GPU-xxxxx"
         """
@@ -1057,6 +1023,7 @@ class MegatronPolicyWorker:
 
     def prepare_weights_for_ipc(self):
         """Prepare Megatron model weights for IPC transfer to vLLM.
+
         Collects information about weight tensors (names and sizes).
         Returns a list of (parameter_name, size_in_bytes) tuples.
         """
@@ -1150,7 +1117,6 @@ class MegatronPolicyWorker:
         no_grad.__exit__(None, None, None)
 
         return param_info
-
 
     # Temporary fix, 'keys' is a kwarg due to some sort of ray bug
     def get_weights_ipc_handles(self, keys: list[str] = None) -> dict[str, Any]:
@@ -1324,6 +1290,7 @@ class MegatronPolicyWorker:
         offload_to_cpu: bool = True,
     ):
         """Save a training checkpoint.
+
         Args:
             weights_path: The specific directory path where the checkpoint will be saved.
             optimizer_path: If not None, optimizer and scheduler states are saved if they exist.
@@ -1392,13 +1359,16 @@ class MegatronPolicyWorker:
 
     def load_checkpoint(self, weights_path: str, optimizer_path: Optional[str] = None):
         """Load a training checkpoint.
+
         Args:
             weights_path: The exact directory path from which to load the checkpoint.
             optimizer_path: If not None, attempts to load optimizer and scheduler states
                             if self.optimizer and self.scheduler are initialized.
         """
-        raise NotImplementedError("Loading checkpoints outside of the init function is not yet implemented for Megatron policy.")
-    
+        raise NotImplementedError(
+            "Loading checkpoints outside of the init function is not yet implemented for Megatron policy."
+        )
+
     def shutdown(self):
         """Shutdown the policy."""
         #

@@ -12,24 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections import defaultdict
 import re
+from collections import defaultdict
 
 import einops
 import numpy as np
 import torch
+from megatron.core import parallel_state
+from nemo.lightning.io.state import (
+    StateDictTransform,
+    TransformCTX,
+    _match_keys,
+    _ModelState,
+)
 from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.integrations.accelerate import init_empty_weights
 
-from megatron.core import parallel_state
-from nemo.lightning.io.state import (
-    TransformCTX,
-    _ModelState,
-    StateDictTransform,
-    _match_keys,
-)
-import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 import nemo_rl.models.megatron.converters.llama as llama_converter
+import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 
 _GROUP_TO_RANKS_CACHE = {}
 
@@ -128,8 +128,7 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
 
 
 def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
-    """
-    Split interleave-concatenated qkv to q, k, v
+    """Split interleave-concatenated qkv to q, k, v.
 
     Example: export layer linear_qkv to HF {q|k|v}_proj
     """
@@ -165,8 +164,7 @@ def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
 
 
 def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
-    """
-    Split interleave-concatenated qkv bias to separate q, k, v bias
+    """Split interleave-concatenated qkv bias to separate q, k, v bias.
 
     Example: export layer linear_qkv bias to HF {q|k|v}_proj bias
     """
