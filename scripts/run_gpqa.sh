@@ -35,8 +35,8 @@ for step_dir in $step_dirs; do
             # if output contains a record
             if [ -n "$summary_line_num" ]; then
                 # if summary also contains a record
-                output_record=$(tail -n +"$((output_line_num + 1))" "$output_file" | head -n2)
-                summary_record=$(tail -n +"$((summary_line_num + 1))" "$summary_file" | head -n2)
+                output_record=$(tail -n +"$((output_line_num + 1))" "$output_file" | head -n4)
+                summary_record=$(tail -n +"$((summary_line_num + 1))" "$summary_file" | head -n4)
                 # if the record is already in the summary, skip
                 if [ "$output_record" == "$summary_record" ]; then
                     continue

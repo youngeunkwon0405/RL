@@ -15,15 +15,16 @@
 # Generate rollouts for arbitrary environments
 # Supports multi-turn rollouts and many simultaneous environments (E.g. you can train on math, code, multi-turn games and more at once)
 
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import ray
 import torch
-from transformers import AutoTokenizer
+from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.data.interfaces import (
     DatumSpec,
     FlatMessagesType,
+    LLMMessageLogType,
 )
 from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
@@ -39,16 +40,18 @@ from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
 
+TokenizerType = PreTrainedTokenizerBase
+
 
 def generate_responses(
     policy_generation: GenerationInterface,
     generation_input_data: BatchedDataDict[GenerationDatumSpec],
     batch: BatchedDataDict[DatumSpec],
-    tokenizer: AutoTokenizer,
+    tokenizer: TokenizerType,
     input_lengths: torch.Tensor,
     include_logprobs: bool = True,
     greedy: bool = False,
-) -> Tuple[BatchedDataDict[DatumSpec], List[torch.Tensor], dict]:
+) -> tuple[BatchedDataDict[DatumSpec], list[torch.Tensor], dict[str, float | int]]:
     """Generate responses from policy."""
     # Add stop_strings to generation_input_data if present in the batch
     if "stop_strings" in batch:
@@ -58,9 +61,17 @@ def generate_responses(
         generation_input_data["stop_strings"] = [None] * len(input_lengths)
 
     # Generate responses
-    generation_outputs = policy_generation.generate(
-        generation_input_data, greedy=greedy
-    )
+    if (
+        "vllm_cfg" in policy_generation.cfg
+        and policy_generation.cfg["vllm_cfg"]["async_engine"]
+    ):
+        generation_outputs = policy_generation.generate_async(
+            generation_input_data, greedy=greedy
+        )
+    else:
+        generation_outputs = policy_generation.generate(
+            generation_input_data, greedy=greedy
+        )
 
     # Extract generated tokens
     generated_ids = []
@@ -102,7 +113,7 @@ def generate_responses(
 
 def calculate_rewards(
     batch: BatchedDataDict[DatumSpec],
-    task_to_env: Dict[str, EnvironmentInterface],
+    task_to_env: dict[str, EnvironmentInterface],
 ) -> EnvironmentReturn:
     """Calculate rewards for generated responses and get environment feedback.
 
@@ -126,7 +137,7 @@ def calculate_rewards(
     task_names = batch["task_name"]
 
     # Group messages by task type
-    task_groups = {}
+    task_groups: dict[str, list[tuple[int, LLMMessageLogType]]] = {}
     for i, task_name in enumerate(task_names):
         if task_name not in task_groups:
             task_groups[task_name] = []
@@ -147,7 +158,7 @@ def calculate_rewards(
         env_info = [batch["extra_env_info"][i] for i in indices]
 
         # Submit task to environment and store future
-        future = task_to_env[task_name].step.remote(messages, env_info)
+        future = task_to_env[task_name].step.remote(messages, env_info)  # type: ignore # ray actor call
         futures.append(future)
         future_to_indices[future] = indices
 
@@ -199,12 +210,12 @@ def calculate_rewards(
 def run_multi_turn_rollout(
     policy_generation: GenerationInterface,
     input_batch: BatchedDataDict[DatumSpec],
-    tokenizer: AutoTokenizer,
-    task_to_env: Dict[str, EnvironmentInterface],
+    tokenizer: TokenizerType,
+    task_to_env: dict[str, EnvironmentInterface],
     max_seq_len: int,
     max_rollout_turns: int = 999999,
     greedy: bool = False,
-) -> Tuple[BatchedDataDict[DatumSpec], Dict[str, Any]]:
+) -> tuple[BatchedDataDict[DatumSpec], dict[str, Any]]:
     """Runs a multi-turn rollout loop, interacting with the environment.
 
     Args:
@@ -252,7 +263,7 @@ def run_multi_turn_rollout(
         active_batch = current_batch.select_indices(active_indices)
         active_stop_strings = [current_stop_strings[i] for i in active_indices.tolist()]
 
-        active_flat_messages: FlatMessagesType
+        active_flat_messages: BatchedDataDict[FlatMessagesType]
         active_flat_messages, active_input_lengths = (
             batched_message_log_to_flat_message(
                 active_batch["message_log"],
@@ -310,10 +321,14 @@ def run_multi_turn_rollout(
                 len(tokenized_obs) + len(generated_ids[i]) + active_input_lengths[i]
                 >= max_seq_len
             ):
+                tokens_left_for_obs = max_seq_len - (
+                    len(generated_ids[i]) + active_input_lengths[i]
+                )
+                assert tokens_left_for_obs >= 0, (
+                    f"tokens_left_for_obs={tokens_left_for_obs} should not be negative. This should not happen if the inference engine respects the max sequence length."
+                )
                 # truncate
-                tokenized_obs = tokenized_obs[
-                    : max_seq_len - (len(generated_ids[i]) + active_input_lengths[i])
-                ]
+                tokenized_obs = tokenized_obs[:tokens_left_for_obs]
                 truncation_mask[i] = True
                 # Record truncation
                 sample_truncated[active_indices[i]] = True
