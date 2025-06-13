@@ -5,6 +5,7 @@
 *.log
 *.tar
 *.tar.gz
+*-attach.sh
 .venv
 venv
 venvs
