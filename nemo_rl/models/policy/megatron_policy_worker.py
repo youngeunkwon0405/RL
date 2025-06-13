@@ -304,6 +304,9 @@ class MegatronPolicyWorker:
         model_cfg.context_parallel_size = self.cfg["megatron_cfg"][
             "context_parallel_size"
         ]  # not supported right now
+        assert model_cfg.context_parallel_size == 1, (
+            "Context parallel is not supported right now"
+        )
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
         model_cfg.params_dtype = dtype_map[
