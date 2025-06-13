@@ -236,8 +236,8 @@ class MegatronPolicyWorker:
         optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,
         init_reference_model: bool = True,
-        worker_sharding_annotations: Optional[NamedSharding] = None,
-        pre_init_communication_queue: Optional[Queue] = None,
+        worker_sharding_annotations: NamedSharding = None,
+        pre_init_communication_queue: Queue = None,
         megatron_checkpoint_home: Optional[str] = None,
         **kwargs: Any,
     ):
