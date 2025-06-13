@@ -383,7 +383,7 @@ class MegatronPolicyWorker:
             self.optimizer,
             self.scheduler,
             self.checkpointing_context,
-        ) = setup_megatron_model(self.megatron_cfg, load_optimizer=init_optimizer)
+        ) = setup_megatron_model(policy_cfg=self.cfg, cfg=self.megatron_cfg, load_optimizer=init_optimizer)
 
         # Set the param sync function for the model
         if (
