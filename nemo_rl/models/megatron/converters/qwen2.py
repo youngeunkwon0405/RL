@@ -24,9 +24,6 @@ def get_export_mapping(source):
         "decoder.layers.*.mlp.linear_fc1.layer_norm_weight": "model.layers.*.post_attention_layernorm.weight",
         "decoder.final_layernorm.weight": "model.norm.weight",
     }
-    # if getattr(source.config, "tie_word_embeddings", False):
-    # small Qwen 2 models have shared input output embeddings
-    # del mapping["lm_head.weight"]
     return mapping
 
 

@@ -252,9 +252,6 @@ class MegatronToHFConverter:
             raise ValueError(
                 f"No converter mapping and transforms found for {hf_model_name}"
             )
-        print(f"hf model name: {hf_model_name}")
-        print(f"export_mapping: {self.export_mapping}")
-        print(f"export_transforms: {self.export_transforms}")
 
         self.export_transforms = update_transforms_for_nemorl(self.export_transforms)
 

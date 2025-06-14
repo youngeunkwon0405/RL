@@ -217,6 +217,17 @@ def setup_megatron_model(
     return state, model, optimizer, scheduler, checkpointing_context
 
 
+def destroy_parallel_state():
+    if torch.distributed.is_initialized():
+        torch.distributed.barrier()
+        torch.distributed.destroy_process_group()
+    if hasattr(parallel_state, "destroy_model_parallel"):
+        try:
+            parallel_state.destroy_model_parallel()
+        except:
+            pass  # Ignore errors if already destroyed
+
+
 @ray.remote
 class MegatronPolicyWorker:
     def __repr__(self):
@@ -266,21 +277,10 @@ class MegatronPolicyWorker:
             os.path.join(pretrained_path, "iter_0000000")
         )
 
-        # More robust rank detection and synchronization
-        is_rank_zero = get_rank_safe() == 0
-
         # Ensure clean slate before import
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-            torch.distributed.destroy_process_group()
+        destroy_parallel_state()
 
-        if hasattr(parallel_state, "destroy_model_parallel"):
-            try:
-                parallel_state.destroy_model_parallel()
-            except:
-                pass  # Ignore errors if already destroyed
-
-        if is_rank_zero:
+        if get_rank_safe() == 0:
             if pt_checkpoint_exists:
                 print(
                     f"Checkpoint already exists at {pretrained_path}. Skipping import."
@@ -311,27 +311,13 @@ class MegatronPolicyWorker:
                     raise
                 finally:
                     # Force cleanup after import
-                    if torch.distributed.is_initialized():
-                        torch.distributed.destroy_process_group()
-                    if hasattr(parallel_state, "destroy_model_parallel"):
-                        try:
-                            parallel_state.destroy_model_parallel()
-                        except:
-                            pass
+                    destroy_parallel_state()
             pre_init_communication_queue.put(True)
         else:
             pre_init_communication_queue.get()
             pre_init_communication_queue.put(True)
 
-        if torch.distributed.is_initialized():
-            torch.distributed.barrier()
-            torch.distributed.destroy_process_group()
-
-        if hasattr(parallel_state, "destroy_model_parallel"):
-            try:
-                parallel_state.destroy_model_parallel()
-            except:
-                pass  # Ignore errors if already destroyed
+        destroy_parallel_state()
 
         pretrained_run_config = os.path.join(
             pretrained_path, "iter_0000000/run_config.yaml"
