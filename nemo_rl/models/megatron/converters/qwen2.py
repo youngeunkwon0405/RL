@@ -24,13 +24,13 @@ def get_export_mapping(source):
         "decoder.layers.*.mlp.linear_fc1.layer_norm_weight": "model.layers.*.post_attention_layernorm.weight",
         "decoder.final_layernorm.weight": "model.norm.weight",
     }
-    if getattr(source.config, "tie_word_embeddings", False):
-        # small Qwen 2 models have shared input output embeddings
-        del mapping["lm_head.weight"]
+    # if getattr(source.config, "tie_word_embeddings", False):
+    # small Qwen 2 models have shared input output embeddings
+    # del mapping["lm_head.weight"]
     return mapping
 
 
-def get_export_transforms():
+def get_export_transforms(hf_config):
     transforms = [
         io.state_transform(
             source_key="decoder.layers.*.self_attention.linear_qkv.weight",
@@ -63,11 +63,15 @@ def get_export_transforms():
             target_key="model.embed_tokens.weight",
             fn=TransformFns.prune_padding,
         ),
-        io.state_transform(
-            source_key="output_layer.weight",
-            target_key="lm_head.weight",
-            fn=TransformFns.prune_padding,
-        ),
     ]
+
+    if not hf_config.tie_word_embeddings:
+        transforms.append(
+            io.state_transform(
+                source_key="output_layer.weight",
+                target_key="lm_head.weight",
+                fn=TransformFns.prune_padding,
+            ),
+        )
 
     return transforms
