@@ -16,7 +16,6 @@ import asyncio
 import copy
 import gc
 import os
-import sys
 import uuid
 from collections import defaultdict
 from typing import (
@@ -170,9 +169,6 @@ class VllmGenerationWorker:
         self.fraction_of_gpus = fraction_of_gpus
         self.is_model_owner = bundle_indices is not None
 
-        # Store the Python executable being used by this worker
-        self.py_executable = sys.executable
-
         # Skip model loading if we're not the model owner
         if not self.is_model_owner:
             self.llm = None
@@ -185,90 +181,6 @@ class VllmGenerationWorker:
         # vLLM handles the parallelism internally through Ray
         self.rank = 0
         self.world_size = 1
-
-        # Monkey patch for vLLM to ensure RAY_ADDRESS is set in Ray actors.
-        try:
-            import vllm.utils
-            from vllm.logger import init_logger
-            from vllm.utils import cuda_is_initialized, is_in_ray_actor
-
-            logger = init_logger("vllm_patch")
-
-            def _patched_maybe_force_spawn():
-                """Patched version of vllm.utils._maybe_force_spawn.
-
-                This patch changes an `elif is_in_ray_actor()` to an `if` statement.
-                This ensures that `os.environ["RAY_ADDRESS"]` is set when running
-                within a Ray actor, even if CUDA has already been initialized.
-                This is crucial for vLLM workers to connect back to the Ray cluster.
-                """
-                if os.environ.get("VLLM_WORKER_MULTIPROC_METHOD") == "spawn":
-                    return
-
-                reason = None
-                if cuda_is_initialized():
-                    reason = "CUDA is initialized"
-
-                if is_in_ray_actor():
-                    # even if we choose to spawn, we need to pass the ray address
-                    # to the subprocess so that it knows how to connect to the ray cluster.
-                    # env vars are inherited by subprocesses, even if we use spawn.
-                    import ray
-
-                    os.environ["RAY_ADDRESS"] = ray.get_runtime_context().gcs_address
-                    if reason is None:
-                        reason = "In a Ray actor and can only be spawned"
-
-                if reason is not None:
-                    logger.warning(
-                        "We must use the `spawn` multiprocessing start method. "
-                        "Overriding VLLM_WORKER_MULTIPROC_METHOD to 'spawn'. "
-                        "See https://docs.vllm.ai/en/latest/getting_started/"
-                        "troubleshooting.html#python-multiprocessing "
-                        "for more information. Reason: %s",
-                        reason,
-                    )
-                    os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
-
-            vllm.utils._maybe_force_spawn = _patched_maybe_force_spawn
-            logger.info("Successfully patched vllm.utils._maybe_force_spawn.")
-
-            def _patch_vllm_init_workers_ray():
-                # Patch the vLLM ray_distributed_executor.py file to pass custom runtime_env in _init_workers_ray call.
-                # This allows passing custom py_executable to worker initialization.
-
-                try:
-                    import vllm.executor.ray_distributed_executor as ray_executor_module
-
-                    file_to_patch = ray_executor_module.__file__
-
-                    with open(file_to_patch, "r") as f:
-                        content = f.read()
-
-                    old_line = "self._init_workers_ray(placement_group)"
-                    new_line = f'self._init_workers_ray(placement_group, runtime_env={{"py_executable": "{self.py_executable}"}})'
-
-                    if new_line in content:
-                        return
-
-                    if old_line not in content:
-                        return
-
-                    patched_content = content.replace(old_line, new_line)
-
-                    # Write back the patched content
-                    with open(file_to_patch, "w") as f:
-                        f.write(patched_content)
-
-                except (ImportError, FileNotFoundError, PermissionError):
-                    # Allow failures gracefully
-                    pass
-
-            _patch_vllm_init_workers_ray()
-
-        except (ImportError, AttributeError):
-            # vllm not installed or has a different structure, skipping patch.
-            pass
 
         try:
             import vllm
@@ -307,8 +219,8 @@ class VllmGenerationWorker:
             # For non-parallel mode, explicitly set executor to None to avoid Ray issues
             vllm_kwargs["distributed_executor_backend"] = None
 
-        os.environ["VLLM_USE_V1"] = os.environ.get("NRL_VLLM_USE_V1", "1")
-        os.environ["VLLM_ALLOW_INSECURE_SERIALIZATION"] = "1"
+        if not self.cfg["vllm_cfg"]["async_engine"]:
+            os.environ["VLLM_USE_V1"] = "1"
 
         load_format = self.cfg["vllm_cfg"]["load_format"]
         if ModelFlag.VLLM_LOAD_FORMAT_AUTO.matches(self.model_name):
@@ -336,9 +248,9 @@ class VllmGenerationWorker:
 
         if self.cfg["vllm_cfg"]["async_engine"]:
             from vllm.engine.arg_utils import AsyncEngineArgs
-            from vllm.v1.engine.async_llm import AsyncLLM
+            from vllm.engine.async_llm_engine import AsyncLLMEngine
 
-            self.llm = AsyncLLM.from_engine_args(AsyncEngineArgs(**llm_kwargs))
+            self.llm = AsyncLLMEngine.from_engine_args(AsyncEngineArgs(**llm_kwargs))
         else:
             self.llm = vllm.LLM(**llm_kwargs)
 
@@ -362,27 +274,17 @@ class VllmGenerationWorker:
 
         return list(stop_set) if stop_set else None
 
-    def _build_sampling_params(
-        self,
-        *,
-        greedy: bool,
-        stop_strings,
-        max_new_tokens: Optional[int] = None,
-    ):
+    def _build_sampling_params(self, *, greedy: bool, stop_strings):
         top_k_cfg = self.cfg["top_k"]
         top_k_val = 1 if greedy else (top_k_cfg if top_k_cfg is not None else -1)
 
         temperature = 0.0 if greedy else self.cfg["temperature"]
 
-        max_tokens = (
-            max_new_tokens if max_new_tokens is not None else self.cfg["max_new_tokens"]
-        )
-
         return self.SamplingParams(
             temperature=temperature,
             top_p=self.cfg["top_p"],
             top_k=top_k_val,
-            max_tokens=max_tokens,
+            max_tokens=self.cfg["max_new_tokens"],
             logprobs=0,
             stop_token_ids=self.cfg["stop_token_ids"],
             stop=stop_strings,
@@ -589,15 +491,9 @@ class VllmGenerationWorker:
                 [per_sample_stop_strings] if per_sample_stop_strings else None
             )
 
-            remaining_ctx = (
-                self.cfg["vllm_cfg"]["max_model_len"] - current_input_actual_length
-            )
-            allowed_new_tokens = max(0, min(self.cfg["max_new_tokens"], remaining_ctx))
-
             sampling_params_for_request = self._build_sampling_params(
                 greedy=greedy,
                 stop_strings=final_stop_strings_for_sample,
-                max_new_tokens=allowed_new_tokens,
             )
 
             request_id = str(uuid.uuid4())
@@ -620,18 +516,16 @@ class VllmGenerationWorker:
             request_id_to_context[request_id] = context_for_this_task
             task_futures.append(task)
 
-        # Wait for all tasks to finish in the original request order to preserve deterministic
-        # alignment between inputs and outputs.
-        finished_task_results = await asyncio.gather(
-            *task_futures, return_exceptions=True
-        )
+        for task_future_completed in asyncio.as_completed(task_futures):
+            try:
+                vllm_output_single = await task_future_completed
+            except Exception as e:
+                print(f"Error in a generation task: {e}")
+                import traceback
 
-        for i, task_result in enumerate(finished_task_results):
-            if isinstance(task_result, Exception):
-                print(f"Error in a generation task (index {i}): {task_result}")
+                traceback.print_exc()
                 continue
 
-            vllm_output_single = task_result
             request_id_from_output = vllm_output_single.request_id
             context = request_id_to_context[request_id_from_output]
             original_input_ids_single_row = context["original_input_ids_row"]
@@ -642,8 +536,11 @@ class VllmGenerationWorker:
             generated_token_ids = list(generation_details.token_ids)
             num_generated_tokens = len(generated_token_ids)
 
+            original_padded_len_of_this_input_row = original_input_ids_single_row.shape[
+                0
+            ]
             final_output_tensor_len = (
-                original_input_actual_length + num_generated_tokens
+                original_padded_len_of_this_input_row + num_generated_tokens
             )
 
             # Create output_ids tensor for this single item
@@ -786,7 +683,7 @@ class VllmGenerationWorker:
 
                 if is_async_engine:
                     try:
-                        self.llm.shutdown()
+                        self.llm.shutdown_background_loop()
                     except Exception as e_stop:
                         print(f"Error calling shutdown_background_loop: {e_stop}")
                 # Explicitly delete the engine. This may trigger its __del__ method.
@@ -831,7 +728,9 @@ class VllmGenerationWorker:
                 "report_device_id_async can only be used with async_engine=True. Use report_device_id instead."
             )
 
-        result_or_coro = await self.llm.collective_rpc("report_device_id", args=tuple())
+        result_or_coro = self.llm.engine.model_executor.collective_rpc(
+            "report_device_id", args=tuple()
+        )
 
         if asyncio.iscoroutine(result_or_coro):
             list_of_worker_results = await result_or_coro
@@ -898,7 +797,7 @@ class VllmGenerationWorker:
                     "update_weights_from_ipc_handles_async can only be used with async_engine=True. Use update_weights_from_ipc_handles instead."
                 )
 
-            result_or_coro = await self.llm.collective_rpc(
+            result_or_coro = self.llm.engine.model_executor.collective_rpc(
                 "update_weights_from_ipc_handles", args=(ipc_handles,)
             )
 
@@ -952,7 +851,7 @@ class VllmGenerationWorker:
             )
 
         # Reset the prefix cache to ensure that prefix cache is not reused after weights are updated
-        await self.llm.reset_prefix_cache()
+        self.llm.engine.reset_prefix_cache()
         await self.llm.sleep(level=1)
 
         gc.collect()
@@ -1203,22 +1102,6 @@ class VllmGeneration(GenerationInterface):
         results = ray.get(futures)
         return results
 
-    def _report_device_id(self) -> list[list[str]]:
-        """Report the device ID of vllm workers."""
-        # Choose the appropriate method based on async_engine setting
-        method_name = (
-            "report_device_id_async"
-            if self.cfg["vllm_cfg"]["async_engine"]
-            else "report_device_id"
-        )
-        # Use run_all_workers_single_data for methods that don't need data
-        futures = self.worker_group.run_all_workers_single_data(
-            method_name, run_rank_0_only_axes=["tensor_parallel"]
-        )
-        # Wait for all futures to complete
-        results = ray.get(futures)
-        return results
-
     def generate(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
@@ -1443,7 +1326,7 @@ class VllmGeneration(GenerationInterface):
             # Directly pass ipc_handles to the method
             futures = self.worker_group.run_all_workers_multiple_data(
                 method_name,
-                ipc_handles=ipc_handles,
+                data=ipc_handles_list,
                 run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
             )
             # Wait for all futures to complete
