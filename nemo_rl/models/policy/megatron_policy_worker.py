@@ -282,6 +282,12 @@ class MegatronPolicyWorker:
             torch.distributed.barrier()
             torch.distributed.destroy_process_group()
 
+        if hasattr(parallel_state, "destroy_model_parallel"):
+            try:
+                parallel_state.destroy_model_parallel()
+            except:
+                pass  # Ignore errors if already destroyed
+
         pretrained_run_config = os.path.join(
             pretrained_path, "iter_0000000/run_config.yaml"
         )
