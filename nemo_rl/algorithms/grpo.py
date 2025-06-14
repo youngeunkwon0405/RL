@@ -947,6 +947,8 @@ def validate(
             print(f"\n  ⚠️ Error displaying message samples: {str(e)}")
             print("  ⚠️ Continuing validation without displaying samples...")
 
+    val_metrics["accuracy"] = val_batch["total_reward"].mean().item()
+
     # Get timing metrics
     timing_metrics = timer.get_timing_metrics(reduction_op="sum")
     validation_time = timing_metrics.get("total_validation_time", 0)
