@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import datetime
 import gc
 import os
 import time
@@ -77,7 +76,7 @@ from nemo.tron.setup import (
 from nemo.tron.state import GlobalState
 from nemo.tron.tokenizers.tokenizer import build_tokenizer
 from nemo.tron.utils.async_utils import maybe_finalize_async_save
-from nemo.tron.utils.common_utils import get_rank_safe, get_world_size_safe
+from nemo.tron.utils.common_utils import get_rank_safe
 from nemo.tron.utils.train_utils import (
     logical_and_across_model_parallel_group,
     reduce_max_stat_across_model_parallel_group,
@@ -267,17 +266,6 @@ class MegatronPolicyWorker:
             os.path.join(pretrained_path, "iter_0000000")
         )
 
-        # initialize torch distributed
-        init_process_group_kwargs = {
-            "backend": "nccl",
-            "world_size": get_world_size_safe(),
-            "rank": get_rank_safe(),
-            "timeout": datetime.timedelta(minutes=10),
-        }
-
-        torch.distributed.init_process_group(**init_process_group_kwargs)
-        torch.distributed.barrier(device_ids=[0])
-
         if get_rank_safe() == 0:
             if pt_checkpoint_exists:
                 print(
@@ -285,11 +273,14 @@ class MegatronPolicyWorker:
                 )
             else:
                 import_model_from_hf_name(hf_model_name, pretrained_path)
-            # pre_init_communication_queue.put(True)
-        # else:
-        # pre_init_communication_queue.get()
-        # pre_init_communication_queue.put(True)
-        torch.distributed.barrier()
+            pre_init_communication_queue.put(True)
+        else:
+            pre_init_communication_queue.get()
+            pre_init_communication_queue.put(True)
+
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+            torch.distributed.destroy_process_group()
 
         pretrained_run_config = os.path.join(
             pretrained_path, "iter_0000000/run_config.yaml"
