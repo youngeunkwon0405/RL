@@ -324,7 +324,7 @@ class MegatronPolicyWorker:
             save=weights_path,
             load=weights_path,
             pretrained_checkpoint=pretrained_path,  # This is the path to the pretrained ckpt for the SFT case
-            async_save=False,
+            async_save=False,  # This doesn't work right now.
             fully_parallel_save=True,
             fully_parallel_load=True,  # Enable fully parallel load
             load_rng=False,
