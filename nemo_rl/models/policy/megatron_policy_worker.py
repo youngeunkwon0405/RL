@@ -266,13 +266,58 @@ class MegatronPolicyWorker:
             os.path.join(pretrained_path, "iter_0000000")
         )
 
-        if get_rank_safe() == 0:
+        # More robust rank detection and synchronization
+        is_rank_zero = get_rank_safe() == 0
+
+        # Ensure clean slate before import
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+            torch.distributed.destroy_process_group()
+
+        if hasattr(parallel_state, "destroy_model_parallel"):
+            try:
+                parallel_state.destroy_model_parallel()
+            except:
+                pass  # Ignore errors if already destroyed
+
+        if is_rank_zero:
             if pt_checkpoint_exists:
                 print(
                     f"Checkpoint already exists at {pretrained_path}. Skipping import."
                 )
             else:
-                import_model_from_hf_name(hf_model_name, pretrained_path)
+                try:
+                    # Clean environment to prevent conflicts
+                    env_backup = {}
+                    env_vars_to_clean = [
+                        "MASTER_ADDR",
+                        "MASTER_PORT",
+                        "WORLD_SIZE",
+                        "LOCAL_RANK",
+                    ]
+                    for var in env_vars_to_clean:
+                        if var in os.environ:
+                            env_backup[var] = os.environ[var]
+                            del os.environ[var]
+
+                    import_model_from_hf_name(hf_model_name, pretrained_path)
+
+                    # Restore environment
+                    for var, val in env_backup.items():
+                        os.environ[var] = val
+
+                except Exception as e:
+                    print(f"Error importing model: {e}")
+                    raise
+                finally:
+                    # Force cleanup after import
+                    if torch.distributed.is_initialized():
+                        torch.distributed.destroy_process_group()
+                    if hasattr(parallel_state, "destroy_model_parallel"):
+                        try:
+                            parallel_state.destroy_model_parallel()
+                        except:
+                            pass
             pre_init_communication_queue.put(True)
         else:
             pre_init_communication_queue.get()
