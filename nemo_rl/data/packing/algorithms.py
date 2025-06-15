@@ -247,7 +247,7 @@ class ConcatenativePacker(SequencePacker):
         return bins
 
 
-class FirstFit(SequencePacker):
+class FirstFitPacker(SequencePacker):
     """Base class for First-Fit algorithms.
 
     First-Fit algorithms place each sequence into the first bin where it fits.
@@ -313,7 +313,7 @@ class FirstFit(SequencePacker):
         return bins
 
 
-class FirstFitDecreasing(FirstFit):
+class FirstFitDecreasingPacker(FirstFitPacker):
     """First-Fit Decreasing (FFD) algorithm for sequence packing.
 
     This algorithm sorts sequences by length in descending order and then
@@ -341,7 +341,7 @@ class FirstFitDecreasing(FirstFit):
         return indexed_lengths
 
 
-class FirstFitShuffle(FirstFit):
+class FirstFitShufflePacker(FirstFitPacker):
     """First-Fit Shuffle algorithm for sequence packing.
 
     This algorithm randomly shuffles the sequences and then places each
@@ -369,7 +369,7 @@ class FirstFitShuffle(FirstFit):
         return indexed_lengths
 
 
-class ModifiedFirstFitDecreasing(SequencePacker):
+class ModifiedFirstFitDecreasingPacker(SequencePacker):
     """Modified First-Fit Decreasing (MFFD) algorithm for sequence packing.
 
     This algorithm implements the Johnson & Garey (1985) Modified First-Fit-Decreasing
@@ -545,9 +545,9 @@ def get_packer(
     """
     packers: Dict[PackingAlgorithm, Type[SequencePacker]] = {
         PackingAlgorithm.CONCATENATIVE: ConcatenativePacker,
-        PackingAlgorithm.FIRST_FIT_DECREASING: FirstFitDecreasing,
-        PackingAlgorithm.FIRST_FIT_SHUFFLE: FirstFitShuffle,
-        PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING: ModifiedFirstFitDecreasing,
+        PackingAlgorithm.FIRST_FIT_DECREASING: FirstFitDecreasingPacker,
+        PackingAlgorithm.FIRST_FIT_SHUFFLE: FirstFitShufflePacker,
+        PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING: ModifiedFirstFitDecreasingPacker,
     }
 
     # Convert string to enum if needed
