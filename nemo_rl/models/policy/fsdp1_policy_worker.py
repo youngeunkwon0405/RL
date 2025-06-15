@@ -248,10 +248,6 @@ class FSDP1PolicyWorker:
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
     ) -> dict[str, Any]:
-        logging.debug("################################")
-        logging.debug("FSDP1 worker train")
-        logging.debug("################################")
-
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
         skip_tie_check = os.environ.get("NRL_SKIP_TIED_WEIGHT_CHECK")
@@ -423,7 +419,6 @@ class FSDP1PolicyWorker:
                 "all_mb_metrics": dict(mb_metrics),
             }
 
-            logging.debug("################################")
             return metrics
 
     def get_logprobs(

@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
 from itertools import chain
 from typing import Any, Optional, Union
 
@@ -30,7 +29,6 @@ from nemo_rl.data.llm_message_utils import (
     batched_message_log_to_flat_message,
 )
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
-from nemo_rl.utils.logger import log_json
 
 TokenizerType = PreTrainedTokenizerBase
 
@@ -115,16 +113,6 @@ class AllTaskProcessedDataset:
             entry, task_data_spec, self.tokenizer, self.max_seq_length, idx
         )
 
-        logging.debug(
-            "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_"
-        )
-        logging.debug("AllTaskProcessedDataset, __getitem__")
-        logging.debug(f"{idx=}")
-        log_json("entry", entry)
-        log_json("datum_spec", datum_spec)
-        logging.debug(
-            "-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_"
-        )
         return datum_spec
 
 
@@ -158,16 +146,6 @@ def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict[Any]:
         stop_strings=stop_strings,
     )
 
-    logging.debug(
-        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-    )
-    logging.debug("rl_collate_fn")
-    log_json("data_batch", data_batch)
-    log_json("output", output)
-    logging.debug(
-        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-    )
-
     return output
 
 
@@ -184,16 +162,6 @@ def packed_rl_collate_fn(
     output = rl_collate_fn(flattened_dataums)
     # Update the output to reflect the packed nature of the data
     output.packed_sequence_size = [len(inner) for inner in packet_data_batch]
-
-    logging.debug(
-        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-    )
-    logging.debug("packed_rl_collate_fn")
-    log_json("packet_data_batch", packet_data_batch)
-    log_json("output", output)
-    logging.debug(
-        "%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%"
-    )
 
     return output
 

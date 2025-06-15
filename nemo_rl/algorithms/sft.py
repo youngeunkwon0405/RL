@@ -44,7 +44,7 @@ from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import PolicyInterface
 from nemo_rl.models.policy.lm_policy import Policy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
-from nemo_rl.utils.logger import Logger, LoggerConfig, log_json
+from nemo_rl.utils.logger import Logger, LoggerConfig
 from nemo_rl.utils.timer import Timer
 
 logging.basicConfig(level=logging.DEBUG)
@@ -459,24 +459,14 @@ def sft_train(
             with timer.time("total_step_time"):
                 # Prepare batch and generate responses
                 print("▶ Preparing batch...")
-                logging.debug(
-                    "================================================================"
-                )
-                logging.debug("Training batch")
-                logging.debug(
-                    "================================================================"
-                )
-                log_json("batch", batch.get_dict())
 
                 with timer.time("data_processing"):
                     ## add loss mask based on role to every message
-                    logging.debug("add loss mask based on role to every message")
                     add_loss_mask_to_message_log(
                         batch["message_log"],
                         roles_to_train_on=["assistant"],
                     )
 
-                    logging.debug("batch message to flat")
                     cat_and_padded, input_lengths = batched_message_log_to_flat_message(
                         batch["message_log"],
                         pad_value_dict={"token_ids": tokenizer.pad_token_id},
@@ -485,7 +475,6 @@ def sft_train(
                         ],
                     )
 
-                    logging.debug("creating train data dict")
                     train_data: BatchedDataDict = BatchedDataDict(
                         {
                             "input_ids": cat_and_padded["token_ids"],
@@ -499,17 +488,11 @@ def sft_train(
                     num_samples = len(train_data["input_ids"])
                     num_tokens = sum(train_data["input_lengths"])
 
-                logging.debug("batch after processing:")
-                log_json("batch", batch.get_dict())
-                log_json("train_data", train_data.get_dict())
-
                 print("▶ Taking a training step...")
                 train_results = policy.train(train_data, loss_fn)
 
                 # consumed_samples += num_samples
                 # consumed_tokens += num_tokens
-
-                log_json("train_results", train_results)
 
                 is_last_step = total_steps + 1 >= master_config["sft"][
                     "max_num_steps"
@@ -577,10 +560,6 @@ def sft_train(
                             os.path.join(checkpoint_path, "train_dataloader.pt"),
                         )
                         checkpointer.finalize_checkpoint(checkpoint_path)
-
-                logging.debug(
-                    "================================================================"
-                )
 
             losses = train_results["loss"]
             metrics = {

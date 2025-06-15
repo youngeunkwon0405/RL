@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
 from collections import UserDict
 from copy import deepcopy
 from typing import (
@@ -955,7 +954,6 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
     def get_dict(self) -> dict[Any, Any]:
         """Get the underlying data dictionary."""
-        logging.debug("get_dict, paked_sequence_size: %s", self.packed_sequence_size)
         return self.data
 
 

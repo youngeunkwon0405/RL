@@ -49,7 +49,6 @@ from nemo_rl.models.policy.utils import (
     import_class_from_path,
     sliding_window_overwrite,
 )
-from nemo_rl.utils.logger import log_json
 from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
@@ -526,16 +525,6 @@ class DTensorPolicyWorker:
         gbs: Optional[int] = None,
         mbs: Optional[int] = None,
     ) -> dict[str, Any]:
-        logging.debug(
-            "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
-        )
-        logging.debug("DTensor worker train")
-        logging.debug(
-            "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
-        )
-
-        log_json("data", data.get_dict())
-
         """Train the policy on a batch of data with a given loss function."""
         # Check if the model has tied weights
         if (
@@ -553,10 +542,6 @@ class DTensorPolicyWorker:
         local_gbs = gbs // self.dp_size
         dataset_size = data.size
         num_global_batches = dataset_size // local_gbs
-
-        logging.debug(f"Dataset size: {dataset_size}")
-        logging.debug(f"Global batch size: {gbs}")
-        logging.debug(f"Local batch size: {local_gbs}")
 
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
@@ -582,11 +567,9 @@ class DTensorPolicyWorker:
             losses = []
             all_mb_metrics = []
             for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
-                logging.debug("slicing data")
                 global_batch: BatchedDataDict[Any] = data.slice(
                     gb_start, gb_start + local_gbs
                 )
-                log_json("global_batch", data.get_dict())
 
                 assert "sample_mask" in global_batch, (
                     "sample_mask must be present in the data!"
@@ -628,9 +611,6 @@ class DTensorPolicyWorker:
                     mb_iterator = batch.make_microbatch_iterator(mbs)
 
                 for mb in mb_iterator:
-                    logging.debug("$$$$$")
-                    log_json("mb", mb.get_dict())
-
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
                         if self.enable_seq_paccking:
                             input_ids = mb.get("input_ids").cuda()
@@ -661,12 +641,6 @@ class DTensorPolicyWorker:
                                 seq_len, device=input_ids.device
                             ).repeat(batch_size, 1)
                             flash_attn_kwargs = {}
-
-                        logging.debug("model inputs")
-                        log_json("input_ids", input_ids)
-                        log_json("attention_mask", attention_mask)
-                        log_json("position_ids", position_ids)
-                        log_json("flash_attn_kwargs", flash_attn_kwargs)
 
                         outputs = self.model(
                             input_ids=input_ids,
@@ -720,12 +694,6 @@ class DTensorPolicyWorker:
                         mb_losses.append(loss.item())
                         all_mb_metrics.append(loss_metrics)
 
-                    logging.debug("model outputs")
-                    logging.debug(f"{loss=}")
-                    logging.debug(f"{loss_metrics=}")
-                    logging.debug(f"{logits.shape=}")
-                    logging.debug(f"{torch.mean(logits)=}")
-
                 grad_norm: Optional[float | torch.Tensor] = None
 
                 if not eval_mode:
@@ -776,9 +744,6 @@ class DTensorPolicyWorker:
                 "all_mb_metrics": dict(mb_metrics),
             }
 
-            logging.debug(
-                "$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$"
-            )
             return metrics
 
     def get_logprobs(
