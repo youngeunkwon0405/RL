@@ -27,6 +27,7 @@ class PackingAlgorithm(enum.Enum):
     CONCATENATIVE = "concatenative"
     FIRST_FIT_DECREASING = "first_fit_decreasing"
     FIRST_FIT_SHUFFLE = "first_fit_shuffle"
+    MODIFIED_FIRST_FIT_DECREASING = "modified_first_fit_decreasing"
 
 
 class SequencePacker(ABC):
@@ -368,6 +369,161 @@ class FirstFitShuffle(FirstFit):
         return indexed_lengths
 
 
+class ModifiedFirstFitDecreasing(SequencePacker):
+    """Modified First-Fit Decreasing (MFFD) algorithm for sequence packing.
+
+    This algorithm implements the Johnson & Garey (1985) Modified First-Fit-Decreasing
+    heuristic. It classifies items into four categories (large, medium, small, tiny)
+    and uses a sophisticated 5-phase packing strategy to achieve better bin utilization
+    than standard First-Fit Decreasing.
+
+    The algorithm phases:
+    1. Classify items by size relative to bin capacity
+    2. Create one bin per large item
+    3. Add medium items to large bins (forward pass)
+    4. Add pairs of small items to bins with medium items (backward pass)
+    5. Greedily fit remaining items
+    6. Apply FFD to any leftovers
+
+    Time complexity: O(n log n) for sorting + O(n * m) for packing,
+    where n is the number of sequences and m is the number of bins.
+    """
+
+    def _classify_items(
+        self, items: List[Tuple[int, int]]
+    ) -> Tuple[
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+        List[Tuple[int, int]],
+    ]:
+        """Split items into large / medium / small / tiny classes.
+
+        Follows the classification used by Johnson & Garey:
+            large   : (C/2, C]
+            medium  : (C/3, C/2]
+            small   : (C/6, C/3]
+            tiny    : (0  , C/6]
+
+        Args:
+            items: List of (index, size) tuples
+
+        Returns:
+            Tuple of four lists (large, medium, small, tiny) without additional sorting.
+        """
+        large, medium, small, tiny = [], [], [], []
+        for idx, size in items:
+            if size > self.bin_capacity / 2:
+                large.append((idx, size))
+            elif size > self.bin_capacity / 3:
+                medium.append((idx, size))
+            elif size > self.bin_capacity / 6:
+                small.append((idx, size))
+            else:
+                tiny.append((idx, size))
+        return large, medium, small, tiny
+
+    def _pack_implementation(self, sequence_lengths: List[int]) -> List[List[int]]:
+        """Pack sequences using the Modified First-Fit Decreasing algorithm.
+
+        Args:
+            sequence_lengths: A list of sequence lengths to pack.
+
+        Returns:
+            A list of bins, where each bin is a list of indices into the original
+            sequence_lengths list.
+        """
+        # Validate inputs
+        if self.bin_capacity <= 0:
+            raise ValueError("bin_capacity must be positive")
+        if any(l <= 0 for l in sequence_lengths):
+            raise ValueError("sequence lengths must be positive")
+
+        # Validate sequence lengths don't exceed capacity
+        self._validate_sequence_lengths(sequence_lengths)
+
+        items: List[Tuple[int, int]] = [(i, l) for i, l in enumerate(sequence_lengths)]
+
+        # Phase-0: classify
+        large, medium, small, tiny = self._classify_items(items)
+
+        # Sort according to the rules of MFFD
+        large.sort(key=lambda x: x[1], reverse=True)  # descending size
+        medium.sort(key=lambda x: x[1], reverse=True)
+        small.sort(key=lambda x: x[1])  # ascending size
+        tiny.sort(key=lambda x: x[1])
+
+        # Phase-1: start one bin per large item
+        bins: List[List[Tuple[int, int]]] = [[item] for item in large]
+
+        # Phase-2: try to add one medium item to each large bin (forward pass)
+        for b in bins:
+            remaining = self.bin_capacity - sum(size for _, size in b)
+            for i, (idx, size) in enumerate(medium):
+                if size <= remaining:
+                    b.append(medium.pop(i))
+                    break
+
+        # Phase-3: backward pass – fill with two small items where possible
+        for b in reversed(bins):
+            has_medium = any(
+                self.bin_capacity / 3 < size <= self.bin_capacity / 2 for _, size in b
+            )
+            if has_medium or len(small) < 2:
+                continue
+            remaining = self.bin_capacity - sum(size for _, size in b)
+            if small[0][1] + small[1][1] > remaining:
+                continue
+            first_small = small.pop(0)
+            # pick the *largest* small that fits with first_small (so iterate from end)
+            second_idx = None
+            for j in range(len(small) - 1, -1, -1):
+                if small[j][1] <= remaining - first_small[1]:
+                    second_idx = j
+                    break
+            if second_idx is not None:
+                second_small = small.pop(second_idx)
+                b.extend([first_small, second_small])
+
+        # Phase-4: forward greedy fit of remaining items
+        remaining_items = sorted(
+            medium + small + tiny, key=lambda x: x[1], reverse=True
+        )
+        for b in bins:
+            while remaining_items:
+                rem = self.bin_capacity - sum(size for _, size in b)
+                # if even the smallest remaining doesn't fit we break
+                if rem < remaining_items[-1][1]:
+                    break
+
+                # pick the first (largest) that fits
+                chosen_idx = None
+                for i, (_, size) in enumerate(remaining_items):
+                    if size <= rem:
+                        chosen_idx = i
+                        break
+                if chosen_idx is None:
+                    break
+                b.append(remaining_items.pop(chosen_idx))
+
+        # Phase-5: FFD on leftovers
+        leftovers = remaining_items  # renamed for clarity
+        ffd_bins: List[List[Tuple[int, int]]] = []
+        for idx, size in sorted(leftovers, key=lambda x: x[1], reverse=True):
+            placed = False
+            for bin_ffd in ffd_bins:
+                if size <= self.bin_capacity - sum(s for _, s in bin_ffd):
+                    bin_ffd.append((idx, size))
+                    placed = True
+                    break
+            if not placed:
+                ffd_bins.append([(idx, size)])
+        bins.extend(ffd_bins)
+
+        # Convert to list of index lists (discard sizes)
+        return [[idx for idx, _ in b] for b in bins]
+
+
 def get_packer(
     algorithm: Union[PackingAlgorithm, str],
     bin_capacity: int,
@@ -391,6 +547,7 @@ def get_packer(
         PackingAlgorithm.CONCATENATIVE: ConcatenativePacker,
         PackingAlgorithm.FIRST_FIT_DECREASING: FirstFitDecreasing,
         PackingAlgorithm.FIRST_FIT_SHUFFLE: FirstFitShuffle,
+        PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING: ModifiedFirstFitDecreasing,
     }
 
     # Convert string to enum if needed

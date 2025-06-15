@@ -100,6 +100,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ]
 
     def test_get_packer(self, bin_capacity: int, algorithms: List[PackingAlgorithm]):
@@ -121,6 +122,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     def test_small_sequences(
@@ -145,6 +147,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     def test_medium_sequences(
@@ -169,6 +172,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     def test_large_sequences(
@@ -193,6 +197,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     # TODO(ahmadki): use the function to specify all test algorithms instead of lists below
@@ -229,6 +234,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     def test_empty_list(self, bin_capacity: int, algorithm: PackingAlgorithm):
@@ -245,6 +251,7 @@ class TestSequencePacker:
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
             PackingAlgorithm.FIRST_FIT_SHUFFLE,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     def test_error_cases(self, bin_capacity: int, algorithm: PackingAlgorithm):
@@ -261,6 +268,7 @@ class TestSequencePacker:
         [
             PackingAlgorithm.CONCATENATIVE,
             PackingAlgorithm.FIRST_FIT_DECREASING,
+            PackingAlgorithm.MODIFIED_FIRST_FIT_DECREASING,
         ],
     )
     def test_deterministic(

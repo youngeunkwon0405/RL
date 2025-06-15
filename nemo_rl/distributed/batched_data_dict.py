@@ -34,7 +34,6 @@ from nemo_rl.distributed.collectives import (
     gather_jagged_object_lists,
     rebalance_nd_tensor,
 )
-from nemo_rl.utils.bin_packing import mffd_pack
 
 DictT = TypeVar("DictT", bound=Mapping[str, Any])
 
@@ -490,6 +489,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                     sorted_v = [v[i] for i in batch_sorted_indices]
                 data[k] = sorted_v
 
+        # FIXME(ahmadki): needs a re-write
         elif sequence_packing_args is not None:
             # Modified-FFD is Johnson & Garey (1985) Modified First-Fit Decreasing heuristic
             assert sequence_packing_args["algorithm"] == "modified_ffd", (
@@ -523,10 +523,12 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                     _get_padded_seqlen(seq_len.item()) for seq_len in chunk_seqlens
                 ]
 
+                # FIXME(ahmadki): no longer exists. keeping the code until I refactor the function
                 # Apply sequence-aware MFFD bin packing
-                bin_assignments = mffd_pack(
-                    chunk_padded_seqlens_list, max_tokens_per_microbatch
-                )
+                # bin_assignments = mffd_pack(
+                #     chunk_padded_seqlens_list, max_tokens_per_microbatch
+                # )
+                bin_assignments = None
                 all_chunk_bin_assignments.append(bin_assignments)
 
             # create shards with the packed bins
