@@ -173,12 +173,12 @@ def gather_params(
             full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
 
         # gather across PP group
-        pp_gathered_global_keys = [None] * pp_world_size
-        torch.distributed.all_gather_object(
-            pp_gathered_global_keys, global_key, group=pp_group
-        )
+        # pp_gathered_global_keys = [None] * pp_world_size
+        # torch.distributed.all_gather_object(
+        #     pp_gathered_global_keys, global_key, group=pp_group
+        # )
         # To test no gather:
-        # pp_gathered_global_keys = [global_key] * pp_world_size
+        pp_gathered_global_keys = [global_key] * pp_world_size
 
         pp_gathered_params = [
             torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
@@ -188,12 +188,12 @@ def gather_params(
 
         # gather across EP group
         if ep_pattern.search(local_key):
-            ep_gathered_global_keys = [None] * ep_world_size
-            torch.distributed.all_gather_object(
-                ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
-            )
+            # ep_gathered_global_keys = [None] * ep_world_size
+            # torch.distributed.all_gather_object(
+            #     ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
+            # )
             # To test no gather:
-            # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
+            ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
 
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
             ep_gathered_params = [
@@ -212,7 +212,7 @@ def gather_params(
             if k is not None:
                 gathered_params[k] = p
         
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
+    # torch.cuda.empty_cache()
+    # torch.cuda.synchronize()
     print(f"Time taken to gather params: {time.time() - st}")
     return gathered_params
