@@ -31,18 +31,6 @@ from nemo.collections.llm.gpt.model.base import GPTConfig
 import nemo_rl.models.megatron.converters as model_converters
 from nemo_rl.models.megatron.converters.common import get_global_key_from_local_key
 
-REFIT_TIME_DEBUG = True
-
-def _rank_0_print(*args, **kwargs):
-    """ Utility function to print only on rank 0. """
-    if (
-        REFIT_TIME_DEBUG and
-        parallel_state.get_tensor_model_parallel_rank() == 0 and
-        parallel_state.get_pipeline_model_parallel_rank() == 0 and
-        parallel_state.get_expert_model_parallel_rank() == 0
-    ):
-        print("[Rank 0] ", *args, **kwargs)
-
 def get_tp_dim(model, param_name, named_modules_dict):
     # pass in named_modules_dict so we can get it ahead of time instead
     # of once for each param
@@ -58,7 +46,7 @@ def get_tp_dim(model, param_name, named_modules_dict):
     key = prefix + ".".join(param_name.split(".")[:-1])
     module = named_modules_dict.get(key)
     if module is None:
-        _rank_0_print(f"Module {key} not found in named_modules_dict")
+        print(f"Module {key} not found in named_modules_dict")
         return None
     if hasattr(module, "parallel_mode") and module.parallel_mode is not None:
         # TE layers sometimes have parallel_mode we can check directly
@@ -92,10 +80,6 @@ def gather_params(
     keys,
     key_to_global_keys: Optional[Dict[str, List[str]]] = None,
 ):
-    import time
-
-    gather_params_start_time = time.time()
-    st = gather_params_start_time
 
     tp_group = parallel_state.get_tensor_model_parallel_group()
     tp_world_size = torch.distributed.get_world_size(tp_group)
@@ -127,9 +111,6 @@ def gather_params(
                 # TODO: why cast to torch.bfloat16 instead of param.dtype?
                 full_param = torch.cat(gathered_slices, dim=tp_dim)
                 
-                et = time.time()
-                _rank_0_print(f"{local_key} {shape} gather tp time: {et - st}")
-                st = et
             else:
                 # TODO: why do we need to clone?
                 full_param = param
@@ -151,9 +132,6 @@ def gather_params(
             # To test no gather:
             # pp_gathered_global_keys = [global_key] * pp_world_size
 
-            et = time.time()
-            _rank_0_print(f"{local_key} {shape} gather pp global key time: {et - st}")
-            st = et
 
         pp_gathered_params = [
             torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
@@ -161,9 +139,6 @@ def gather_params(
         ]
         torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
 
-        et = time.time()
-        _rank_0_print(f"{local_key} {shape} gather pp params time: {et - st}")
-        st = et
 
         # gather across EP group
         if ep_pattern.search(local_key):
@@ -174,10 +149,6 @@ def gather_params(
                 )
                 # To test no gather:
                 # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
-
-                et = time.time()
-                _rank_0_print(f"{local_key} {shape} gather ep global keys time: {et - st}")
-                st = et
 
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
             ep_gathered_params = [
@@ -196,9 +167,6 @@ def gather_params(
                 flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
             flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
 
-            et = time.time()
-            _rank_0_print(f"{local_key} {shape} gather ep params time: {et - st}")
-            st = et
         else:
             if not use_cached_key_to_global_key_map:
                 flat_gathered_global_keys = pp_gathered_global_keys
@@ -211,9 +179,4 @@ def gather_params(
             if k is not None:
                 gathered_params[k] = p
     
-    st = time.time()
-    # torch.cuda.empty_cache()
-    # torch.cuda.synchronize()
-    _rank_0_print(f"Time taken to empty cuda cache and synchronize cuda: {time.time() - st}")
-    _rank_0_print(f"Time taken to gather params: {time.time() - gather_params_start_time}")
     return gathered_params

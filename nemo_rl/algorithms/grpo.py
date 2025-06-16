@@ -293,10 +293,8 @@ def refit_policy_generation(
     timer: Timer,
 ) -> None:
     """Refit the policy generation interface with the latest policy weights."""
-    import time
-    st = time.time()
 
-    policy.offload_before_refit()
+   policy.offload_before_refit()
 
     with timer.time("prepare_for_generation/reshard"):
         policy_generation.prepare_for_generation(tags=["weights"])
@@ -320,20 +318,18 @@ def refit_policy_generation(
             split_keys.append(keys)
         # do update
         for keys in split_keys:
-            ipc_handles = policy.get_weights_ipc_handles(keys)
-            if not policy_generation.update_weights(ipc_handles):
-                error_message = (
-                    "❌ Error: Updating weights for the generation policy failed during refit.\n"
-                    "This often indicates an issue with cuda-ipc or "
-                    "a problem within the generation backend (e.g., vLLM worker).\n"
-                )
-                raise RuntimeError(error_message)
+            with timer.time("prepare_for_generation/reshard/get_ipc_handles"):
+                ipc_handles = policy.get_weights_ipc_handles(keys)
+            with timer.time("prepare_for_generation/reshard/update_weights"):
+                if not policy_generation.update_weights(ipc_handles):
+                    error_message = (
+                        "❌ Error: Updating weights for the generation policy failed during refit.\n"
+                        "This often indicates an issue with cuda-ipc or "
+                        "a problem within the generation backend (e.g., vLLM worker).\n"
+                    )
+                    raise RuntimeError(error_message)
     policy.offload_after_refit()
     policy_generation.prepare_for_generation(tags=["kv_cache"])
-
-    et = time.time()
-    print(f"[Refit] Total time taken to offload_after_refit and prepare for generation: {et - st}")
-    st = et
 
 
 # ===============================================================================
