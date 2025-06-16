@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Optional, TypedDict, cast
 
 import numpy as np
+import rich
 import torch
 from torchdata.stateful_dataloader import StatefulDataLoader
 from transformers import PreTrainedTokenizerBase
@@ -586,6 +587,9 @@ def grpo_train(
         timing_metrics: dict[str, float] = timer.get_timing_metrics(reduction_op="sum")  # type: ignore
         # track example with high token mult prob error above 1.05
         if metrics["token_mult_prob_error"] > 1.05:
+            rich.print(
+                f"[bold red]Logging token mult prob error() plot for step {step + 1}[/bold red]"
+            )
             logger.log_plot_token_mult_prob_error(
                 {
                     "prompt_lengths": repeated_batch["length"],
@@ -594,9 +598,11 @@ def grpo_train(
                     "prev_logprobs": train_data["prev_logprobs"],
                     "token_mask": train_data["token_mask"],
                     "sample_mask": train_data["sample_mask"],
+                    "input_ids": train_data["input_ids"],
                 },
-                step,
+                step + 1,
                 name="train/token_mult_prob_error_plot_sample",
+                tokenizer=tokenizer,
             )
 
         print("\n📊 Training Results:")

@@ -26,7 +26,6 @@ from typing import Any, Callable, Mapping, Optional, TypedDict
 import ray
 import requests
 import torch
-import wandb
 from matplotlib import pyplot as plt
 from prometheus_client.parser import text_string_to_metric_families
 from prometheus_client.samples import Sample
@@ -36,6 +35,7 @@ from rich.logging import RichHandler
 from rich.panel import Panel
 from torch.utils.tensorboard import SummaryWriter
 
+import wandb
 from nemo_rl.data.interfaces import LLMMessageLogType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
@@ -619,7 +619,11 @@ class Logger(LoggerInterface):
         print(f"Logged data to {filepath}")
 
     def log_plot_token_mult_prob_error(
-        self, data: dict[str, Any], step: int, name: str
+        self,
+        data: dict[str, Any],
+        step: int,
+        name: str,
+        tokenizer,
     ) -> None:
         """Log a plot of log probability errors in samples.
 
@@ -643,6 +647,8 @@ class Logger(LoggerInterface):
 
         mult_prob_error = (torch.exp(diff) * mask).sum(dim=-1) / mask.sum(dim=-1)
 
+        for i, error in enumerate(mult_prob_error):
+            print(f"FOOBAR sample {i} error: {error}")
         sample_idx = torch.argmax(mult_prob_error)
         sample_error = mult_prob_error[sample_idx]
 
@@ -672,6 +678,42 @@ class Logger(LoggerInterface):
         relative_error = torch.abs((gen_prob - prev_prob) / gen_prob)
         max_rel_error_idx = torch.argmax(relative_error).item()
         max_rel_error = relative_error[max_rel_error_idx].item()
+
+        worst_example_tokens = data["input_ids"][
+            sample_idx, : data["full_lengths"][sample_idx]
+        ].tolist()
+        worst_example_str = tokenizer.decode(worst_example_tokens)
+        print(f"DEBUG: {(step, sample_idx, max_abs_error, max_abs_error_idx)=}")
+        print(f"DEBUG: {worst_example_str=}")
+        print(f"DEBUG: {worst_example_tokens=}")
+        print(
+            f"DEBUG: worst_generation_logprobs={repr(generation_logprobs[sample_idx, :].tolist())}"
+        )
+
+        if not hasattr(self, "text_table"):
+            self.text_table = wandb.Table(
+                columns=[
+                    "train_step",
+                    "problematic_idx_in_batch",
+                    "max_abs_error",
+                    "max_abs_error_token_idx",
+                    "problematic_str",
+                    "problematic_tokens",
+                    "generation_logprobs",
+                ],
+                log_mode="INCREMENTAL",
+            )
+        self.text_table.add_data(
+            step,
+            sample_idx,
+            max_abs_error,
+            max_abs_error_idx,
+            worst_example_str,
+            repr(worst_example_tokens),
+            repr(generation_logprobs[sample_idx, :].tolist()),
+        )
+        # assume wandb first as hack
+        self.loggers[0].run.log({"problematic_samples": self.text_table}, step=step)
 
         fig = plt.figure()
         step_idx = torch.arange(generation_start_idx, generation_end_idx)

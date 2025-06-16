@@ -123,6 +123,7 @@ class VllmGenerationWorker:
                 bundle_id = local_bundle_indices[0] // len(local_bundle_indices)
                 seed = node_idx * 1024 + bundle_id
 
+            print(f"CONFIGURE_WORKER VllmGenerationWorker seed: {seed}")
             init_kwargs["seed"] = seed
 
         # Check if this worker is part of a parallel group (TP or TP+PP).
@@ -229,6 +230,8 @@ class VllmGenerationWorker:
         if ModelFlag.VLLM_LOAD_FORMAT_AUTO.matches(self.model_name):
             load_format = "auto"
 
+        print(f"VllmGenerationWorker seed: {seed}")
+
         llm_kwargs = dict(
             model=self.model_name,
             load_format=load_format,
@@ -280,7 +283,9 @@ class VllmGenerationWorker:
 
         return list(stop_set) if stop_set else None
 
-    def _build_sampling_params(self, *, greedy: bool, stop_strings):
+    def _build_sampling_params(
+        self, *, greedy: bool, stop_strings, seed: Optional[int] = None
+    ):
         top_k_cfg = self.cfg["top_k"]
         top_k_val = 1 if greedy else (top_k_cfg if top_k_cfg is not None else -1)
 
@@ -292,13 +297,19 @@ class VllmGenerationWorker:
             top_k=top_k_val,
             max_tokens=self.cfg["max_new_tokens"],
             logprobs=0,
+            # enabling for nm5 to see prefill logprobs
+            prompt_logprobs=0,
             stop_token_ids=self.cfg["stop_token_ids"],
             stop=stop_strings,
             include_stop_str_in_output=True,
+            seed=seed,
         )
 
     def generate(
-        self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
+        self,
+        data: BatchedDataDict[GenerationDatumSpec],
+        greedy: bool = False,
+        seed: Optional[int] = None,
     ) -> BatchedDataDict[GenerationOutputSpec]:
         """Generate a batch of data using vLLM generation.
 
@@ -332,6 +343,7 @@ class VllmGenerationWorker:
         sampling_params = self._build_sampling_params(
             greedy=greedy,
             stop_strings=stop_strings,
+            seed=seed,
         )
 
         # verify inputs have correct padding
@@ -1124,13 +1136,49 @@ class VllmGeneration(GenerationInterface):
         sharded_data: list[SlicedDataDict] = data.shard_by_batch_size(
             dp_size, allow_uneven_shards=True
         )
+        extra_common_kwargs = {}
+        import pickle
+
+        import rich
+
+        if os.environ.get("NRL_DUMP_FIRST_VLLM_GENERATE_INPUTS"):
+            # THe generate method is not aware of what step it is, so if this
+            # option is enabled, we track the step internally. We always assume
+            # that the first step is 1 since someone debugging is likely starting
+            # from step 1 to ensure reproducibility during debugging.
+            if not hasattr(self, "_times_called"):
+                self._times_called = 0
+            self._times_called += 1
+            # We need to set the seed if this option is enabled since it's not possible to
+            # know a-priori which example will fail and what the seed will be. So once someone
+            # sees high logprob error, they should set this, which will seed the generations,
+            # and yield a different run from the original un-seeded run, but if the log prob
+            # error is systematic, we should see the error even on this differing run.
+            #
+            # Make sure to set checkpointing.save_period=1
+            extra_common_kwargs["seed"] = self._times_called
+            seed = self._times_called
+            current_step = self._times_called
+
+            global_idx = 0
+            for shard in sharded_data:
+                shard_size = shard["input_ids"].shape[0]
+                shard_path = f"/tmp/vllm_generate_inputs_stp{current_step}_seed{seed}_{global_idx}:{global_idx + shard_size}.pkl"
+                rich.print(
+                    f"[bold green]Dumping step {current_step} vLLM generate inputs to {shard_path}[/bold green]"
+                )
+
+                with open(shard_path, "wb") as f:
+                    # Dump the inner dict to avoid having users replicating outside of nemo-rl need our dictionary typings.
+                    pickle.dump(shard.data, f)
+                global_idx += shard_size
         future_bundle = self.worker_group.run_all_workers_sharded_data(
             "generate",
             sharded_data,
             in_sharded_axes=["data_parallel"],
             replicate_on_axes=None,  # just run on tp rank 0
             output_is_replicated=None,
-            common_kwargs={"greedy": greedy},
+            common_kwargs={"greedy": greedy, **extra_common_kwargs},
         )
 
         # Get results from the workers, respecting tied worker groups (only one result per tied worker group)

@@ -44,7 +44,7 @@ dependencies = [
 
 [project.optional-dependencies]
 vllm = [
-    "vllm",
+    "vllm==0.9.1",
 ]
 mcore = [
     # also need cudnn (https://developer.nvidia.com/cudnn-downloads?target_os=Linux&target_arch=x86_64&Distribution=Ubuntu&target_version=20.04&target_type=deb_network)
@@ -100,12 +100,19 @@ nemo-tron = { workspace = true }
 # The NeMo Run source to be used by nemo-tron
 nemo_run = { git = "https://github.com/NVIDIA/NeMo-Run", rev = "414f0077c648fde2c71bb1186e97ccbf96d6844c" }
 causal-conv1d = { git = "https://github.com/Dao-AILab/causal-conv1d", tag = "v1.5.0.post8" }
-mamba-ssm = { git = "https://github.com/state-spaces/mamba.git", tag = "v2.2.4" }
-vllm = { index = "vllm-index" }
+# Has roger's fix
+mamba-ssm = { git = "https://github.com/state-spaces/mamba.git", rev = "2e16fc3062cdcd4ebef27a9aa4442676e1c7edf4" }
+# Need to add this to the environment:
+# export VLLM_COMMIT=a3319f4f04fbea7defe883e516df727711e516cd
+# export VLLM_PRECOMPILED_WHEEL_LOCATION=https://wheels.vllm.ai/${VLLM_COMMIT}/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl
+# uv pip install https://wheels.vllm.ai/a3319f4f04fbea7defe883e516df727711e516cd/vllm-1.0.0.dev-cp38-abi3-manylinux1_x86_64.whl
 
-[[tool.uv.index]]
-name = "vllm-index"
-url = "https://wheels.vllm.ai/nightly"
+#vllm = { path = "./3rdparty/vllm" }
+#vllm = { index = "vllm-nightly-index" }
+
+#[[tool.uv.index]]
+#name = "vllm-nightly-index"
+#url = "https://wheels.vllm.ai/nightly"
 
 [tool.uv.workspace]
 members = [
