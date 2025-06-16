@@ -294,7 +294,7 @@ def refit_policy_generation(
 ) -> None:
     """Refit the policy generation interface with the latest policy weights."""
 
-   policy.offload_before_refit()
+    policy.offload_before_refit()
 
     with timer.time("prepare_for_generation/reshard"):
         policy_generation.prepare_for_generation(tags=["weights"])

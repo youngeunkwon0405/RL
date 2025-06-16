@@ -1329,13 +1329,11 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
-
         gathered_megatron_params = gather_params(
             self.model,
             keys,
             key_to_global_keys=self.local_key_to_global_keys,
         )
-
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )

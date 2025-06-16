@@ -31,6 +31,7 @@ from nemo.collections.llm.gpt.model.base import GPTConfig
 import nemo_rl.models.megatron.converters as model_converters
 from nemo_rl.models.megatron.converters.common import get_global_key_from_local_key
 
+
 def get_tp_dim(model, param_name, named_modules_dict):
     # pass in named_modules_dict so we can get it ahead of time instead
     # of once for each param
@@ -92,9 +93,7 @@ def gather_params(
     state_dict = model.state_dict()
     gathered_params = {}
     ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
-
     use_cached_key_to_global_key_map = key_to_global_keys is not None
-
     for local_key, shape, dtype in sorted(keys):
         if local_key in state_dict:
             param = state_dict[local_key]
@@ -110,13 +109,11 @@ def gather_params(
                 torch.distributed.all_gather(gathered_slices, param, group=tp_group)
                 # TODO: why cast to torch.bfloat16 instead of param.dtype?
                 full_param = torch.cat(gathered_slices, dim=tp_dim)
-                
             else:
                 # TODO: why do we need to clone?
                 full_param = param
             if not use_cached_key_to_global_key_map:
                 global_key = get_global_key_from_local_key(local_key, model.config)
-
         else:
             #  params that may not be on every rank, e.g. the embedding layer
             if not use_cached_key_to_global_key_map:
@@ -138,7 +135,6 @@ def gather_params(
             for _ in range(pp_world_size)
         ]
         torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
-
 
         # gather across EP group
         if ep_pattern.search(local_key):
@@ -178,5 +174,5 @@ def gather_params(
         for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
             if k is not None:
                 gathered_params[k] = p
-    
+
     return gathered_params
