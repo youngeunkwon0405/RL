@@ -42,13 +42,13 @@ class ClippedPGLossConfig(TypedDict):
 class ClippedPGLossDataDict(TypedDict):
     """Required keys for the Clipped Policy Gradient loss function."""
 
-    input_ids: Tensor
-    advantages: Tensor
-    prev_logprobs: Tensor
-    generation_logprobs: Tensor
-    reference_policy_logprobs: Tensor
-    token_mask: Tensor
-    sample_mask: Tensor
+    input_ids: torch.Tensor
+    advantages: torch.Tensor
+    prev_logprobs: torch.Tensor
+    generation_logprobs: torch.Tensor
+    reference_policy_logprobs: torch.Tensor
+    token_mask: torch.Tensor
+    sample_mask: torch.Tensor
     __extra__: Any
 
 
@@ -138,6 +138,9 @@ class ClippedPGLossFn(LossFunction):
         next_token_logits = next_token_logits.to(torch.float32)
 
         if vocab_parallel_group is not None:
+            assert vocab_parallel_rank is not None, (
+                "vocab_parallel_rank must be provided when vocab_parallel_group is provided"
+            )
             curr_logprobs = from_parallel_logits_to_logprobs(
                 next_token_logits,
                 data["input_ids"],
@@ -321,6 +324,9 @@ class NLLLoss(LossFunction):
 
         # Gather the logprobs for the actual next tokens
         if vocab_parallel_group is not None:
+            assert vocab_parallel_rank is not None, (
+                "vocab_parallel_rank must be provided when vocab_parallel_group is provided"
+            )
             token_logprobs = from_parallel_logits_to_logprobs(
                 next_token_logits,
                 data["input_ids"],
@@ -377,10 +383,10 @@ class DPOLossConfig(TypedDict):
 class DPOLossDataDict(TypedDict):
     """Required keys for the DPO loss function."""
 
-    input_ids: Tensor
-    reference_policy_logprobs: Tensor
-    token_mask: Tensor
-    sample_mask: Tensor
+    input_ids: torch.Tensor
+    reference_policy_logprobs: torch.Tensor
+    token_mask: torch.Tensor
+    sample_mask: torch.Tensor
 
 
 class DPOLossFn(LossFunction):
@@ -466,6 +472,9 @@ class DPOLossFn(LossFunction):
 
         next_token_logits = next_token_logits.to(torch.float32)
         if vocab_parallel_group is not None:
+            assert vocab_parallel_rank is not None, (
+                "vocab_parallel_rank must be provided when vocab_parallel_group is provided"
+            )
             token_logprobs = from_parallel_logits_to_logprobs(
                 next_token_logits,
                 data["input_ids"],
