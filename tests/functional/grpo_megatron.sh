@@ -17,12 +17,15 @@ export PYTHONPATH=${PROJECT_ROOT}:${PYTHONPATH:-}
 rm -rf $EXP_DIR $LOG_DIR
 mkdir -p $EXP_DIR $LOG_DIR
 
+# Using Qwen2.5-0.5B instead of Qwen3-0.6B because the latter is not supported by Megatron yet
 cd $PROJECT_ROOT
 uv run $PROJECT_ROOT/examples/run_grpo_math.py \
-    policy.model_name=Qwen/Qwen3-0.6B \
+    --config $PROJECT_ROOT/examples/configs/grpo_math_1B_megatron.yaml \
+    policy.model_name=Qwen/Qwen2.5-0.5B \
     grpo.num_prompts_per_step=2 \
     grpo.num_generations_per_prompt=4 \
     policy.train_global_batch_size=4 \
+    policy.logprob_batch_size=4 \
     policy.train_micro_batch_size=1 \
     cluster.gpus_per_node=2 \
     grpo.max_num_steps=2 \
