@@ -144,7 +144,7 @@ class VllmGenerationWorker:
         env_vars["VLLM_SKIP_P2P_CHECK"] = "1"
         # Need to give each DP group its own vllm cache to address:
         # https://github.com/vllm-project/vllm/issues/18851
-        env_vars["VLLM_CACHE_ROOT"] = f"~/.cache/vllm_{seed}"
+        env_vars["VLLM_CACHE_ROOT"] = os.path.expanduser("~/.cache/vllm_{seed}")
 
         return resources, env_vars, init_kwargs
 
