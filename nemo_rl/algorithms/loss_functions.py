@@ -103,6 +103,7 @@ class ClippedPGLossFn(LossFunction):
         self.ratio_clip_c = cfg["ratio_clip_c"]  # set to None to disable dual-clipping
         self.reference_policy_kl_penalty = cfg["reference_policy_kl_penalty"]
         self.disable_ppo_ratio = cfg.get("disable_ppo_ratio", False)
+        self.use_kl_fix = cfg.get("use_kl_fix", False)
         self.use_on_policy_kl_approximation = cfg["use_on_policy_kl_approximation"]
         self.use_importance_sampling_correction = cfg[
             "use_importance_sampling_correction"
@@ -158,16 +159,37 @@ class ClippedPGLossFn(LossFunction):
         else:
             kl_importance_weights = torch.ones_like(curr_logprobs)
 
-        kl = kl_importance_weights * calculate_kl_penalty_joschu2020(
-            logprobs_policy=curr_logprobs,
-            logprobs_reference=reference_policy_logprobs,
-        )
+        if self.use_kl_fix:
+            with torch.no_grad():
+                p_t = (curr_logprobs.detach() - reference_policy_logprobs) * mask
+                p_t = p_t.flip(dims=[-1]).cumsum(dim=-1).flip(dims=[-1])
+
+                kl_for_metric = kl_importance_weights * calculate_kl_penalty_joschu2020(
+                    logprobs_policy=curr_logprobs,
+                    logprobs_reference=reference_policy_logprobs,
+                )
+
+            kl = p_t * curr_logprobs
+        else:
+            kl = kl_importance_weights * calculate_kl_penalty_joschu2020(
+                logprobs_policy=curr_logprobs,
+                logprobs_reference=reference_policy_logprobs,
+            )
+            kl_for_metric = kl
 
         if self.loss_type == LossType.TOKEN_LEVEL:
             kl = masked_mean(kl, mask, global_normalization_factor=global_valid_toks)
+            kl_for_metric = masked_mean(
+                kl_for_metric, mask, global_normalization_factor=global_valid_toks
+            )
         else:
             kl = masked_mean(
                 masked_mean(kl, token_mask, dim=-1),
+                sample_mask,
+                global_normalization_factor=global_valid_seqs,
+            )
+            kl_for_metric = masked_mean(
+                masked_mean(kl_for_metric, token_mask, dim=-1),
                 sample_mask,
                 global_normalization_factor=global_valid_seqs,
             )
@@ -319,6 +341,7 @@ class ClippedPGLossFn(LossFunction):
                 "probs_ratio": probs_ratio,
                 "probs_ratio_clamped": probs_ratio_clamped,
                 "kl_penalty": kl.item(),
+                "kl_penalty_for_metric": kl_for_metric.item(),
                 "kl_penalty_for_loss": kl_for_loss.item(),
                 "token_mult_prob_error": mult_prob_error,
                 "sampling_importance_ratio": sample_importance_ratio.item(),
