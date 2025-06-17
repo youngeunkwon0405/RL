@@ -313,7 +313,7 @@ class NLLLoss(LossFunction):
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
-    ) -> tuple[Tensor, dict[str, Any]]:
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
         token_mask = data["token_mask"][:, 1:]
@@ -547,7 +547,7 @@ class DPOLossFn(LossFunction):
         global_valid_toks: Tensor | None,
         vocab_parallel_rank: Optional[int] = None,
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
-    ) -> tuple[Tensor, dict[str, Any]]:
+    ) -> tuple[torch.Tensor, dict[str, Any]]:
         sft_loss_chosen = torch.tensor(0.0)
         if self.sft_loss_weight > 0:
             assert global_valid_toks is not None, (
