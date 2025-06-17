@@ -95,6 +95,7 @@ policy:
       enabled: true
       resources:
         gpus_per_node: null
+        num_nodes: null
 data:
   max_input_seq_length: 512
   prompt_file: examples/prompts/cot.txt
