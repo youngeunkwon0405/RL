@@ -177,7 +177,7 @@ class RayWorkerBuilder:
                 placement_group_bundle_index=placement_group_bundle_index,
                 placement_group_capture_child_tasks=True,
             )
-            options["num_gpus"] = num_gpus
+            options["num_gpus"] = num_gpus - 0.01 * 5
             worker = worker_class.options(**options).remote(
                 *self.init_args, **worker_kwargs
             )
@@ -214,7 +214,7 @@ class RayWorkerBuilder:
         """
         # Set up worker arguments and resources
         options = deepcopy(extra_options)
-        initializer_options = {"runtime_env": options["runtime_env"]}
+        initializer_options = {"runtime_env": options["runtime_env"], 'num_gpus': 0.01}
         isolated_initializer = self.IsolatedWorkerInitializer.options(  # type: ignore # @ray.remote call
             **initializer_options
         ).remote(self.ray_actor_class_fqn, *self.args, **self.kwargs)

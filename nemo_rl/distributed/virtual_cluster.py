@@ -288,7 +288,7 @@ class RayVirtualCluster:
             for bundle_count in self._bundle_ct_per_node_list:
                 for _ in range(bundle_count):
                     all_bundles.append(
-                        {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle}
+                        {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle - 0.01 * 5}
                     )
 
             placement_groups = [
@@ -301,7 +301,7 @@ class RayVirtualCluster:
             for node_idx, bundle_count in enumerate(self._bundle_ct_per_node_list):
                 if bundle_count > 0:
                     node_bundles = [
-                        {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle}
+                        {"CPU": num_cpus_per_bundle, "GPU": num_gpus_per_bundle - 0.01 * 5}
                         for _ in range(bundle_count)
                     ]
                     pg = placement_group(
