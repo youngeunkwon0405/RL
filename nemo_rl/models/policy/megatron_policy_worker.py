@@ -89,6 +89,7 @@ from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.model_utils import from_parallel_logits_to_logprobs
 from nemo_rl.distributed.named_sharding import NamedSharding
+from nemo_rl.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
 from nemo_rl.models.generation.interfaces import (
     GenerationDatumSpec,
     GenerationOutputSpec,
@@ -321,7 +322,11 @@ def destroy_parallel_state():
         pass
 
 
-@ray.remote
+@ray.remote(
+    runtime_env={
+        **get_nsight_config_if_pattern_matches("megatron_policy_worker"),
+    }
+)
 class MegatronPolicyWorker:
     def __repr__(self):
         """Customizes the actor's prefix in the Ray logs.
@@ -1535,5 +1540,12 @@ class MegatronPolicyWorker:
 
     def shutdown(self):
         """Shutdown the policy."""
-        #
         pass
+
+    def start_gpu_profiling(self) -> None:
+        """Start GPU profiling."""
+        torch.cuda.profiler.start()
+
+    def stop_gpu_profiling(self) -> None:
+        """Stop GPU profiling."""
+        torch.cuda.profiler.stop()
