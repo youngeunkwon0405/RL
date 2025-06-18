@@ -114,11 +114,25 @@ def main():
     config: MasterConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
 
+    if (
+        config["grpo"]["num_prompts_per_step"]
+        * config["grpo"]["num_generations_per_prompt"]
+        != config["policy"]["train_global_batch_size"]
+        and config["policy"]["num_global_batch_repeats"] > 1
+    ):
+        raise ValueError(
+            f"num prompts per step ({config['grpo']['num_prompts_per_step']}) * "
+            f"num generations per prompt ({config['grpo']['num_generations_per_prompt']}) "
+            f"must be equal to train global batch size ({config['policy']['train_global_batch_size']}) "
+            f"if num global batch repeats ({config['policy']['num_global_batch_repeats']}) > 1 "
+            "because I don't shuffle the data so the batch will be seen in the same order like B1 B1 B1 B2 B2 B2 instead of B1 B2 B1 B2"
+        )
+
     # Print config
     print("Final config:")
     pprint.pprint(config)
 
-    # Get the next experiment directory with incremented ID
+    # Get the next experiment directory with incremented ID:vs
     config["logger"]["log_dir"] = get_next_experiment_dir(config["logger"]["log_dir"])
     print(f"📊 Using log directory: {config['logger']['log_dir']}")
     if config["checkpointing"]["enabled"]:

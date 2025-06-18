@@ -16,6 +16,7 @@ import gc
 import os
 from collections import defaultdict
 from contextlib import contextmanager, nullcontext
+from copy import deepcopy
 from typing import Any, Dict, Iterable, Optional, Tuple, Union
 
 import numpy as np
@@ -138,6 +139,8 @@ class DTensorPolicyWorker:
 
         self.cpu_offload = self.cfg["dtensor_cfg"]["cpu_offload"]
         self.max_grad_norm = self.cfg["max_grad_norm"]
+
+        self.num_global_batch_repeats = self.cfg["num_global_batch_repeats"]
 
         if self.cfg["precision"] == "float32":
             self.dtype = torch.float32
@@ -313,213 +316,235 @@ class DTensorPolicyWorker:
             self.model.train()
 
         with ctx:
-            # Get data from batch and move to device
-            data.to("cuda")
+            batch_data = data
+            all_synced_train_step_metrics = []
 
-            losses = []
-            train_step_metrics = []
-            train_step_metrics_no_accumulation = []
+            for _ in range(self.num_global_batch_repeats):
+                # prevent accidental mutation of the batch data
+                data = deepcopy(batch_data).to("cuda")
 
-            for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
-                global_batch: BatchedDataDict = data.slice(
-                    gb_start, gb_start + local_gbs
-                )
-
-                assert "sample_mask" in global_batch, (
-                    "sample_mask must be present in the data!"
-                )
-                ## get the normalization factor for the loss
-                local_valid_seqs = torch.sum(global_batch["sample_mask"])
-
-                if not "token_mask" in global_batch:
-                    local_valid_toks = (
-                        local_valid_seqs * global_batch["input_ids"].shape[1]
-                    )
-                else:
-                    local_valid_toks = torch.sum(
-                        global_batch["token_mask"][:, 1:]
-                        * global_batch["sample_mask"].unsqueeze(-1)
+                train_step_metrics = []
+                train_step_metrics_no_accumulation = []
+                for gb_idx, gb_start in enumerate(range(0, dataset_size, local_gbs)):
+                    global_batch: BatchedDataDict = data.slice(
+                        gb_start, gb_start + local_gbs
                     )
 
-                to_reduce = torch.tensor([local_valid_seqs, local_valid_toks]).cuda()
-                torch.distributed.all_reduce(to_reduce, group=self.dp_mesh.get_group())
-                global_valid_seqs, global_valid_toks = to_reduce[0], to_reduce[1]
-
-                if (
-                    hasattr(loss_fn, "loss_type")
-                    and loss_fn.loss_type == LossType.TOKEN_LEVEL
-                ):
-                    assert "token_mask" in global_batch, (
-                        "token_mask must be present in the data when using token-level loss"
+                    assert "sample_mask" in global_batch, (
+                        "sample_mask must be present in the data!"
                     )
+                    ## get the normalization factor for the loss
+                    local_valid_seqs = torch.sum(global_batch["sample_mask"])
 
-                self.optimizer.zero_grad()
-                batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
-                # Calculate number of microbatches to process
-                # make_microbatch_iterator assumes that the batch size is a multiple of the microbatch size
-                # so its safe to not check for the case where the last data slice is smaller than mbs
-                if self.cfg["dynamic_batching"]["enabled"]:
-                    mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
-                else:
-                    mb_iterator = batch.make_microbatch_iterator(microbatch_size=mbs)
+                    if not "token_mask" in global_batch:
+                        local_valid_toks = (
+                            local_valid_seqs * global_batch["input_ids"].shape[1]
+                        )
+                    else:
+                        local_valid_toks = torch.sum(
+                            global_batch["token_mask"][:, 1:]
+                            * global_batch["sample_mask"].unsqueeze(-1)
+                        )
 
-                mbs_sum_accumulator = defaultdict(list)
-                for mb in mb_iterator:
-                    input_ids = mb.get("input_ids").cuda()
-                    input_lengths = mb.get("input_lengths")
-                    batch_size, seq_len = input_ids.shape
-
-                    attention_mask = torch.zeros(
-                        (batch_size, seq_len), dtype=torch.long, device=input_ids.device
+                    to_reduce = torch.tensor(
+                        [local_valid_seqs, local_valid_toks]
+                    ).cuda()
+                    torch.distributed.all_reduce(
+                        to_reduce, group=self.dp_mesh.get_group()
                     )
-                    for i, length in enumerate(input_lengths):
-                        # For right-padded sequence, set 1s at the beginning of the sequence
-                        attention_mask[i, :length] = 1
+                    global_valid_seqs, global_valid_toks = to_reduce[0], to_reduce[1]
 
-                    with torch.autocast(device_type="cuda", dtype=self.dtype):
-                        attention_mask_input_all_ones = torch.ones(
+                    if (
+                        hasattr(loss_fn, "loss_type")
+                        and loss_fn.loss_type == LossType.TOKEN_LEVEL
+                    ):
+                        assert "token_mask" in global_batch, (
+                            "token_mask must be present in the data when using token-level loss"
+                        )
+
+                    self.optimizer.zero_grad()
+                    batch = data.get_batch(batch_idx=gb_idx, batch_size=local_gbs)
+                    # Calculate number of microbatches to process
+                    # make_microbatch_iterator assumes that the batch size is a multiple of the microbatch size
+                    # so its safe to not check for the case where the last data slice is smaller than mbs
+                    if self.cfg["dynamic_batching"]["enabled"]:
+                        mb_iterator = (
+                            batch.make_microbatch_iterator_with_dynamic_shapes()
+                        )
+                    else:
+                        mb_iterator = batch.make_microbatch_iterator(
+                            microbatch_size=mbs
+                        )
+
+                    mbs_sum_accumulator = defaultdict(list)
+                    for mb in mb_iterator:
+                        input_ids = mb.get("input_ids").cuda()
+                        input_lengths = mb.get("input_lengths")
+                        batch_size, seq_len = input_ids.shape
+
+                        attention_mask = torch.zeros(
                             (batch_size, seq_len),
                             dtype=torch.long,
                             device=input_ids.device,
                         )
-                        position_ids = torch.arange(
-                            seq_len, device=input_ids.device
-                        ).repeat(batch_size, 1)
+                        for i, length in enumerate(input_lengths):
+                            # For right-padded sequence, set 1s at the beginning of the sequence
+                            attention_mask[i, :length] = 1
 
-                        outputs = self.model(
-                            input_ids=input_ids,
-                            attention_mask=attention_mask_input_all_ones,
-                            position_ids=position_ids,
-                            use_cache=False,
+                        with torch.autocast(device_type="cuda", dtype=self.dtype):
+                            attention_mask_input_all_ones = torch.ones(
+                                (batch_size, seq_len),
+                                dtype=torch.long,
+                                device=input_ids.device,
+                            )
+                            position_ids = torch.arange(
+                                seq_len, device=input_ids.device
+                            ).repeat(batch_size, 1)
+
+                            # TODO: we probably don't want to cast the fp32 layer in autocast
+                            outputs = self.model(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask_input_all_ones,
+                                position_ids=position_ids,
+                                use_cache=False,
+                            )
+
+                        # Get logprobs
+                        if not hasattr(outputs, "logits"):
+                            logits = self.model.lm_head(outputs.last_hidden_state)
+                        else:
+                            logits = outputs.logits
+
+                        # Divide logits by temperature
+                        if (
+                            "generation" in self.cfg
+                            and self.cfg["generation"] is not None
+                        ):
+                            logits.div_(self.cfg["generation"]["temperature"])
+
+                        loss, loss_metrics = loss_fn(
+                            logits, mb, global_valid_seqs, global_valid_toks
                         )
 
-                    # Get logprobs
-                    if not hasattr(outputs, "logits"):
-                        logits = self.model.lm_head(outputs.last_hidden_state)
-                    else:
-                        logits = outputs.logits
+                        num_valid_samples = loss_metrics["num_valid_samples"]
+                        if num_valid_samples > 0:
+                            for k, v in loss_metrics.items():
+                                mbs_sum_accumulator[k].append(v)
 
-                    # Divide logits by temperature
-                    if "generation" in self.cfg and self.cfg["generation"] is not None:
-                        logits.div_(self.cfg["generation"]["temperature"])
+                        # Backward pass
+                        if not eval_mode:
+                            ## NOTE: invalid samples should be multiplied
+                            ## by zero in the loss function to prevent them
+                            ## from affecting the gradient calculation
 
-                    loss, loss_metrics = loss_fn(
-                        logits, mb, global_valid_seqs, global_valid_toks
-                    )
+                            # when FSDP reduces the gradients over the DP dim, they're automatically averaged
+                            # but we want to sum them so we cancel out the average here
+                            loss *= self.dp_size
+                            loss.backward()
 
-                    num_valid_samples = loss_metrics["num_valid_samples"]
-                    if num_valid_samples > 0:
-                        for k, v in loss_metrics.items():
-                            mbs_sum_accumulator[k].append(v)
+                    # accumulate here
+                    train_step_metric = {
+                        k: np.sum(v) for k, v in mbs_sum_accumulator.items()
+                    }
 
-                    # Backward pass
+                    grad_norm = None
                     if not eval_mode:
-                        ## NOTE: invalid samples should be multiplied
-                        ## by zero in the loss function to prevent them
-                        ## from affecting the gradient calculation
-
-                        # when FSDP reduces the gradients over the DP dim, they're automatically averaged
-                        # but we want to sum them so we cancel out the average here
-                        loss *= self.dp_size
-                        loss.backward()
-
-                # accumulate here
-                train_step_metric = {
-                    k: np.sum(v) for k, v in mbs_sum_accumulator.items()
-                }
-
-                grad_norm = None
-                if not eval_mode:
-                    with torch.no_grad():
-                        grad_norm = get_grad_norm(
-                            self.model.parameters(),
-                            dp_group=self.dp_mesh.get_group(),
-                            tp_group=self.tp_mesh.get_group(),
-                            dtype=torch.float32,
-                        )
-
-                        # TODO: I think this is actually synced DP wise already from the
-                        # bprop hooks?
-                        grad_sparsity, grad_sparsity_dict = get_grad_sparsity(
-                            self.model.named_parameters(),
-                            dp_group=self.dp_mesh.get_group(),
-                            tp_group=self.tp_mesh.get_group(),
-                        )
-
-                        if self.max_grad_norm is not None:
-                            clip_grad_by_total_norm_(
+                        with torch.no_grad():
+                            grad_norm = get_grad_norm(
                                 self.model.parameters(),
-                                max_grad_norm=self.max_grad_norm,
-                                total_norm=grad_norm,
+                                dp_group=self.dp_mesh.get_group(),
+                                tp_group=self.tp_mesh.get_group(),
                                 dtype=torch.float32,
                             )
-                        grad_norm = torch.tensor([grad_norm])
 
-                    # Update parameters
-                    self.optimizer.step()
+                            # TODO: I think this is actually synced DP wise already from the
+                            # bprop hooks?
+                            grad_sparsity, grad_sparsity_dict = get_grad_sparsity(
+                                self.model.named_parameters(),
+                                dp_group=self.dp_mesh.get_group(),
+                                tp_group=self.tp_mesh.get_group(),
+                            )
 
-                train_step_metrics.append(train_step_metric)
-                train_step_metrics_no_accumulation.append(
-                    {
-                        "lr": self.optimizer.param_groups[0]["lr"],
-                        "global_valid_seqs": global_valid_seqs.item(),
-                        "global_valid_toks": global_valid_toks.item(),
-                        "grad_norm": grad_norm.item(),
-                        "grad_sparsity": grad_sparsity,
-                        "grad_sparsity_dict": grad_sparsity_dict,
-                    }
-                )
+                            if self.max_grad_norm is not None:
+                                clip_grad_by_total_norm_(
+                                    self.model.parameters(),
+                                    max_grad_norm=self.max_grad_norm,
+                                    total_norm=grad_norm,
+                                    dtype=torch.float32,
+                                )
+                            grad_norm = torch.tensor([grad_norm])
 
-            # increment scheduler after all batches in rollout are processed
-            self.scheduler.step()
-            # dynamic batch and sequence dims causes alot of fragmentation, so clear
-            # the memory allocator before moving on
-            torch.cuda.empty_cache()
+                        # Update parameters
+                        self.optimizer.step()
 
-            synced_train_step_metrics = []
-
-            # Compute global loss across all ranks
-            with torch.no_grad():
-                for metric in train_step_metrics:
-                    keys = sorted(metric.keys())
-                    values = torch.as_tensor(
-                        [metric[k] for k in keys], dtype=torch.float32, device="cuda"
+                    train_step_metrics.append(train_step_metric)
+                    train_step_metrics_no_accumulation.append(
+                        {
+                            "lr": self.optimizer.param_groups[0]["lr"],
+                            "global_valid_seqs": global_valid_seqs.item(),
+                            "global_valid_toks": global_valid_toks.item(),
+                            "grad_norm": grad_norm.item(),
+                            "grad_sparsity": grad_sparsity,
+                            "grad_sparsity_dict": grad_sparsity_dict,
+                        }
                     )
 
-                    torch.distributed.all_reduce(values, group=self.dp_mesh.get_group())
+                # dynamic batch and sequence dims causes alot of fragmentation, so clear
+                # the memory allocator before moving on
+                torch.cuda.empty_cache()
 
-                    metric_dict = {k: v.cpu().item() for k, v in zip(keys, values)}
-                    metric_dict["sequence_level_ratios"] = (
-                        metric_dict["sequence_level_ratios"]
-                        / metric_dict["num_valid_samples"]
-                    )
+                synced_train_step_metrics = []
 
-                    metric_dict["clamped_min_ratios"] = (
-                        metric_dict["clamped_min_ratios"]
-                        / metric_dict["tokens_min_clipped"]
-                        if metric_dict["tokens_min_clipped"] > 0
-                        else 1
-                    )
-                    metric_dict["clamped_max_ratios"] = (
-                        metric_dict["clamped_max_ratios"]
-                        / metric_dict["tokens_max_clipped"]
-                        if metric_dict["tokens_max_clipped"] > 0
-                        else 1
-                    )
+                # Compute global loss across all ranks
+                with torch.no_grad():
+                    for metric in train_step_metrics:
+                        keys = sorted(metric.keys())
+                        values = torch.as_tensor(
+                            [metric[k] for k in keys],
+                            dtype=torch.float32,
+                            device="cuda",
+                        )
 
-                    synced_train_step_metrics.append(metric_dict)
-                for i, metric in enumerate(train_step_metrics_no_accumulation):
-                    synced_train_step_metrics[i].update(metric)
+                        torch.distributed.all_reduce(
+                            values, group=self.dp_mesh.get_group()
+                        )
 
-                for metric in synced_train_step_metrics:
-                    metric["percent_max_clipped"] = (
-                        metric["tokens_max_clipped"] / metric["global_valid_toks"]
-                    )
-                    metric["percent_min_clipped"] = (
-                        metric["tokens_min_clipped"] / metric["global_valid_toks"]
-                    )
+                        metric_dict = {k: v.cpu().item() for k, v in zip(keys, values)}
+                        metric_dict["sequence_level_ratios"] = (
+                            metric_dict["sequence_level_ratios"]
+                            / metric_dict["num_valid_samples"]
+                        )
 
-            return synced_train_step_metrics
+                        metric_dict["clamped_min_ratios"] = (
+                            metric_dict["clamped_min_ratios"]
+                            / metric_dict["tokens_min_clipped"]
+                            if metric_dict["tokens_min_clipped"] > 0
+                            else 1
+                        )
+                        metric_dict["clamped_max_ratios"] = (
+                            metric_dict["clamped_max_ratios"]
+                            / metric_dict["tokens_max_clipped"]
+                            if metric_dict["tokens_max_clipped"] > 0
+                            else 1
+                        )
+
+                        synced_train_step_metrics.append(metric_dict)
+                    for i, metric in enumerate(train_step_metrics_no_accumulation):
+                        synced_train_step_metrics[i].update(metric)
+
+                    for metric in synced_train_step_metrics:
+                        metric["percent_max_clipped"] = (
+                            metric["tokens_max_clipped"] / metric["global_valid_toks"]
+                        )
+                        metric["percent_min_clipped"] = (
+                            metric["tokens_min_clipped"] / metric["global_valid_toks"]
+                        )
+
+                # increment scheduler after all batches in rollout are processed
+                self.scheduler.step()
+                all_synced_train_step_metrics.extend(synced_train_step_metrics)
+
+        return all_synced_train_step_metrics
 
     def get_logprobs(
         self,
