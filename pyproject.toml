@@ -59,6 +59,9 @@ mcore = [
     "transformer-engine[pytorch]==2.3.0",
     "megatron-core",
     "nemo-tron",
+    # Libraries for ssm
+    "mamba-ssm",
+    "causal-conv1d",
 ]
 
 [dependency-groups]

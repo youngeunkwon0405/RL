@@ -2317,12 +2317,10 @@ source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
     { name = "blobfile" },
-    { name = "causal-conv1d" },
     { name = "colored" },
     { name = "datasets" },
     { name = "debugpy" },
     { name = "hydra-core" },
-    { name = "mamba-ssm" },
     { name = "math-verify" },
     { name = "matplotlib" },
     { name = "numpy" },
@@ -2343,6 +2341,8 @@ dependencies = [
 
 [package.optional-dependencies]
 mcore = [
+    { name = "causal-conv1d" },
+    { name = "mamba-ssm" },
     { name = "megatron-core" },
     { name = "nemo-tron" },
     { name = "transformer-engine", extra = ["pytorch"] },
@@ -2386,12 +2386,12 @@ test = [
 requires-dist = [
     { name = "accelerate", specifier = ">=0.26" },
     { name = "blobfile" },
-    { name = "causal-conv1d", git = "https://github.com/Dao-AILab/causal-conv1d?tag=v1.5.0.post8" },
+    { name = "causal-conv1d", marker = "extra == 'mcore'", git = "https://github.com/Dao-AILab/causal-conv1d?tag=v1.5.0.post8" },
     { name = "colored", specifier = "==2.2.3" },
     { name = "datasets", specifier = ">=3.6.0" },
     { name = "debugpy" },
     { name = "hydra-core" },
-    { name = "mamba-ssm", git = "https://github.com/state-spaces/mamba.git?rev=2e16fc3062cdcd4ebef27a9aa4442676e1c7edf4" },
+    { name = "mamba-ssm", marker = "extra == 'mcore'", git = "https://github.com/state-spaces/mamba.git?rev=2e16fc3062cdcd4ebef27a9aa4442676e1c7edf4" },
     { name = "math-verify" },
     { name = "matplotlib" },
     { name = "megatron-core", marker = "extra == 'mcore'", editable = "3rdparty/Megatron-LM-workspace" },
