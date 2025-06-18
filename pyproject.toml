@@ -17,16 +17,17 @@ dynamic = [
     "readme",
 ]
 description = "NeMo RL: A Scalable and Efficient Post-Training Library for Models Ranging from 1 GPU to 1000s, and from Tiny to >100B Parameters"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {text = "Apache 2.0"}
 dependencies = [
+    "setuptools",
     "torch==2.7.0",
     "colored==2.2.3",
     "ray[default]==2.46.0",
     "transformers>=4.51.0",
     "wandb",
     "numpy",
-    "datasets",
+    "datasets>=3.6.0",
     "rich",
     "math-verify",
     "accelerate>=0.26",
@@ -35,6 +36,11 @@ dependencies = [
     "torchdata",
     "nvidia-ml-py",
     "hydra-core",
+    "tiktoken",
+    "blobfile",
+    "debugpy",
+    "matplotlib",
+    "plotly"
 ]
 
 [project.optional-dependencies]
@@ -50,7 +56,6 @@ mcore = [
     "transformer-engine[pytorch]==2.3.0",
     "megatron-core",
     "nemo-tron",
-    "flash-attn==2.7.3"
 ]
 
 [dependency-groups]
@@ -82,7 +87,6 @@ dev = [
     "mypy",
     "types-PyYAML",
     "types-requests",
-    "debugpy",
 ]
 test = [
     "pytest>=7.0.0",
@@ -105,7 +109,7 @@ members = [
 
 [tool.uv]
 # Currently, TE must be built with no build-isolation b/c it requires torch
-no-build-isolation-package = ["transformer-engine-torch", "transformer-engine", "flash-attn"]
+no-build-isolation-package = ["transformer-engine-torch", "transformer-engine"]
 # Always apply the build group since dependencies like TE/mcore/nemo-run require build dependencies
 # and this lets us assume they are implicitly installed with a simply `uv sync`. Ideally, we'd
 # avoid including these in the default dependency set, but for now it's required.

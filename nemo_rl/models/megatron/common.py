@@ -12,23 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from functools import partial
-from typing import Iterable, Optional
+from typing import Any, Iterator, Optional
 
 import torch
 import torch.distributed as dist
 from megatron.core.models.gpt import GPTModel
+from megatron.core.packed_seq_params import PackedSeqParams
 from megatron.core.parallel_state import (
+    get_context_parallel_world_size,
     get_tensor_model_parallel_group,
     get_tensor_model_parallel_rank,
-    get_context_parallel_world_size,
-    get_context_parallel_rank,
-    get_pipeline_model_parallel_rank
 )
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from nemo.tron.state import GlobalState
-from megatron.core.packed_seq_params import PackedSeqParams
 
 from nemo_rl.algorithms.loss_functions import LossFunction, SequencePackingLossWrapper
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 
 def _pack_sequences_for_megatron(
@@ -38,13 +37,13 @@ def _pack_sequences_for_megatron(
     pad_packed_seq_to: Optional[int] = None,
 ) -> tuple[torch.Tensor, PackedSeqParams, torch.Tensor, Optional[torch.Tensor]]:
     """Pack sequences for Megatron model processing with optional context parallelism.
-    
+
     Args:
         input_ids: Input token IDs [batch_size, seq_length]
         seq_lengths: Actual sequence lengths for each sample [batch_size]
         pad_individual_seqs_to_multiple_of: Pad individual sequences to a multiple of this value
         pad_packed_seq_to: Pad packed sequences to this value
-        
+
     Returns:
         Tuple of:
         - packed_input_ids: Packed input tensor [1, T]
@@ -53,36 +52,44 @@ def _pack_sequences_for_megatron(
         - cu_seqlens_padded: Padded cumulative sequence lengths (if CP > 1)
     """
     batch_size = input_ids.shape[0]
-    
+
     # Build cumulative sequence lengths (cu_seqlens) and extract valid tokens
     cu_seqlens = [0]
-    cu_seqlens_padded = [0] if pad_individual_seqs_to_multiple_of > 1 or pad_packed_seq_to is not None else None
+    cu_seqlens_padded = (
+        [0]
+        if pad_individual_seqs_to_multiple_of > 1 or pad_packed_seq_to is not None
+        else None
+    )
     valid_tokens = []
-    
+
     pad_factor = pad_individual_seqs_to_multiple_of
-    
+
     for b in range(batch_size):
-        seq_len = seq_lengths[b].item() if torch.is_tensor(seq_lengths[b]) else seq_lengths[b]
-        
+        seq_len = (
+            seq_lengths[b].item() if torch.is_tensor(seq_lengths[b]) else seq_lengths[b]
+        )
+
         # Extract valid tokens for this sequence
         valid_tokens.append(input_ids[b, :seq_len])
-        
+
         # Update cumulative sequence lengths
         cu_seqlens.append(cu_seqlens[-1] + seq_len)
-        
+
         # For context parallelism, track padded sequence lengths
         if pad_factor > 1 or pad_packed_seq_to is not None:
             # Pad sequence length to multiple of (cp_size * 2)
             padded_seq_len = ((seq_len + pad_factor - 1) // pad_factor) * pad_factor
             cu_seqlens_padded.append(cu_seqlens_padded[-1] + padded_seq_len)
-    
+
     # Convert to tensors
     cu_seqlens = torch.tensor(cu_seqlens, dtype=torch.int32, device=input_ids.device)
     if pad_factor > 1 or pad_packed_seq_to is not None:
-        cu_seqlens_padded = torch.tensor(cu_seqlens_padded, dtype=torch.int32, device=input_ids.device)
+        cu_seqlens_padded = torch.tensor(
+            cu_seqlens_padded, dtype=torch.int32, device=input_ids.device
+        )
         if pad_packed_seq_to is not None:
             cu_seqlens_padded[-1] = pad_packed_seq_to
-    
+
     # Calculate max sequence length (padded if using CP)
     if pad_factor > 1 or (pad_packed_seq_to is not None):
         seq_lens_padded = cu_seqlens_padded[1:] - cu_seqlens_padded[:-1]
@@ -90,25 +97,32 @@ def _pack_sequences_for_megatron(
     else:
         seq_lens = cu_seqlens[1:] - cu_seqlens[:-1]
         max_seqlen = seq_lens.max().item()
-    
-   
+
     # Concatenate all valid tokens
     # If using individual padding, we need to pad individual sequences
     if pad_factor > 1:
         padded_tokens = []
         for b in range(batch_size):
-            seq_len = seq_lengths[b].item() if torch.is_tensor(seq_lengths[b]) else seq_lengths[b]
+            seq_len = (
+                seq_lengths[b].item()
+                if torch.is_tensor(seq_lengths[b])
+                else seq_lengths[b]
+            )
             padded_seq_len = ((seq_len + pad_factor - 1) // pad_factor) * pad_factor
-            
+
             # Pad this sequence to the required length
             seq_tokens = input_ids[b, :seq_len]
             if padded_seq_len > seq_len:
                 # Pad with zeros (or use a padding token if available)
-                padding = torch.zeros(padded_seq_len - seq_len, dtype=seq_tokens.dtype, device=seq_tokens.device)
+                padding = torch.zeros(
+                    padded_seq_len - seq_len,
+                    dtype=seq_tokens.dtype,
+                    device=seq_tokens.device,
+                )
                 seq_tokens = torch.cat([seq_tokens, padding])
-            
+
             padded_tokens.append(seq_tokens)
-        
+
         # Concatenate all padded tokens
         # For 'thd' format, the shape should be [1, T] where T is total tokens
         packed_input_ids = torch.cat(padded_tokens, dim=0).unsqueeze(0)
@@ -116,13 +130,24 @@ def _pack_sequences_for_megatron(
         # No individual padding, just concatenate valid tokens
         # For 'thd' format, the shape should be [1, T] where T is total tokens
         packed_input_ids = torch.cat(valid_tokens, dim=0).unsqueeze(0)
-    
+
     if pad_packed_seq_to is not None:
-        packed_input_ids = torch.cat([packed_input_ids, torch.zeros(1, pad_packed_seq_to - packed_input_ids.shape[1], dtype=packed_input_ids.dtype, device=packed_input_ids.device)], dim=1)
-    
+        packed_input_ids = torch.cat(
+            [
+                packed_input_ids,
+                torch.zeros(
+                    1,
+                    pad_packed_seq_to - packed_input_ids.shape[1],
+                    dtype=packed_input_ids.dtype,
+                    device=packed_input_ids.device,
+                ),
+            ],
+            dim=1,
+        )
+
     if cu_seqlens_padded is None:
         cu_seqlens_padded = cu_seqlens.clone()
-        
+
     packed_seq_params = PackedSeqParams(
         cu_seqlens_q=cu_seqlens,
         cu_seqlens_kv=cu_seqlens,
@@ -130,10 +155,15 @@ def _pack_sequences_for_megatron(
         cu_seqlens_kv_padded=cu_seqlens_padded,
         max_seqlen_q=int(max_seqlen),
         max_seqlen_kv=int(max_seqlen),
-        qkv_format='thd',
+        qkv_format="thd",
     )
- 
-    return packed_input_ids.contiguous(), packed_seq_params, cu_seqlens, cu_seqlens_padded
+
+    return (
+        packed_input_ids.contiguous(),
+        packed_seq_params,
+        cu_seqlens,
+        cu_seqlens_padded,
+    )
 
 
 def _unpack_sequences_from_megatron(
@@ -145,7 +175,7 @@ def _unpack_sequences_from_megatron(
     original_seq_length: int,
 ) -> torch.Tensor:
     """Unpack sequences from Megatron output format.
-    
+
     Args:
         output_tensor: Packed output tensor [1, T, vocab_size]
         seq_lengths: Actual sequence lengths for each sample
@@ -153,46 +183,50 @@ def _unpack_sequences_from_megatron(
         cu_seqlens_padded: Padded cumulative sequence lengths (if CP was used)
         original_batch_size: Original batch size
         original_seq_length: Original maximum sequence length
-        
+
     Returns:
         Unpacked output tensor [batch_size, seq_length, vocab_size]
     """
     # Remove the batch dimension to get [T, vocab_size]
     output_tensor = output_tensor.squeeze(0)
-    
+
     # Create a padded output tensor with original shape
     vocab_size = output_tensor.shape[-1]
     unpacked_output = torch.zeros(
         (original_batch_size, original_seq_length, vocab_size),
         dtype=output_tensor.dtype,
-        device=output_tensor.device
+        device=output_tensor.device,
     )
-    
+
     # Get context parallel size to determine which cu_seqlens to use
     cp_size = get_context_parallel_world_size()
-    
+
     # Fill in the unpacked output tensor with valid tokens
     for b in range(original_batch_size):
         # Get actual sequence length for this sample
-        seq_len = seq_lengths[b].item() if torch.is_tensor(seq_lengths[b]) else seq_lengths[b]
-        
+        seq_len = (
+            seq_lengths[b].item() if torch.is_tensor(seq_lengths[b]) else seq_lengths[b]
+        )
+
         if cp_size > 1 and cu_seqlens_padded is not None:
             # When using CP, we need to account for padding
             # Calculate the padded sequence boundaries
             pad_factor = cp_size * 2
             padded_seq_len = ((seq_len + pad_factor - 1) // pad_factor) * pad_factor
             start_idx = cu_seqlens_padded[b].item()
-            
+
             # Only copy the valid tokens (not the padding)
-            unpacked_output[b, :seq_len] = output_tensor[start_idx:start_idx + seq_len]
+            unpacked_output[b, :seq_len] = output_tensor[
+                start_idx : start_idx + seq_len
+            ]
         else:
             # No CP, use regular cu_seqlens
             start_idx = cu_seqlens[b].item()
             end_idx = cu_seqlens[b + 1].item()
-            
+
             # Copy the valid tokens to the unpacked tensor
             unpacked_output[b, :seq_len] = output_tensor[start_idx:end_idx]
-    
+
     return unpacked_output
 
 
@@ -200,13 +234,13 @@ def forward_step_arbitrary_loss(
     state: GlobalState,
     global_valid_seqs: torch.Tensor,
     global_valid_toks: torch.Tensor,
-    data_iterator: Iterable,
+    data_iterator: Iterator[BatchedDataDict[Any]],
     model: GPTModel,
     loss_fn: LossFunction,
     pack_sequences: bool = False,
     seq_length_key: Optional[str] = None,
     pad_individual_seqs_to_multiple_of: int = 1,
-    pad_full_seq_to: Optional[int] = None, 
+    pad_full_seq_to: Optional[int] = None,
 ):
     """Forward training step with support for packed sequences and context parallelism.
 
@@ -219,7 +253,7 @@ def forward_step_arbitrary_loss(
         loss_fn (LossFunction): Loss function to apply
         pack_sequences (bool): Whether to pack sequences for efficiency
         seq_length_key (Optional[str]): Key in data_dict containing actual sequence lengths
-        
+
     Notes on packed sequences with context parallelism (CP):
         - When CP > 1, each sequence is padded to a multiple of (cp_size * 2)
         - The factor of 2 ensures load balancing for causal attention
@@ -236,26 +270,35 @@ def forward_step_arbitrary_loss(
         attention_mask = None
         position_ids = None
         packed_seq_params = None
-        
+
         original_batch_size = input_ids.shape[0]
         original_seq_length = input_ids.shape[1]
         seq_lengths = None  # Will be set if using packed sequences
         cu_seqlens = None
         cu_seqlens_padded = None
-        
+
         if pack_sequences:
             # For packed sequences with padded input, we need sequence lengths
-            assert seq_length_key is not None, "seq_length_key must be provided for packed sequences"
-            assert seq_length_key in data_dict, f"{seq_length_key} not found in data_dict"
-            
+            assert seq_length_key is not None, (
+                "seq_length_key must be provided for packed sequences"
+            )
+            assert seq_length_key in data_dict, (
+                f"{seq_length_key} not found in data_dict"
+            )
+
             # Get sequence lengths and context parallel size
             seq_lengths = data_dict[seq_length_key]
-            
+
             # Pack sequences
-            input_ids, packed_seq_params, cu_seqlens, cu_seqlens_padded = _pack_sequences_for_megatron(
-                input_ids, seq_lengths, pad_individual_seqs_to_multiple_of, pad_full_seq_to
+            input_ids, packed_seq_params, cu_seqlens, cu_seqlens_padded = (
+                _pack_sequences_for_megatron(
+                    input_ids,
+                    seq_lengths,
+                    pad_individual_seqs_to_multiple_of,
+                    pad_full_seq_to,
+                )
             )
-            
+
             # For packed sequences, position_ids and attention_mask are typically None
             # The PackedSeqParams handles all necessary sequence information
             position_ids = None
@@ -268,13 +311,15 @@ def forward_step_arbitrary_loss(
             )
 
     with straggler_timer:
-        output_tensor = model(input_ids, position_ids, attention_mask, packed_seq_params=packed_seq_params)
-        
+        output_tensor = model(
+            input_ids, position_ids, attention_mask, packed_seq_params=packed_seq_params
+        )
+
         # Unpack the output tensor if we did packed sequences
         if pack_sequences and packed_seq_params is not None:
             # remove padding
             loss_fn = SequencePackingLossWrapper(loss_fn, packed_seq_params)
-        
+
         loss_data = data_dict
 
     return output_tensor, partial(
@@ -289,7 +334,7 @@ def forward_step_arbitrary_loss(
 
 def broadcast_tensor(
     tensor: torch.Tensor | None, src_rank: int, group: dist.ProcessGroup
-):
+) -> torch.Tensor:
     """Broadcasts a tensor from src_rank to all ranks in the group using broadcast_object_list for metadata.
 
     Handles the case where the input tensor might be None on non-source ranks.

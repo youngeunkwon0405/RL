@@ -59,6 +59,7 @@ simple_policy_config = {
         "sequence_parallel": False,
         "activation_checkpointing": False,
         "tensor_parallel_size": 1,
+        "context_parallel_size": 1,
         "custom_parallel_plan": None,
     },
     "dynamic_batching": {
@@ -66,7 +67,9 @@ simple_policy_config = {
     },
     "max_grad_norm": 1.0,
     "generation": {
+        "backend": "vllm",
         "temperature": 1.0,
+        "colocated": {"enabled": True},
     },
 }
 

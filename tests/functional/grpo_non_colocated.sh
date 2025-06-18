@@ -18,25 +18,25 @@ rm -rf $EXP_DIR $LOG_DIR
 mkdir -p $EXP_DIR $LOG_DIR
 
 cd $PROJECT_ROOT
-uv run $PROJECT_ROOT/examples/run_dpo.py \
+uv run $PROJECT_ROOT/examples/run_grpo_math.py \
     policy.model_name=Qwen/Qwen3-0.6B \
+    grpo.num_prompts_per_step=2 \
+    grpo.num_generations_per_prompt=4 \
+    policy.train_global_batch_size=4 \
+    policy.train_micro_batch_size=1 \
+    policy.generation.colocated.enabled=false \
+    policy.generation.colocated.resources.gpus_per_node=1 \
     cluster.gpus_per_node=2 \
-    dpo.max_num_steps=3 \
-    dpo.val_batches=1 \
-    dpo.val_global_batch_size=8 \
-    policy.train_global_batch_size=8 \
+    grpo.max_num_steps=2 \
     logger.tensorboard_enabled=true \
     logger.log_dir=$LOG_DIR \
     logger.wandb_enabled=false \
-    logger.monitor_gpus=true \
     checkpointing.enabled=false \
     $@ \
     2>&1 | tee $RUN_LOG
 
 uv run tests/json_dump_tb_logs.py $LOG_DIR --output_path $JSON_METRICS
 
-# TODO: threshold set higher since test is flaky
-# https://github.com/NVIDIA/NeMo-RL/issues/370
 uv run tests/check_metrics.py $JSON_METRICS \
-  'data["train/loss"]["3"] < 0.8'
+    'max(data["train/token_mult_prob_error"]) < 1.05' \
 

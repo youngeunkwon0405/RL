@@ -230,6 +230,13 @@ base_vllm_test_config: VllmConfig = {
         "disable_log_requests": True,
         "gpu_memory_utilization": 0.6,
     },
+    "colocated": {
+        "enabled": True,
+        "resources": {
+            "gpus_per_node": None,
+            "num_nodes": None,
+        },
+    },
 }
 
 
@@ -240,10 +247,10 @@ def multi_step_setup_hf(
     multi_step_calculator_environment,
     initial_multi_step_calculator_batch,
 ):
-    """Sets up components for multi-step calculator tests using HfPolicy."""
+    """Sets up components for multi-step calculator tests using Policy."""
     policy = None
     task_to_env, _ = multi_step_calculator_environment
-    print("Creating HfPolicy for Multi-Step Calculator Test...")
+    print("Creating Policy for Multi-Step Calculator Test...")
     try:
         config = deepcopy(base_hf_test_config)
         config["tokenizer_name"] = rollout_tokenizer.name_or_path
@@ -268,10 +275,10 @@ def multi_step_setup_hf(
             rollout_cluster,
         )
     finally:
-        print("Cleaning up HfPolicy (Multi-Step Calc Test)...")
+        print("Cleaning up Policy (Multi-Step Calc Test)...")
         if policy:
             policy.shutdown()
-        print("HfPolicy cleanup finished (Multi-Step Calc Test).")
+        print("Policy cleanup finished (Multi-Step Calc Test).")
 
 
 @pytest.fixture(scope="function")
@@ -316,7 +323,7 @@ def multi_step_setup_vllm(
 
 
 def test_run_multi_step_calculator_hf(multi_step_setup_hf):
-    """Tests multi-step calculator rollout with HfPolicy."""
+    """Tests multi-step calculator rollout with Policy."""
     policy, rollout_tokenizer, task_to_env, initial_batch, rollout_cluster = (
         multi_step_setup_hf
     )

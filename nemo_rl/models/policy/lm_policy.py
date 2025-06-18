@@ -67,6 +67,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         self.cp_size = 1
         tp_size = 1
         pp_size = 1
+        cp_size = 1
 
         worker_builder_cls: str
         training_backend = None
@@ -78,6 +79,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                     "nemo_rl.models.policy.dtensor_policy_worker.DTensorPolicyWorker"
                 )
                 tp_size = config["dtensor_cfg"]["tensor_parallel_size"]
+                cp_size = config["dtensor_cfg"]["context_parallel_size"]
             else:
                 worker_builder_cls = (
                     "nemo_rl.models.policy.fsdp1_policy_worker.FSDP1PolicyWorker"
@@ -89,24 +91,30 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             )
             tp_size = config["megatron_cfg"]["tensor_model_parallel_size"]
             pp_size = config["megatron_cfg"]["pipeline_model_parallel_size"]
-            self.cp_size = config["megatron_cfg"]["context_parallel_size"]
+            cp_size = config["megatron_cfg"]["context_parallel_size"]
             training_backend = "megatron"
         else:
-            raise ValueError(
-                "Invalid training backend, unsolvable. Enable megatron_cfg.enabled or use hf."
+            training_backend = "hf"
+            worker_builder_cls = (
+                "nemo_rl.models.policy.fsdp1_policy_worker.FSDP1PolicyWorker"
             )
 
         self.sharding_annotations = NamedSharding(
             layout=np.arange(cluster.world_size()).reshape(
                 pp_size,  # PP
                 -1,  # DP
+                cp_size,  # CP
                 tp_size,  # TP
             ),
-            names=["pipeline_parallel", "data_parallel", "tensor_parallel"],
+            names=[
+                "pipeline_parallel",
+                "data_parallel",
+                "context_parallel",
+                "tensor_parallel",
+            ],
         )
 
-        # A queue for worker communication before torch dist init
-        pre_init_queue: RayQueue = RayQueue()
+        pre_init_queue = RayQueue()
         worker_builder = RayWorkerBuilder(
             worker_builder_cls,
             config,
@@ -129,7 +137,10 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         if config["dynamic_batching"]["enabled"]:
             assert config["dtensor_cfg"]["enabled"] or training_backend == "megatron", (
-                "Dynamic batch is only supported for DTensor policy or Megatron policy."
+                "Dynamic batch is only supported for DTensor or Megatron policy."
+            )
+            assert pp_size == 1, (
+                "Dynamic batching is only supported for single pipeline parallel stage"
             )
             self.use_dynamic_batches = True
             self.dynamic_batching_args: DynamicBatchingArgs = {
@@ -163,6 +174,16 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
 
         self.cfg = config
 
+    def init_collective(
+        self, ip: str, port: int, world_size: int
+    ) -> list[ray.ObjectRef]:
+        """Initialize the collective communication."""
+        futures = self.worker_group.run_all_workers_single_data(
+            "init_collective", ip=ip, port=port, world_size=world_size
+        )
+        # this function should co-work with vllm, so we should wait for all futures to complete outside
+        return futures
+
     def get_logprobs(
         self, data: BatchedDataDict[GenerationDatumSpec]
     ) -> BatchedDataDict[LogprobOutputSpec]:
@@ -174,6 +195,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
           The logprob of input token i is specified at position i in the output logprobs tensor.
         """
         dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        cp_size = self.sharding_annotations.get_axis_size("context_parallel")
         sharded_data: list[SlicedDataDict]
         unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
@@ -181,7 +203,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 "dynamic_batching"
             ]["logprob_mb_tokens"]
             sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
-                dp_size,
+                cp_size * dp_size,
                 batch_size=None,
                 dynamic_batching_args=self.dynamic_batching_args,
             )
@@ -196,14 +218,24 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             )
         else:
             sharded_data = data.shard_by_batch_size(  # type: ignore
-                dp_size,
+                cp_size * dp_size,
                 batch_size=None,
             )
 
+        sharded_data_2d = []
+        shard_idx = 0
+        # Convert to 2d dim array
+        for _ in range(dp_size):
+            cp_data = []
+            for _ in range(cp_size):
+                cp_data.append(sharded_data[shard_idx])
+                shard_idx += 1
+            sharded_data_2d.append(cp_data)
+
         futures = self.worker_group.run_all_workers_sharded_data(
             "get_logprobs",
-            sharded_data,
-            in_sharded_axes=["data_parallel"],
+            sharded_data_2d,
+            in_sharded_axes=["data_parallel", "context_parallel"],
             replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
             output_is_replicated=["tensor_parallel", "pipeline_parallel"],
         )
@@ -228,6 +260,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         Returns: Identical to get_logprobs.
         """
         dp_size = self.sharding_annotations.get_axis_size("data_parallel")
+        cp_size = self.sharding_annotations.get_axis_size("context_parallel")
         sharded_data: list[SlicedDataDict]
         unsorted_data_indices: list[int]
         if self.use_dynamic_batches:
@@ -235,7 +268,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
                 "dynamic_batching"
             ]["logprob_mb_tokens"]
             sharded_data, unsorted_data_indices = data.shard_by_batch_size(  # type: ignore
-                dp_size,
+                cp_size * dp_size,
                 batch_size=None,
                 dynamic_batching_args=self.dynamic_batching_args,
             )
@@ -250,14 +283,24 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             )
         else:
             sharded_data = data.shard_by_batch_size(  # type: ignore
-                dp_size,
+                cp_size * dp_size,
                 batch_size=None,
             )
 
+        sharded_data_2d = []
+        shard_idx = 0
+        # Convert to 2d dim array
+        for _ in range(dp_size):
+            cp_data = []
+            for _ in range(cp_size):
+                cp_data.append(sharded_data[shard_idx])
+                shard_idx += 1
+            sharded_data_2d.append(cp_data)
+
         futures = self.worker_group.run_all_workers_sharded_data(
             "get_reference_policy_logprobs",
-            sharded_data,
-            in_sharded_axes=["data_parallel"],
+            sharded_data_2d,
+            in_sharded_axes=["data_parallel", "context_parallel"],
             replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
             output_is_replicated=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={"micro_batch_size": micro_batch_size},
@@ -317,8 +360,16 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             "train",
             sharded_data,
             in_sharded_axes=["data_parallel"],
-            replicate_on_axes=["tensor_parallel", "pipeline_parallel"],
-            output_is_replicated=["tensor_parallel", "pipeline_parallel"],
+            replicate_on_axes=[
+                "context_parallel",
+                "tensor_parallel",
+                "pipeline_parallel",
+            ],
+            output_is_replicated=[
+                "context_parallel",
+                "tensor_parallel",
+                "pipeline_parallel",
+            ],
             common_kwargs={
                 "loss_fn": loss_fn,
                 "eval_mode": eval_mode,
@@ -441,6 +492,27 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             all_handles.update(handle)
 
         return all_handles
+
+    def prepare_info_for_collective(self) -> dict[str, Any]:
+        """Prepare the info for collective communication.
+
+        Returns:
+            dict: A dictionary containing the info for collective communication.
+        """
+        futures = self.worker_group.run_all_workers_single_data(
+            "prepare_info_for_collective"
+        )
+        results = ray.get(futures)
+        # Only get the first worker's info since all workers will have the same result
+        return results[0]
+
+    def broadcast_weights_for_collective(self) -> list[ray.ObjectRef]:
+        """Broadcast the weights for collective communication."""
+        futures = self.worker_group.run_all_workers_single_data(
+            "broadcast_weights_for_collective"
+        )
+        # this function should co-work with vllm, so we should wait for all futures to complete outside
+        return futures
 
     def offload_before_refit(self) -> None:
         """Offload the optimizer and buffers to the CPU."""

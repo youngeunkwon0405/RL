@@ -612,7 +612,7 @@ class RayWorkerGroup:
 
             if should_run:
                 method = getattr(worker, method_name)
-                futures.append(method.remote(data[data_idx], **common_kwargs))
+                futures.append(method.remote(data=data[data_idx], **common_kwargs))
                 data_idx += 1
 
         assert data_idx == len(data), (

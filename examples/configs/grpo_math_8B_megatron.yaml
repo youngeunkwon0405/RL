@@ -29,7 +29,7 @@ policy:
   optimizer: null # remove default FSDP optimizer
 
   scheduler: null # remove default FSDP scheduler
-  
+
   megatron_cfg:
     enabled: true
     empty_unused_memory_level: 0
@@ -38,7 +38,7 @@ policy:
     pipeline_model_parallel_size: 1
     context_parallel_size: 1
     pipeline_dtype: ${policy.precision}
-    
+
     optimizer:
       optimizer: "adam"
       lr: 3.0e-7
@@ -47,7 +47,7 @@ policy:
       bf16: true
       fp16: false
       params_dtype: "float32"
-      
+
     scheduler:
       start_weight_decay: ${policy.megatron_cfg.optimizer.weight_decay}
       end_weight_decay: ${policy.megatron_cfg.optimizer.weight_decay}
