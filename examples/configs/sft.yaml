@@ -12,7 +12,7 @@ sft:
   seed: 42
 
 checkpointing:
-  enabled: false
+  enabled: true
   checkpoint_dir: "results/sft"
   metric_name: "val_loss"
   higher_is_better: false

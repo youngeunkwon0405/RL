@@ -455,7 +455,6 @@ def sft_train(
             with timer.time("total_step_time"):
                 # Prepare batch and generate responses
                 print("▶ Preparing batch...")
-
                 with timer.time("data_processing"):
                     ## add loss mask based on role to every message
                     add_loss_mask_to_message_log(

@@ -52,7 +52,7 @@ policy:
   # training and logprob stages respectively.
   dynamic_batching:
     enabled: False
-   
+
   sequence_packing:
     enabled: True
     train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
