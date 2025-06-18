@@ -454,7 +454,6 @@ class MegatronPolicyWorker:
         ]  # FP32 for amp
         model_cfg.pipeline_dtype = dtype_map[self.cfg["megatron_cfg"]["pipeline_dtype"]]
         model_cfg.parallel_output = True
-
         if self.cfg["megatron_cfg"]["activation_checkpointing"]:
             model_cfg.activations_checkpoint_granularity = "full"
             model_cfg.activations_checkpoint_method = "uniform"
@@ -520,7 +519,6 @@ class MegatronPolicyWorker:
             ),
         )
         self.megatron_cfg.validate()
-
         print(f"cfg: {self.megatron_cfg}")
         (
             self.mcore_state,
@@ -573,7 +571,6 @@ class MegatronPolicyWorker:
                 overlap_param_gather_with_optimizer_step=self.megatron_cfg.optimizer_config.overlap_param_gather_with_optimizer_step,
                 data_parallel_random_init=self.megatron_cfg.rng_config.data_parallel_random_init,
             )
-
             print("Loading the Reference Model")
             if (
                 ref_checkpoint_config.pretrained_checkpoint is not None
@@ -670,7 +667,6 @@ class MegatronPolicyWorker:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
         total_dataset_size = torch.tensor(data.size, device="cuda")
-
         torch.distributed.all_reduce(
             total_dataset_size,
             op=torch.distributed.ReduceOp.SUM,
@@ -1056,7 +1052,6 @@ class MegatronPolicyWorker:
             )
 
         no_grad.__exit__(None, None, None)
-
         return BatchedDataDict[LogprobOutputSpec](logprobs=logprobs).to("cpu")
 
     @contextmanager
@@ -1334,7 +1329,6 @@ class MegatronPolicyWorker:
                     size_in_bytes,
                 )
             )
-
         # Gather parameter info from all pipeline parallel ranks to ensure complete coverage
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
@@ -1362,6 +1356,7 @@ class MegatronPolicyWorker:
 
         print(f"Prepared {len(param_info)} tensors for IPC transfer")
         no_grad.__exit__(None, None, None)
+
         # Collect current available memory for refit
         ## Get current device index from torch
         device_idx = torch.cuda.current_device()
@@ -1395,7 +1390,6 @@ class MegatronPolicyWorker:
 
         # Create IPC handles for each parameter
         all_handles = []
-
         for key, tensor in gathered_hf_params.items():
             handle = reduce_tensor(tensor.detach())
             all_handles.append((key, handle))

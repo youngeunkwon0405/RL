@@ -13,7 +13,6 @@
 # limitations under the License.
 
 import gc
-import logging
 import os
 import warnings
 from collections import defaultdict
@@ -54,9 +53,6 @@ from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
-
-logging.basicConfig(level=logging.DEBUG)
-torch.set_printoptions(profile="full")
 
 
 @ray.remote

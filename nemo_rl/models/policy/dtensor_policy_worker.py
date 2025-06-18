@@ -14,7 +14,6 @@
 
 import contextlib
 import gc
-import logging
 import os
 from collections import defaultdict
 from contextlib import AbstractContextManager, contextmanager, nullcontext
@@ -59,9 +58,6 @@ from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
 )
-
-logging.basicConfig(level=logging.DEBUG)
-torch.set_printoptions(profile="full")
 
 
 @contextmanager
@@ -842,12 +838,12 @@ class DTensorPolicyWorker:
                             # but we want to sum them so we cancel out the average here
                             loss *= self.dp_size * self.cp_size
                             loss.backward()
+
                     if num_valid_samples > 0:
                         mb_losses.append(loss.item())
                         all_mb_metrics.append(loss_metrics)
 
                 grad_norm: Optional[float | torch.Tensor] = None
-
                 if not eval_mode:
                     with torch.no_grad():
                         grad_norm = get_grad_norm(

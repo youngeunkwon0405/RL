@@ -112,7 +112,6 @@ class AllTaskProcessedDataset:
         datum_spec = task_data_processor(
             entry, task_data_spec, self.tokenizer, self.max_seq_length, idx
         )
-
         return datum_spec
 
 
@@ -145,7 +144,6 @@ def rl_collate_fn(data_batch: list[DatumSpec]) -> BatchedDataDict[Any]:
         batch_max_length=batch_max_length,
         stop_strings=stop_strings,
     )
-
     return output
 
 
@@ -162,7 +160,6 @@ def packed_rl_collate_fn(
     output = rl_collate_fn(flattened_dataums)
     # Update the output to reflect the packed nature of the data
     output.packed_sequence_size = [len(inner) for inner in packet_data_batch]
-
     return output
 
 

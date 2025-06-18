@@ -253,7 +253,6 @@ def setup_data(
 
 def main() -> None:
     """Main entry point."""
-    print(f"Controller pid: {os.getpid()}", flush=True)
     # Parse arguments
     args, overrides = parse_args()
 

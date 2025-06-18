@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import logging
 import os
 import warnings
 from pathlib import Path
@@ -46,9 +45,6 @@ from nemo_rl.models.policy.lm_policy import Policy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import Logger, LoggerConfig
 from nemo_rl.utils.timer import Timer
-
-logging.basicConfig(level=logging.DEBUG)
-torch.set_printoptions(profile="full")
 
 
 class SFTSaveState(TypedDict):
