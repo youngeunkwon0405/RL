@@ -1,6 +1,4 @@
-# Debugging in NeMo RL
-This guide explains how to debug NeMo RL applications, covering two scenarios. It details debugging the main driver script by setting the RAY_DEBUG=legacy environment variable, and outlines the procedure for debugging distributed Ray worker/actor processes using the Ray Distributed Debugger within a SLURM environment.
-## Debugging in the Driver Script
+# Debug NeMo RL Applications
 
 By default, setting breakpoints in the driver script (outside of  `@ray.remote`) will not pause program execution when using Ray. To enable pausing at these breakpoints, set the environment variable to `RAY_DEBUG=legacy`:
 
@@ -8,17 +6,17 @@ By default, setting breakpoints in the driver script (outside of  `@ray.remote`)
 RAY_DEBUG=legacy uv run ....
 ```
 
-## Debugging in the Worker/Actors (on SLURM)
+## Debug Worker/Actors on SLURM
 
-Since Ray programs can spawn many workers/actors, we need to use the Ray Distributed Debugger
-to properly jump to the breakpoint on each worker.
+Since Ray programs can spawn multiple workers and actors, using the Ray Distributed Debugger is essential to accurately jump to breakpoints on each worker.
 
 ### Prerequisites
-* Install [Ray Debugger VS Code/Cursor extension](https://docs.ray.io/en/latest/ray-observability/ray-distributed-debugger.html).
+
+* Install the [Ray Debugger VS Code/Cursor extension](https://docs.ray.io/en/latest/ray-observability/ray-distributed-debugger.html).
 * Launch the [interactive cluster](./cluster.md#interactive-launching) with `ray.sub`.
 * Launch VS Code/Cursor on the SLURM login node (where `squeue`/`sbatch` is available).
 
-### Port-forwarding from the Head Node
+### Forward a Port from the Head Node
 
 From the SLURM login node, query the nodes used by the interactive `ray.sub` job as follows:
 
@@ -41,9 +39,16 @@ ssh -L $LOCAL_PORT:localhost:$DASHBOARD_PORT -N node-12
 ssh -L 52640:localhost:8265 -N node-12
 ```
 
+The example output from the port-forwarding with `ssh` may print logs like this, where the warning is expected.
+
+```text
+Warning: Permanently added 'node-12' (ED25519) to the list of known hosts.
+bind [::1]:52640: Cannot assign requested address
+```
+
 ### Open the Ray Debugger Extension
 
-In VS Code/Cursor, open the Ray Debugger extension by clicking on the Ray icon in the activity bar or by searching for "View: Show Ray Debugger" in the command palette (Ctrl+Shift+P or Cmd+Shift+P).
+In VS Code or Cursor, open the Ray Debugger extension by clicking the Ray icon in the activity bar or searching for "View: Show Ray Debugger" in the Command Palette (Ctrl+Shift+P or Cmd+Shift+P).
 
 ![Ray Debugger Extension Step 1](./assets/ray-debug-step1.png)
 
@@ -61,9 +66,16 @@ Enter the address and port you set up in the port forwarding step. If you follow
 
 ### Add a Breakpoint and Run Your Program
 
-All breakpoints that are reached while the program is running will be visible in the Ray Debugger Panel dropdown for the cluster `127.0.0.1:52640`. Click
-`Start Debugging` to jump to one worker's breakpoint.
+The Ray Debugger Panel for cluster `127.0.0.1:52640` lists all active breakpoints. To begin debugging, select a breakpoint from the dropdown and click `Start Debugging` to jump to that worker.
 
 Note that you can jump between breakpoints across all workers with this process.
 
 ![Ray Debugger Extension Step 4](./assets/ray-debug-step4.png)
+
+## Debug the Driver Script
+
+By default, setting breakpoints in the driver script (outside of  `@ray.remote`) will not pause program execution when using Ray. To enable pausing at these breakpoints, set the environment variable to `RAY_DEBUG=legacy`:
+
+```sh
+RAY_DEBUG=legacy uv run ....
+```

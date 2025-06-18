@@ -1074,8 +1074,66 @@ def test_vllm_refit_non_collocated_handles_update_failure(
     vllm_config["vllm_cfg"]["tensor_parallel_size"] = 1
     vllm_policy = VllmGeneration(generation_cluster_separate, vllm_config)
 
-    hf_policy_instance = None
-    vllm_policy_instance = None
+    # initialize collective communication for update weights
+    ip, port = ray.get(_get_node_ip_and_free_port.remote())
+    futures_train = lm_policy.init_collective(ip, port, world_size=2)
+    futures_inference = vllm_generation.init_collective(ip, port, world_size=2)
+    ray.get(futures_train + futures_inference)
+
+    print("refitting vllm policy...")
+    refit_policy_generation(
+        lm_policy, vllm_generation, vllm_config["colocated"]["enabled"]
+    )
+
+    # test generate
+    outputs = vllm_generation.generate(test_input_data, greedy=True)
+    output_ids = outputs["output_ids"]
+    generated_texts = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+    assert generated_texts == [
+        "Hello, my name is Lina. I'm",
+        "The capital of France is Paris. The capital of",
+    ], "Output should be the same as the expected output"
+
+    # Clean up
+    vllm_generation.shutdown()
+    lm_policy.shutdown()
+
+
+@pytest.mark.timeout(210)
+@pytest.mark.parametrize("tensor_parallel_size", [1, 2])
+def test_vllm_generation_with_megatron_training(
+    cluster, tokenizer, tensor_parallel_size
+):
+    """Test that uses vLLM for generation and Megatron policy for training and logprob computation.
+
+    This test validates that vLLM and Megatron policies can work together.
+    """
+
+    if cluster.num_gpus_per_node < tensor_parallel_size:
+        pytest.skip(f"Need at least {tensor_parallel_size} GPUs for this test")
+
+    # Both policies must use the same model (Qwen2.5-0.5B) for weight transfer compatibility
+    model_name = "Qwen/Qwen2.5-0.5B"
+
+    # Create tokenizer for both policies
+    test_tokenizer = get_tokenizer({"name": model_name})
+
+    # vLLM config with Qwen2.5-0.5B
+    vllm_config = deepcopy(basic_vllm_test_config)
+    vllm_config["model_name"] = model_name
+    vllm_config["tokenizer"]["name"] = model_name
+    vllm_config["vllm_cfg"]["async_engine"] = False
+    vllm_config = configure_generation_config(vllm_config, test_tokenizer)
+
+    # Megatron config with same model
+    megatron_config = get_basic_megatron_test_config(
+        tp=tensor_parallel_size, pp=1, precision="float32"
+    )
+    megatron_config["model_name"] = model_name
+    megatron_config["tokenizer"]["name"] = model_name
+
+    vllm_policy = None
+    megatron_policy = None
 
     try:
         hf_policy_instance = hf_policy

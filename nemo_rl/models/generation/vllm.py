@@ -41,7 +41,11 @@ from nemo_rl.distributed.named_sharding import NamedSharding
 from nemo_rl.distributed.virtual_cluster import (
     RayVirtualCluster,
 )
-from nemo_rl.distributed.worker_groups import RayWorkerBuilder, RayWorkerGroup
+from nemo_rl.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
+from nemo_rl.distributed.worker_groups import (
+    RayWorkerBuilder,
+    RayWorkerGroup,
+)
 from nemo_rl.models.generation.interfaces import (
     GenerationConfig,
     GenerationDatumSpec,
@@ -69,7 +73,9 @@ class VllmConfig(GenerationConfig):
     vllm_kwargs: NotRequired[dict[str, Any]]
 
 
-@ray.remote
+@ray.remote(
+    runtime_env={**get_nsight_config_if_pattern_matches("vllm_generation_worker")}
+)
 class VllmGenerationWorker:
     def __repr__(self) -> str:
         """Customizes the actor's prefix in the Ray logs.
@@ -895,6 +901,14 @@ class VllmGenerationWorker:
 
         await self.llm.wake_up(**wake_up_args)
 
+    def start_gpu_profiling(self) -> None:
+        """Start GPU profiling."""
+        torch.cuda.profiler.start()
+
+    def stop_gpu_profiling(self) -> None:
+        """Stop GPU profiling."""
+        torch.cuda.profiler.stop()
+
 
 class VllmGeneration(GenerationInterface):
     def __init__(
@@ -1335,6 +1349,33 @@ class VllmGeneration(GenerationInterface):
         except Exception as e:
             print(f"Error updating weights: {e}")
             return False
+
+    def update_weights_from_collective(
+        self, info: dict[str, Any]
+    ) -> list[ray.ObjectRef]:
+        """Update weights of the policy using collective communication."""
+        if not self.worker_group or not self.worker_group.workers:
+            raise RuntimeError("Worker group is not initialized")
+
+        # Use run_all_workers_single_data to send data to all workers
+        futures = self.worker_group.run_all_workers_single_data(
+            "update_weights_from_collective",
+            data=info,
+            run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
+        )
+
+        # this function should co-work with lm_policy, so we should wait for all futures to complete outside
+        return futures
+
+    def start_gpu_profiling(self) -> None:
+        """Start GPU profiling."""
+        futures = self.worker_group.run_all_workers_single_data("start_gpu_profiling")
+        ray.get(futures)
+
+    def stop_gpu_profiling(self) -> None:
+        """Stop GPU profiling."""
+        futures = self.worker_group.run_all_workers_single_data("stop_gpu_profiling")
+        ray.get(futures)
 
     def __del__(self) -> None:
         """Shuts down the worker groups when the object is deleted or is garbage collected.

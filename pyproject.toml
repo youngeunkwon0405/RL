@@ -41,6 +41,9 @@ dependencies = [
     "tiktoken",
     "blobfile",
     "debugpy",
+    "nvtx",
+    "matplotlib",
+    "plotly"
 ]
 
 [project.optional-dependencies]
