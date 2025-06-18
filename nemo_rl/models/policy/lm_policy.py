@@ -144,9 +144,9 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
             self.use_dynamic_batches = False
 
         if config["sequence_packing"]["enabled"]:
-            assert config["megatron_cfg"]["enabled"], (
-                "Sequence packing is only supported for Megatron policy."
-            )
+            assert (
+                config["megatron_cfg"]["enabled"] or config["dtensor_cfg"]["enabled"]
+            ), "Sequence packing requires for Megatron or DTensor policies."
             self.use_sequence_packing = True
             self.sequence_packing_args: SequencePackingArgs = {
                 "train_mb_tokens": config["sequence_packing"]["train_mb_tokens"],
