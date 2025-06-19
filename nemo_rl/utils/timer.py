@@ -13,9 +13,26 @@
 # limitations under the License.
 import time
 from contextlib import contextmanager
-from typing import Callable, Generator, Optional, Sequence, Union
+from typing import (
+    Callable,
+    Generator,
+    Literal,
+    Mapping,
+    Optional,
+    Sequence,
+    Union,
+    overload,
+)
 
 import numpy as np
+
+
+def _identity_fn(x: Sequence[float]) -> Sequence[float]:
+    return x
+
+
+# Define the valid reduction operations as a literal type
+ReductionOp = Literal["mean", "median", "min", "max", "std", "sum", "count"]
 
 
 class Timer:
@@ -181,9 +198,8 @@ class Timer:
             ValueError: If an invalid operation is provided
         """
         if operation not in self._REDUCTION_FUNCTIONS:
-            valid_reductions = ", ".join(self._REDUCTION_FUNCTIONS.keys())
             raise ValueError(
-                f"Invalid operation '{operation}'. Valid options are: {valid_reductions}"
+                f"Invalid operation '{operation}'. Valid options are: {list(self._REDUCTION_FUNCTIONS.keys())}"
             )
 
         if label not in self._timers:
@@ -192,9 +208,17 @@ class Timer:
         reduction_func = self._REDUCTION_FUNCTIONS[operation]
         return reduction_func(self._timers[label])
 
+    @overload
+    def get_timing_metrics(self, reduction_op: ReductionOp) -> Mapping[str, float]: ...
+
+    @overload
     def get_timing_metrics(
-        self, reduction_op: Union[str, dict[str, str]] = "mean"
-    ) -> dict[str, float | list[float]]:
+        self, reduction_op: Literal[None]
+    ) -> Mapping[str, list[float]]: ...
+
+    def get_timing_metrics(
+        self, reduction_op: Union[str, dict[str, str | None]] | None = "mean"
+    ) -> Mapping[str, float | list[float]]:
         """Get all timing measurements with optional reduction.
 
         Args:
@@ -211,7 +235,7 @@ class Timer:
         Raises:
             ValueError: If an invalid reduction operation is provided
         """
-        if isinstance(reduction_op, str):
+        if isinstance(reduction_op, str) or reduction_op is None:
             reduction_op = {label: reduction_op for label in self._timers}
 
         results: dict[str, float | list[float]] = {}
@@ -221,8 +245,12 @@ class Timer:
 
             if op in self._REDUCTION_FUNCTIONS:
                 results[label] = self.reduce(label, op)
-            else:
+            elif op is None:
                 results[label] = self._timers[label]
+            else:
+                raise ValueError(
+                    f"Invalid operation '{op}'. Valid options are: {list(self._REDUCTION_FUNCTIONS.keys())}"
+                )
 
         # Add any labels not in the reduction_op dictionary
         for label in self._timers:

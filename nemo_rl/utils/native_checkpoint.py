@@ -15,7 +15,7 @@
 """Checkpoint management utilities for HF models."""
 
 import os
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 import torch
 import torch.distributed.checkpoint as dcp
@@ -28,6 +28,9 @@ from torch.distributed.checkpoint.state_dict import (
 )
 from torch.distributed.checkpoint.stateful import Stateful
 from transformers import AutoConfig, AutoTokenizer
+
+if TYPE_CHECKING:
+    import torch.distributed.checkpoint.state_dict
 
 
 ## modified from pytorch tutorial https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html

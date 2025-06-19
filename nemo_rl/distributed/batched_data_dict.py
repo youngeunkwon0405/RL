@@ -135,13 +135,13 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
         return global_rollout_batch
 
-    def chunk(self, rank: int, chunks: int) -> "SlicedDataDict":
+    def chunk(self, rank: int, chunks: int) -> "SlicedDataDict[DictT]":
         """Chunks a global batch into 'chunks' splits and returns the 'rank'th split batch=[A A A B B B D D E], rank=2, chunks=3 -> [D D E].
 
         Requires all leading dimensions of tensors and lengths of lists to be the same over the batch
         and the chunks must divide batch size.
         """
-        chunked_batch = SlicedDataDict()
+        chunked_batch = SlicedDataDict[DictT]()
 
         batch_set = set()
         for val in self.data.values():
@@ -205,7 +205,9 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         batch_size: Optional[int] = None,
         allow_uneven_shards: bool = False,
         dynamic_batching_args: Optional[DynamicBatchingArgs] = None,
-    ) -> list["SlicedDataDict"] | tuple[list["SlicedDataDict"], list[int]]:
+    ) -> (
+        list["SlicedDataDict[DictT]"] | tuple[list["SlicedDataDict[DictT]"], list[int]]
+    ):
         """Shards a batch by first dividing it into chunks of size batch_size, then further dividing each chunk into shards equal parts. Finally aggregates the sub-shards by their position.
 
         If batch_size is None, there will be no chunking beforehand (will default to the total batch size).
@@ -340,7 +342,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         else:
             data = self.data
 
-        aggregated_shards = [SlicedDataDict() for _ in range(shards)]
+        aggregated_shards = [SlicedDataDict[DictT]() for _ in range(shards)]
 
         # Group data by shard position across all chunks
         for shard_idx in range(shards):
@@ -458,36 +460,19 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
         return aggregated_shards
 
-    def get_batch(self, batch_idx, batch_size) -> "SlicedDataDict":
-        """Slices a subbatch from the batch.
-
-        Args:
-            batch_idx: the batch index to slice
-            batch_size: the size of the batch to be sliced
-
-        Returns:
-            BatchedDataDict: A new BatchedDataDict containing the sliced data
-        """
+    def get_batch(self, batch_idx, batch_size) -> "SlicedDataDict[DictT]":
+        """Slices a subbatch from the batch."""
         start = batch_size * batch_idx
         end = batch_size * (batch_idx + 1)
         batch = self.slice(start, end)
         if self.micro_batch_indices is not None:
             batch.micro_batch_indices = [self.micro_batch_indices[batch_idx]]
-            batch.micro_batch_lengths = [self.micro_batch_lengths[batch_idx]]  # type: ignore # This exists if idxs do
-
+            batch.micro_batch_lengths = [self.micro_batch_lengths[batch_idx]]
         return batch
 
-    def slice(self, start: int, end: int) -> "SlicedDataDict":
-        """Slices the batch from start to end.
-
-        Args:
-            start: Starting index (inclusive)
-            end: Ending index (exclusive)
-
-        Returns:
-            BatchedDataDict: A new BatchedDataDict containing the sliced data
-        """
-        sliced_batch = SlicedDataDict()
+    def slice(self, start: int, end: int) -> "SlicedDataDict[DictT]":
+        """Slices the batch from start to end."""
+        sliced_batch = SlicedDataDict[DictT]()
         for k in self.data:
             sliced_batch[k] = self.data[k][start:end]
         return sliced_batch
@@ -520,8 +505,8 @@ class BatchedDataDict(UserDict, Generic[DictT]):
     def make_microbatch_iterator_with_dynamic_shapes(
         self,
         sequence_dim: int = 1,
-    ) -> Iterator["SlicedDataDict"]:
-        """Makes an interator that yields microbatchs of dynamic batch and sequence sizes.
+    ) -> Iterator["SlicedDataDict[DictT]"]:
+        """Makes an iterator that yields microbatches of dynamic batch and sequence sizes.
 
         Args:
             sequence_dim: the index of the sequence dim for all tensors in the data dict
@@ -544,7 +529,7 @@ class BatchedDataDict(UserDict, Generic[DictT]):
 
     def make_microbatch_iterator(
         self, microbatch_size: int
-    ) -> Iterator["SlicedDataDict"]:
+    ) -> Iterator["SlicedDataDict[DictT]"]:
         """Make an iterator over the batch that yields microbatches of size microbatch_size."""
         bsize = self.size
         assert bsize % microbatch_size == 0, (
@@ -599,11 +584,13 @@ class BatchedDataDict(UserDict, Generic[DictT]):
         return self.data
 
 
-class SlicedDataDict(BatchedDataDict):
+class SlicedDataDict(BatchedDataDict[DictT], Generic[DictT]):
     """A specialized subclass of BatchedDataDict that represents a slice or shard of a larger batch.
 
     This class provides a distinct type to differentiate between full batches and sliced/sharded batches, which can be helpful for
     type checking.
+
+    This class preserves the generic type information from the parent BatchedDataDict.
     """
 
     pass

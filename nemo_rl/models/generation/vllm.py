@@ -295,6 +295,9 @@ class VllmGenerationWorker:
             )
 
             # Set bundle indices for parallel workers
+            assert bundle_indices is not None, (
+                "bundle_indices is required for parallel workers"
+            )
             bundle_indices_str = ",".join(map(str, bundle_indices))
             os.environ["VLLM_RAY_BUNDLE_INDICES"] = bundle_indices_str
             print(

@@ -317,7 +317,7 @@ class DTensorPolicyWorker:
 
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
-        seq_dim_size = data.get("input_ids").shape[sequence_dim]
+        seq_dim_size = data["input_ids"].shape[sequence_dim]
         for k, v in data.items():
             if torch.is_tensor(v) and len(v.shape) > 1:
                 assert v.shape[sequence_dim] == seq_dim_size, (
@@ -383,8 +383,8 @@ class DTensorPolicyWorker:
                     mb_iterator = batch.make_microbatch_iterator(mbs)
 
                 for mb in mb_iterator:
-                    input_ids = mb.get("input_ids").cuda()
-                    input_lengths = mb.get("input_lengths")
+                    input_ids = mb["input_ids"].cuda()
+                    input_lengths = mb["input_lengths"]
                     batch_size, seq_len = input_ids.shape
 
                     attention_mask = torch.zeros(
@@ -521,7 +521,7 @@ class DTensorPolicyWorker:
 
         # dim 1 is always assumed to be the sequence dim, sanity check this here
         sequence_dim = 1
-        seq_dim_size = data.get("input_ids").shape[sequence_dim]
+        seq_dim_size = data["input_ids"].shape[sequence_dim]
         for k, v in data.items():
             if torch.is_tensor(v) and len(v.shape) > 1:
                 assert v.shape[sequence_dim] == seq_dim_size, (
@@ -539,8 +539,8 @@ class DTensorPolicyWorker:
                 mb_iterator = data.make_microbatch_iterator(logprob_batch_size)
 
             for lp_batch in mb_iterator:
-                input_ids = lp_batch.get("input_ids").cuda()
-                input_lengths = lp_batch.get("input_lengths")
+                input_ids = lp_batch["input_ids"].cuda()
+                input_lengths = lp_batch["input_lengths"]
 
                 batch_size, seq_len = input_ids.shape
                 # Create attention mask for right-padded data
