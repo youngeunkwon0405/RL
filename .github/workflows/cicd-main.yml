@@ -118,17 +118,17 @@ jobs:
           pre-commit install
           pre-commit run --all-files --show-diff-on-failure --color=always
 
-  mypy-check:
-    name: Mypy check
+  pyrefly-check:
+    name: Pyrefly check
     needs: [pre-flight]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Check mypy
+      - name: Check pyrefly
         run: |
           pip install uv
-          uv run --group test mypy nemo_rl examples
+          uv run --group dev pyrefly nemo_rl examples
 
   sphinx-build:
     if: ${{ needs.pre-flight.outputs.test_level != 'none' }}

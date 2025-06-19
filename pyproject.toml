@@ -88,6 +88,7 @@ dev = [
     "mypy",
     "types-PyYAML",
     "types-requests",
+    "pyrefly",
 ]
 test = [
     "pytest>=7.0.0",
