@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
+import itertools
 from pathlib import Path
 from typing import Any, Optional, Tuple, TypedDict, cast
 
@@ -500,9 +501,9 @@ def grpo_train(
 
     # Run grpo training (single-turn)
     batch: BatchedDataDict[DatumSpec]
-    for batch in dataloader:
+    for batch in itertools.cycle(dataloader):
         print(
-            f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
+            f"\n{'=' * 25} Step {step + 1}/{master_config['grpo']['max_num_steps']} {'=' * 25}"
         )
         val_metrics, validation_timings = None, None
 
