@@ -30,6 +30,7 @@ from nemo.lightning.io.state import (
 )
 import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
 import nemo_rl.models.megatron.converters.llama as llama_converter
+import nemo_rl.models.megatron.converters.qwen3 as qwen3_converter
 import nemo_rl.models.megatron.converters.deepseek as deepseek_converter
 
 _GROUP_TO_RANKS_CACHE = {}
@@ -278,9 +279,15 @@ class MegatronToHFConverter:
         global_keys_map = {k: None for k in global_keys}
 
         # TODO(yifu): inheritence for this?
-        if "qwen" in hf_model_name.lower():
+        if "qwen2" in hf_model_name.lower():
             self.export_mapping = qwen2_converter.get_export_mapping()
             self.export_transforms = qwen2_converter.get_export_transforms()
+            self.get_source_fn = lambda source_state_dict, _: _ModelState(
+                source_state_dict
+            )
+        elif "qwen3" in hf_model_name.lower():
+            self.export_mapping = qwen3_converter.get_export_mapping()
+            self.export_transforms = qwen3_converter.get_export_transforms()
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )

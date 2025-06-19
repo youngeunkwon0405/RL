@@ -271,7 +271,7 @@ class MegatronPolicyWorker:
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
         else:
-            pretrained_path = f"/opt/checkpoints/tron/{hf_model_subdir}"
+            pretrained_path = f"/mnt/cache/checkpoints/tron/{hf_model_subdir}"
         print("PRETRAINED PATH: ", pretrained_path)
         pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
             os.path.join(pretrained_path, "iter_0000000")
@@ -319,12 +319,25 @@ class MegatronPolicyWorker:
         model_cfg.context_parallel_size = self.cfg["megatron_cfg"][
             "context_parallel_size"
         ]  # not supported right now
+        
+        ## moe-related
         model_cfg.expert_tensor_parallel_size = self.cfg["megatron_cfg"][
             "expert_tensor_parallel_size"
         ]
         model_cfg.expert_model_parallel_size = self.cfg["megatron_cfg"][
             "expert_model_parallel_size"
         ]
+        model_cfg.moe_router_dtype=self.cfg["megatron_cfg"][
+            "moe_router_dtype"
+        ]
+        model_cfg.moe_router_load_balancing_type=self.cfg["megatron_cfg"][
+            "moe_router_load_balancing_type"
+        ]
+        model_cfg.moe_router_bias_update_rate = self.cfg["megatron_cfg"][
+            "moe_router_bias_update_rate"
+        ]
+
+
         model_cfg.sequence_parallel = self.cfg["megatron_cfg"]["sequence_parallel"]
         model_cfg.bf16 = self.dtype == torch.bfloat16
         model_cfg.fp16 = self.dtype == torch.float16
@@ -340,12 +353,6 @@ class MegatronPolicyWorker:
         model_cfg.bias_dropout_fusion = False
         model_cfg.masked_softmax_fusion = False
         model_cfg.gradient_accumulation_fusion = False
-        model_cfg.moe_router_load_balancing_type = self.cfg["megatron_cfg"][
-            "moe_router_load_balancing_type"
-        ]
-        model_cfg.moe_router_bias_update_rate = self.cfg["megatron_cfg"][
-            "moe_router_bias_update_rate"
-        ]
         model_cfg.disable_bf16_reduced_precision_matmul = True
         if self.cfg["megatron_cfg"]["activation_checkpointing"]:
             model_cfg.activations_checkpoint_granularity = "full"
