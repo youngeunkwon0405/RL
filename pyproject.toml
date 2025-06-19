@@ -170,3 +170,7 @@ invalid-argument-type = "ignore"
 invalid-assignment = "ignore"
 # Ignore since different environments have not be importable at any given time
 unresolved-import = "ignore"
+
+[tool.ty.src]
+include = ["nemo_rl", "examples", "tools", "docs"]
+exclude = ["3rdparty/", "venvs", ".venv", "tests", "uv_cache"]
