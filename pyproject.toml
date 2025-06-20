@@ -40,8 +40,6 @@ dependencies = [
     "blobfile",
     "debugpy",
     "nvtx",
-    "mamba-ssm",
-    "causal-conv1d",
     "matplotlib",
     "plotly"
 ]
