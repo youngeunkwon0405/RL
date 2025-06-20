@@ -31,6 +31,7 @@ from transformers.integrations.accelerate import init_empty_weights
 
 import nemo_rl.models.megatron.converters.llama as llama_converter
 import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
+import nemo_rl.models.megatron.converters.nemotron_h as nemotron_h_converter
 
 
 def get_local_layer_num(s):
@@ -223,6 +224,12 @@ class MegatronToHFConverter:
         elif "llama" in hf_model_name.lower():
             self.export_mapping = llama_converter.get_export_mapping()
             self.export_transforms = llama_converter.get_export_transforms(config)
+            self.get_source_fn = lambda source_state_dict, _: _ModelState(
+                source_state_dict
+            )
+        elif "nemotron-h" in hf_model_name.lower():
+            self.export_mapping = nemotron_h_converter.get_export_mapping(megatron_model)
+            self.export_transforms = nemotron_h_converter.get_export_transforms(config)
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )

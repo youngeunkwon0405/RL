@@ -399,6 +399,10 @@ class MegatronPolicyWorker:
                             env_backup[var] = os.environ[var]
                             del os.environ[var]
 
+                    #if torch.cuda.device_count() > 0:
+                    #    # TODO: Currently this is needed since Mamba cannot be imported without this being set
+                    #    from megatron.core import tensor_parallel
+                    #    tensor_parallel.model_parallel_cuda_manual_seed(1234)
                     import_model_from_hf_name(hf_model_name, pretrained_path)
 
                     # Restore environment
