@@ -463,6 +463,10 @@ def dpo_train(
                     or (total_steps + 1) % master_config["checkpointing"]["save_period"]
                     == 0
                 ):  # +1 because step is 0-indexed
+                    assert val_metrics is not None, (
+                        "val_metrics is required for checkpointing. See https://github.com/NVIDIA-NeMo/RL/issues/441 for more details about relaxing this constraint."
+                    )
+
                     dpo_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     dpo_save_state["total_steps"] = total_steps + 1
                     dpo_save_state["epoch"] = current_epoch

@@ -12,11 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, NotRequired, Optional, Protocol, TypedDict, Union
 
 import torch
-from transformers import PreTrainedTokenizerBase
+from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 # OpenAI-API-like message log, but every messsage may contain associated tensors (i.e. tokenized strings and logprobs) in addition to the original "content" string
 LLMMessageLogType = list[dict[str, Union[str, torch.Tensor]]]
@@ -35,8 +35,8 @@ class DatumSpec(TypedDict):
     extra_env_info: dict[str, Any]
     loss_multiplier: float  # multiplier for the loss for this datum. 0 to mask out (say the sample is invalid)
     idx: int
-    task_name: NotRequired[str] = "default"
-    stop_strings: NotRequired[list[str]] = None  # Optional stop strings for generation
+    task_name: NotRequired[str]  # defaults to "default"
+    stop_strings: NotRequired[list[str]]  # Optional stop strings for generation
     __extra__: NotRequired[Any]  # This allows additional fields of any type
 
 
@@ -54,25 +54,29 @@ class TaskDataSpec:
     task_name: Optional[str] = None
     # prompt
     prompt_file: Optional[PathLike] = None
-
     system_prompt_file: Optional[PathLike] = None
+    # Loaded prompts - will be None if no file specified, or the loaded content if file exists
+    prompt: Optional[str] = field(init=False)
+    system_prompt: Optional[str] = field(init=False)
 
     def __post_init__(self) -> None:
         def load_prompt_file(
-            prompt_file: Optional[PathLike],
-        ) -> Optional[str]:
-            """Load prompt from file if it exists, otherwise return as is."""
-            if prompt_file is None:
-                return None
-            if os.path.exists(prompt_file):
+            prompt_file: PathLike,
+        ) -> str:
+            """Load prompt from file if it exists, otherwise return None."""
+            if not os.path.exists(prompt_file):
+                raise FileNotFoundError(f"Prompt file {prompt_file} not found")
+            else:
                 with open(prompt_file, "r", encoding="utf-8") as f:
                     return f.read()
-            else:
-                raise FileNotFoundError(f"Prompt file {prompt_file} not found")
 
         # Load prompts from files if they exist
-        self.system_prompt = load_prompt_file(self.system_prompt_file)
-        self.prompt = load_prompt_file(self.prompt_file)
+        self.system_prompt = None
+        self.prompt = None
+        if self.system_prompt_file is not None:
+            self.system_prompt = load_prompt_file(self.system_prompt_file)
+        if self.prompt_file is not None:
+            self.prompt = load_prompt_file(self.prompt_file)
 
     def copy_defaults(self, from_spec: "TaskDataSpec") -> None:
         """Apply default values from another Task instance for any None attributes."""

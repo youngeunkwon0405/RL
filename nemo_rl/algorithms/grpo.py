@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from pathlib import Path
-from typing import Any, Optional, Tuple, TypedDict, cast
+from typing import Any, Mapping, Optional, Tuple, TypedDict, cast
 
 import numpy as np
 import ray
@@ -85,6 +85,11 @@ class GRPOSaveState(TypedDict):
     step: int
     val_reward: float
     consumed_samples: int
+
+
+class GRPOValMetrics(TypedDict):
+    accuracy: float
+    avg_length: float
 
 
 def _default_grpo_save_state() -> GRPOSaveState:
@@ -658,6 +663,9 @@ def grpo_train(
                 is_last_step
                 or (step + 1) % master_config["checkpointing"]["save_period"] == 0
             ):  # +1 because step is 0-indexed
+                assert val_metrics is not None, (
+                    "val_metrics is required for checkpointing. See https://github.com/NVIDIA-NeMo/RL/issues/441 for more details about relaxing this constraint."
+                )
                 policy.prepare_for_training()
 
                 grpo_save_state["step"] = step + 1
@@ -759,7 +767,7 @@ def validate(
     val_task_to_env: Optional[dict[str, EnvironmentInterface]],
     step: int,
     master_config: MasterConfig,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[GRPOValMetrics, Mapping[str, Any]]:
     """Run validation on the validation dataset."""
     if val_dataloader is None:
         print("  ⚠️ No validation dataloader provided, skipping validation")
@@ -810,7 +818,7 @@ def validate(
         accuracy = sum(total_rewards) / len(total_rewards)
         avg_length = sum(total_lengths) / len(total_lengths)
 
-        val_metrics = {
+        val_metrics: GRPOValMetrics = {
             "accuracy": accuracy,
             "avg_length": avg_length,
         }

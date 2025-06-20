@@ -289,11 +289,6 @@ def training_setup(tokenizer, request, num_gpus):
     When parameterized, takes any config updates as a dictionary in request.param
     and applies them to the basic config.
     """
-    policy = None
-    cluster = None
-    data = None
-    loss_fn = None
-
     # Get config updates from request.param if available
     config_updates = {}
     config_suffix = ""
@@ -301,71 +296,66 @@ def training_setup(tokenizer, request, num_gpus):
         config_updates = request.param
         config_suffix = "-" + "-".join([f"{k}={v}" for k, v in config_updates.items()])
 
-    try:
-        # Create resources with unique name
-        cluster_name = f"test-train-{num_gpus}gpu{config_suffix}"
-        print(
-            f"Creating training virtual cluster '{cluster_name}' for {num_gpus} GPUs"
-            f"{' with config updates: ' + str(config_updates) if config_updates else ''}"
-        )
+    # Create resources with unique name
+    cluster_name = f"test-train-{num_gpus}gpu{config_suffix}"
+    print(
+        f"Creating training virtual cluster '{cluster_name}' for {num_gpus} GPUs"
+        f"{' with config updates: ' + str(config_updates) if config_updates else ''}"
+    )
 
-        cluster = RayVirtualCluster(
-            name=cluster_name,
-            bundle_ct_per_node_list=[num_gpus],
-            use_gpus=True,
-            num_gpus_per_node=num_gpus,
-            max_colocated_worker_groups=1,
-        )
+    cluster = RayVirtualCluster(
+        name=cluster_name,
+        bundle_ct_per_node_list=[num_gpus],
+        use_gpus=True,
+        num_gpus_per_node=num_gpus,
+        max_colocated_worker_groups=1,
+    )
 
-        # Create a config with optional modifications
-        config = deepcopy(basic_llama_test_config)
-        if config_updates:
-            config.update(config_updates)
+    # Create a config with optional modifications
+    config = deepcopy(basic_llama_test_config)
+    if config_updates:
+        config.update(config_updates)
 
-        print("Creating training HfPolicy...")
-        policy = HfPolicy(
-            cluster=cluster,
-            config=config,
-            init_reference_model=False,
-            tokenizer=tokenizer,
-        )
+    print("Creating training HfPolicy...")
+    policy = HfPolicy(
+        cluster=cluster,
+        config=config,
+        init_reference_model=False,
+        tokenizer=tokenizer,
+    )
 
-        # Create a test batch
-        print("Creating test batch...")
-        # set random seed
-        torch.manual_seed(42)
+    # Create a test batch
+    print("Creating test batch...")
+    # set random seed
+    torch.manual_seed(42)
 
-        # Create test input_ids and attention_mask
-        input_ids = torch.randint(0, 32000, (8, 128))  # 8 sequences, each of length 128
-        attention_mask = torch.ones(8, 128)
+    # Create test input_ids and attention_mask
+    input_ids = torch.randint(0, 32000, (8, 128))  # 8 sequences, each of length 128
+    attention_mask = torch.ones(8, 128)
 
-        # Calculate input_lengths (all sequences are full length in this test)
-        input_lengths = attention_mask.sum(dim=1).to(torch.int32)
+    # Calculate input_lengths (all sequences are full length in this test)
+    input_lengths = attention_mask.sum(dim=1).to(torch.int32)
 
-        data = BatchedDataDict(
-            {
-                "input_ids": input_ids,
-                "input_lengths": input_lengths,
-                "attention_mask": attention_mask,  # Keep for compatibility with loss functions
-                "labels": torch.randint(0, 32000, (8, 128)),
-                "sample_mask": torch.ones(8),
-            }
-        )
+    data = BatchedDataDict(
+        {
+            "input_ids": input_ids,
+            "input_lengths": input_lengths,
+            "attention_mask": attention_mask,  # Keep for compatibility with loss functions
+            "labels": torch.randint(0, 32000, (8, 128)),
+            "sample_mask": torch.ones(8),
+        }
+    )
 
-        # Create loss function
-        loss_fn: LossFunction = SimpleLoss()
+    # Create loss function
+    loss_fn: LossFunction = SimpleLoss()
 
-        # Provide the resources to the test
-        yield policy, cluster, data, loss_fn
+    # Provide the resources to the test
+    yield policy, cluster, data, loss_fn
 
-    except Exception as e:
-        print(f"Error during training setup: {e}")
-        pytest.skip(f"Training setup failed: {e}")
-    finally:
-        # Clean up after the test
-        print("Cleaning up resources for test")
-        policy.worker_group.shutdown()
-        cluster.shutdown()
+    # Clean up after the test
+    print("Cleaning up resources for test")
+    policy.worker_group.shutdown()
+    cluster.shutdown()
 
 
 def get_max_gpu_utilization(policy):
@@ -484,58 +474,48 @@ def test_hf_policy_training(training_setup, tracker, num_gpus, config_name):
 @pytest.fixture
 def generation_setup(request, test_input_data, tokenizer, num_gpus):
     """Setup and teardown specifically for generation tests."""
-    policy = None
-    cluster = None
-    data = None
     init_reference_model = request.param
 
-    try:
-        # Create resources with unique name
-        cluster_name = f"test-gen-{num_gpus}gpu-ref{init_reference_model}"
-        print(
-            f"Creating generation virtual cluster '{cluster_name}' for {num_gpus} GPUs "
-            f"(ref_model={init_reference_model})..."
-        )
+    # Create resources with unique name
+    cluster_name = f"test-gen-{num_gpus}gpu-ref{init_reference_model}"
+    print(
+        f"Creating generation virtual cluster '{cluster_name}' for {num_gpus} GPUs "
+        f"(ref_model={init_reference_model})..."
+    )
 
-        cluster = RayVirtualCluster(
-            name=cluster_name,
-            bundle_ct_per_node_list=[num_gpus],
-            use_gpus=True,
-            num_gpus_per_node=num_gpus,
-            max_colocated_worker_groups=1,
-        )
+    cluster = RayVirtualCluster(
+        name=cluster_name,
+        bundle_ct_per_node_list=[num_gpus],
+        use_gpus=True,
+        num_gpus_per_node=num_gpus,
+        max_colocated_worker_groups=1,
+    )
 
-        config = basic_llama_test_config
-        config["generation"] = configure_generation_config(
-            config["generation"], tokenizer
-        )
+    config = basic_llama_test_config
+    config["generation"] = configure_generation_config(config["generation"], tokenizer)
 
-        print("Creating generation HfPolicy...")
-        policy = HfPolicy(
-            cluster=cluster,
-            config=config,
-            tokenizer=tokenizer,
-            init_reference_model=request.param,
-        )
+    print("Creating generation HfPolicy...")
+    policy = HfPolicy(
+        cluster=cluster,
+        config=config,
+        tokenizer=tokenizer,
+        init_reference_model=request.param,
+    )
 
-        # Create a test batch
-        print("Creating test batch...")
-        torch.manual_seed(42)  # For reproducibility
+    # Create a test batch
+    print("Creating test batch...")
+    torch.manual_seed(42)  # For reproducibility
 
-        # Prepare test data
-        data, prompts, expected_generations = test_input_data
+    # Prepare test data
+    data, prompts, expected_generations = test_input_data
 
-        # Provide the resources to the test
-        yield policy, cluster, data, prompts, expected_generations
+    # Provide the resources to the test
+    yield policy, cluster, data, prompts, expected_generations
 
-    except Exception as e:
-        print(f"Error during generation setup: {e}")
-        pytest.skip(f"Generation setup failed: {e}")
-    finally:
-        # Clean up after the test
-        print("Cleaning up resources for test")
-        policy.worker_group.shutdown()
-        cluster.shutdown()
+    # Clean up after the test
+    print("Cleaning up resources for test")
+    policy.worker_group.shutdown()
+    cluster.shutdown()
 
 
 @pytest.mark.timeout(180)

@@ -75,6 +75,9 @@ def hf_data_processor(
     idx: int,
 ) -> DatumSpec:
     """Process a datum dictionary (directly loaded from data/hf_datasets/openmathinstruct2.py) into a DatumSpec for the Math Environment."""
+    assert task_data_spec.prompt is not None, (
+        f"Prompt is required but not found in {task_data_spec=}"
+    )
     user_message = datum_dict["messages"]
     problem = user_message[0]["content"]
     extra_env_info = {"ground_truth": user_message[1]["content"]}

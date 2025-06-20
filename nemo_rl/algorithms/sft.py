@@ -50,12 +50,17 @@ class SFTSaveState(TypedDict):
     consumed_samples: int
 
 
+class SFTValMetrics(TypedDict):
+    val_loss: float
+
+
 def _default_sft_save_state() -> SFTSaveState:
     return {
         "epoch": 0,
         "step": 0,
         "total_steps": 0,
         "consumed_samples": 0,
+        "val_loss": 0.0,
     }
 
 
@@ -243,7 +248,7 @@ def validate(
         # Show a progress indicator for validation
         # val_total = len(val_dataloader)
 
-        val_metrics = {"val_loss": 0.0}
+        val_metrics: SFTValMetrics = {"val_loss": 0.0}
         num_valid_batches = 0
 
         policy.prepare_for_training()
@@ -456,6 +461,10 @@ def sft_train(
                     or (total_steps + 1) % master_config["checkpointing"]["save_period"]
                     == 0
                 ):  # +1 because step is 0-indexed
+                    assert val_metrics is not None, (
+                        "val_metrics is required for checkpointing. See https://github.com/NVIDIA-NeMo/RL/issues/441 for more details about relaxing this constraint."
+                    )
+
                     sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     sft_save_state["total_steps"] = total_steps + 1
                     sft_save_state["epoch"] = current_epoch

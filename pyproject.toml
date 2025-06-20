@@ -165,9 +165,11 @@ convention = "google"
 
 [tool.ty.rules]
 # TODO: ignore until TypedDict is supported https://github.com/astral-sh/ty/issues/154
-invalid-argument-type = "ignore"
+#invalid-argument-type = "ignore"
 # TODO: ignore until TypedDict is supported https://github.com/astral-sh/ty/issues/154
 invalid-assignment = "ignore"
+# TODO: ignore until TypedDict is supported https://github.com/astral-sh/ty/issues/154
+invalid-return-type = "ignore"
 # Ignore since different environments have not be importable at any given time
 unresolved-import = "ignore"
 
