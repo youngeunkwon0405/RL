@@ -151,9 +151,22 @@ def split_fc1_tp(ctx: TransformCTX, linear_fc1: torch.Tensor):
     # [ gate_tp1 ] --/ [  up_tp0  ] --/ (split  up)
     # [  up_tp1  ]     [  up_tp1  ]
     megatron_config = ctx.source.config
-    # TODO: handle expert_tensor_parallel_size
     tp = megatron_config.tensor_model_parallel_size
     linear_fc1 = einops.rearrange(linear_fc1, "(t c d) a1 ->  c (t d) a1", c=2, t=tp)
+    mlp_gate_proj_weight = linear_fc1[0]
+    mlp_up_proj_weight = linear_fc1[1]
+    return mlp_gate_proj_weight, mlp_up_proj_weight
+
+
+def split_fc1_etp(ctx: TransformCTX, linear_fc1: torch.Tensor):
+    # gate proj and up proj are mixed right now, and we need to reshape them
+    # [ gate_tp0 ]     [ gate_tp0 ]
+    # [  up_tp0  ] --\ [ gate_tp1 ] --\ (split gate)
+    # [ gate_tp1 ] --/ [  up_tp0  ] --/ (split  up)
+    # [  up_tp1  ]     [  up_tp1  ]
+    megatron_config = ctx.source.config
+    etp = megatron_config.expert_tensor_parallel_size
+    linear_fc1 = einops.rearrange(linear_fc1, "(t c d) a1 ->  c (t d) a1", c=2, t=etp)
     mlp_gate_proj_weight = linear_fc1[0]
     mlp_up_proj_weight = linear_fc1[1]
     return mlp_gate_proj_weight, mlp_up_proj_weight
@@ -231,8 +244,10 @@ def update_transforms_for_nemorl(export_transforms):
     # In place update
     for transform in export_transforms:
         if transform.transform.__name__ == "split_fc1":
-            # Need to modify this transform to take into account the TP size
-            transform.transform = split_fc1_tp
+            if "experts" in transform.source_key and "shared_experts" not in transform.source_key:
+                transform.transform = split_fc1_etp
+            else:
+                transform.transform = split_fc1_tp
         elif transform.transform.__name__ == "split_qkv":
             # This transform previously moved qkv weights to cpu
             transform.transform = split_qkv_gpu
