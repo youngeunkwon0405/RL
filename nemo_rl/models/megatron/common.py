@@ -303,8 +303,6 @@ def forward_step_arbitrary_loss(
             # The PackedSeqParams handles all necessary sequence information
             position_ids = None
             attention_mask = None
-            # print(f"input_ids: {input_ids.shape}")
-            # print(f"packed_seq_params: {packed_seq_params}")
         else:
             attention_mask, _, position_ids = get_ltor_masks_and_position_ids(
                 input_ids, 0, False, False, False

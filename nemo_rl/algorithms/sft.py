@@ -404,14 +404,10 @@ def sft_train(
         current_epoch = 0
         current_step = 0
         total_steps = 0
-        consumed_samples = 0
-        consumed_tokens = 0
     else:
         current_epoch = sft_save_state["epoch"]
         current_step = sft_save_state["step"]
         total_steps = sft_save_state["total_steps"]
-        consumed_samples = sft_save_state["consumed_samples"]
-        consumed_tokens = sft_save_state["consumed_tokens"]
 
     sft_config = master_config["sft"]
     # Validation configuration
@@ -447,9 +443,9 @@ def sft_train(
         print(f"\n{'=' * 25} Epoch {current_epoch + 1}/{max_num_epochs} {'=' * 25}")
 
         for batch in train_dataloader:
-            # print(
-            #     f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['sft']['max_num_steps'])} {'=' * 25}"
-            # )
+            print(
+                f"\n{'=' * 25} Step {current_step + 1}/{min(len(train_dataloader), master_config['sft']['max_num_steps'])} {'=' * 25}"
+            )
             val_metrics, validation_timings = None, None
 
             with timer.time("total_step_time"):
@@ -480,20 +476,14 @@ def sft_train(
                     )
                     train_data.packed_sequence_size = batch.packed_sequence_size
 
-                    num_samples = len(train_data["input_ids"])
-                    num_tokens = sum(train_data["input_lengths"])
-
                 print("▶ Taking a training step...")
                 train_results = policy.train(train_data, loss_fn)
-
-                # consumed_samples += num_samples
-                # consumed_tokens += num_tokens
 
                 is_last_step = total_steps + 1 >= master_config["sft"][
                     "max_num_steps"
                 ] or (
                     current_epoch + 1 == max_num_epochs
-                    # and current_step + 1 == len(train_dataloader) # FIXME(ahmadki)
+                    and current_step + 1 == len(train_dataloader)
                 )
 
                 # Run validation if it's a validation step
@@ -530,8 +520,6 @@ def sft_train(
                     sft_save_state["step"] = (current_step + 1) % len(train_dataloader)
                     sft_save_state["total_steps"] = total_steps + 1
                     sft_save_state["epoch"] = current_epoch
-                    sft_save_state["consumed_samples"] = consumed_samples
-                    sft_save_state["consumed_tokens"] = consumed_tokens
                     sft_save_state["val_loss"] = val_metrics["val_loss"]
                     with timer.time("checkpointing"):
                         print(f"Saving checkpoint for step {total_steps + 1}...")
@@ -576,24 +564,6 @@ def sft_train(
             total_time = timing_metrics.get("total_step_time", 0)
             print(f"  • Total step time: {total_time:.2f}s")
 
-            # Number of samples processed
-            print(f"  • Number of samples processed: {num_samples}")
-            # Time per sample
-            time_per_sample = (
-                total_time / num_samples if num_samples > 0 else float("inf")
-            )
-            print(f"  • Time per sample: {time_per_sample:.2f}s")
-
-            # Number of tokens processed
-            print(f"  • Number of tokens processed: {num_tokens}")
-            # Time per token (in microseconds for better readability)
-            time_per_token_us = (
-                (total_time / num_tokens) * 1_000_000
-                if num_tokens > 0
-                else float("inf")
-            )
-            print(f"  • Time per token: {time_per_token_us:.2f}μs")
-
             # Display all other timing metrics (if any)
             for k, v in sorted(
                 timing_metrics.items(), key=lambda item: item[1], reverse=True
@@ -602,16 +572,7 @@ def sft_train(
                     percent = (v / total_time * 100) if total_time > 0 else 0
                     print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
 
-            # Group all training metrics into a single dictionary
             logger.log_metrics(metrics, total_steps + 1, prefix="train")
-            perf_metrics = {
-                "num_samples": int(num_samples),  # num_valid_samples
-                "consumed_samples": int(consumed_samples),
-                "num_tokens": int(num_tokens),  # num unmasked samples
-                "consumed_tokens": int(consumed_tokens),
-            }
-            logger.log_metrics(perf_metrics, total_steps + 1, prefix="train")
-
             logger.log_metrics(timing_metrics, total_steps + 1, prefix="timing/train")
 
             timer.reset()
