@@ -242,6 +242,8 @@ class IFEvalEnvironment(EnvironmentInterface):
         else:
             correct_solution_generation_lengths = 0
 
+        
+
         metrics = {
             # "table": table, TODO @sahilj WIP
             "accuracy": batch["rewards"].mean().item(),

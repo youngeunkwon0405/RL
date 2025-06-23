@@ -26,7 +26,7 @@ from nemo_rl.algorithms.loss_functions import (
     ClippedPGLossDataDict,
     ClippedPGLossFn,
 )
-from nemo_rl.algorithms.utils import calculate_baseline_and_std_per_prompt
+from nemo_rl.algorithms.utils import calculate_baseline_and_std_per_prompt, calculate_math_majority_at_k
 from nemo_rl.data import DataConfig
 from nemo_rl.data.datasets import AllTaskProcessedDataset, rl_collate_fn
 from nemo_rl.data.interfaces import (
@@ -67,6 +67,7 @@ class GRPOConfig(TypedDict):
     num_generations_per_prompt: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
+    use_majority_at_k_bias_reduction: bool
     val_period: int
     val_batch_size: int
     val_at_start: bool
@@ -458,6 +459,7 @@ def grpo_train(
                         leave_one_out_baseline=master_config["grpo"][
                             "use_leave_one_out_baseline"
                         ],
+                        message_logs=repeated_batch["message_log"],
                     )
                 )
                 advantages = (rewards - baseline).unsqueeze(-1)
@@ -715,6 +717,8 @@ def validate(
         total_rewards = []
         total_lengths = []
         all_message_logs = []  # Collect all message logs
+        all_input_ids = []  # Collect all input IDs for pass@k calculation
+        all_val_message_logs = []  # Collect message logs for majority@k calculation
 
         max_batches = (
             master_config["grpo"]["max_val_samples"]
@@ -723,6 +727,15 @@ def validate(
         for batch_idx, val_batch in enumerate(val_dataloader):
             if batch_idx >= max_batches:
                 break
+
+            # Store input IDs before generation for pass@k calculation
+            batch_input_ids = []
+            for message_log in val_batch["message_log"]:
+                # Extract input from the first (user) message
+                for message in message_log:
+                    if message["role"] == "user":
+                        batch_input_ids.append(message["token_ids"])
+                        break
 
             # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
             val_batch, gen_metrics = run_multi_turn_rollout(
@@ -738,6 +751,10 @@ def validate(
 
             total_rewards.extend(rewards.tolist())
             total_lengths.append(gen_metrics["mean_gen_tokens_per_sample"])
+            all_input_ids.extend(batch_input_ids)
+            
+            # Collect message logs for majority@k calculation
+            all_val_message_logs.extend(val_batch["message_log"])
 
             # Collect message logs for later display
             to_env = get_keys_from_message_log(
@@ -762,10 +779,31 @@ def validate(
         # Calculate validation metrics
         accuracy = sum(total_rewards) / len(total_rewards)
         avg_length = sum(total_lengths) / len(total_lengths)
-
+        
+        # Calculate majority@k using the message logs and rewards
+        majority_at_k = 0.0
+        
+        # Stack input IDs into a tensor (pad if necessary)
+        max_len = max(len(ids) for ids in all_input_ids)
+        padded_input_ids = []
+        for ids in all_input_ids:
+            if len(ids) < max_len:
+                # Pad with tokenizer pad token
+                padded = torch.cat([ids, torch.full((max_len - len(ids),), tokenizer.pad_token_id, dtype=ids.dtype, device=ids.device)])
+                padded_input_ids.append(padded)
+            else:
+                padded_input_ids.append(ids)
+        
+        input_tensor = torch.stack(padded_input_ids)
+        rewards_tensor = torch.tensor(total_rewards)
+        valid_mask = torch.ones_like(rewards_tensor)
+        
+        majority_at_k = calculate_math_majority_at_k(all_val_message_logs, input_tensor, rewards_tensor, valid_mask)
+        
         val_metrics = {
             "accuracy": accuracy,
             "avg_length": avg_length,
+            "majority_at_k": majority_at_k,
             "table": table,
         }
 
@@ -791,6 +829,7 @@ def validate(
     # Print summary of validation results
     print("\n📊 Validation Results:")
     print(f"    • Accuracy: {accuracy:.4f}")
+    print(f"    • Majority@K: {majority_at_k:.4f}")
     print(f"    • Average response length: {avg_length:.1f} tokens")
     print(f"    • Samples processed: {len(total_rewards)}")
 

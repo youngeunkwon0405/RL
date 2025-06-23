@@ -94,6 +94,58 @@ class HFVerifyWorker:
                 results.append(0.0)
         return results
 
+    def verify_with_answers(
+        self, pred_responses: List[str], ground_truths: List[str]
+    ) -> Tuple[List[float], List[str]]:
+        """Verify the correctness and extract answers from the predicted responses.
+
+        Args:
+            pred_responses: List[str]. The predicted responses from the LLM.
+            ground_truths: List[str]. The ground truth responses.
+
+        Returns:
+            Tuple[List[float], List[str]]. The rewards and extracted answers for each response.
+        """
+        results = []
+        extracted_answers = []
+        
+        for response, ground_truth in zip(pred_responses, ground_truths):
+            try:
+                ground_truth_parsable = "\\boxed{" + ground_truth + "}"
+                with _mute_output():
+                    try:
+                        ret_score, extracted_answer = self.verify_func(
+                            [ground_truth_parsable], [response]
+                        )
+                        # Extract the answer from the response using the same extraction logic
+                        # The verify_func should return the extracted answer as the second element
+                        if extracted_answer is not None:
+                            extracted_answers.append(str(extracted_answer))
+                        else:
+                            # Fallback: try to extract answer manually from \boxed{}
+                            import re
+                            boxed_match = re.search(r'\\boxed\{([^}]*)\}', response)
+                            if boxed_match:
+                                extracted_answers.append(boxed_match.group(1))
+                            else:
+                                extracted_answers.append("")
+                    except Exception:
+                        ret_score = 0.0
+                        # Fallback extraction
+                        import re
+                        boxed_match = re.search(r'\\boxed\{([^}]*)\}', response)
+                        if boxed_match:
+                            extracted_answers.append(boxed_match.group(1))
+                        else:
+                            extracted_answers.append("")
+
+                results.append(float(ret_score))
+            except Exception:
+                results.append(0.0)
+                extracted_answers.append("")
+                
+        return results, extracted_answers
+
 
 class MathEnvironmentMetadata(TypedDict):
     ground_truth: str
