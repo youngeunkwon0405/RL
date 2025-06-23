@@ -1176,8 +1176,7 @@ class MegatronPolicyWorker:
             key_to_global_keys=self.local_key_to_global_keys,
         )
 
-        for k in gathered_megatron_params.keys():
-            print(f"[get_weights_ipc_handles] {k}")
+
 
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
