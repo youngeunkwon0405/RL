@@ -1169,10 +1169,6 @@ class MegatronPolicyWorker:
         Returns:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
-        import time
-        time.time = lambda: 0.0  # Monkey patch time.time to return constant value
-        print = lambda *args, **kwargs: None
-        st = time.time()
 
         gathered_megatron_params = gather_params(
             self.model,
@@ -1180,17 +1176,12 @@ class MegatronPolicyWorker:
             key_to_global_keys=self.local_key_to_global_keys,
         )
 
-        et = time.time()
-        print(f"[get_weights_ipc_handles] Time taken to gather params: {et - st}")
-        st = et
+        for k in gathered_megatron_params.keys():
+            print(f"[get_weights_ipc_handles] {k}")
 
         gathered_hf_params = self.megatron_to_hf_converter.convert(
             gathered_megatron_params, self.model.config
         )
-
-        et = time.time()
-        print(f"[get_weights_ipc_handles] Time taken to convert params: {et - st}")
-        st = et
 
         # Get device UUID for IPC handles
         device_uuid = self.report_device_id()
@@ -1201,10 +1192,6 @@ class MegatronPolicyWorker:
         for key, tensor in gathered_hf_params.items():
             handle = reduce_tensor(tensor.detach())
             all_handles.append((key, handle))
-
-        et = time.time()
-        print(f"[get_weights_ipc_handles] Time taken to create handles: {et - st}")
-        st = et
 
         # Store references to avoid premature garbage collection
         self._held_gather_buffer = gathered_hf_params
