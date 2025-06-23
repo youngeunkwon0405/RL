@@ -67,7 +67,7 @@ class GRPOConfig(TypedDict):
     num_generations_per_prompt: int
     normalize_rewards: bool
     use_leave_one_out_baseline: bool
-    use_majority_at_k_bias_reduction: bool
+    use_majority_at_k_variance_reduction: bool
     val_period: int
     val_batch_size: int
     val_at_start: bool

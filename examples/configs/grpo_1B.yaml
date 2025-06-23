@@ -7,7 +7,7 @@ grpo:
   num_epochs: 1
   normalize_rewards: true
   use_leave_one_out_baseline: true
-  use_majority_at_k_bias_reduction: true  # Apply bias reduction to majority@k advantages to reduce variance
+  use_majority_at_k_variance_reduction: true  # Apply variance reduction to majority@k advantages to reduce variance
   val_period: 10
   val_at_start: false
   max_val_samples: 256

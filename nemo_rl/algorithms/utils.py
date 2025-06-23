@@ -346,7 +346,7 @@ def _calculate_single_majority_at_k(answers, rewards):
         return 0.0
 
 
-def calculate_majority_at_k_advantages(message_logs, prompts, rewards, valid_mask, bias=False):
+def calculate_majority_at_k_advantages(message_logs, prompts, rewards, valid_mask, variance_reduction=False):
     """Calculate majority@K advantages for each response.
     
     For each response y, the advantage is:
@@ -357,7 +357,7 @@ def calculate_majority_at_k_advantages(message_logs, prompts, rewards, valid_mas
         prompts: tensor (b, s) Tensor of prompts 
         rewards: tensor (b,) Float-valued rewards
         valid_mask: tensor (b,) Vector of 0/1, where 0 is to ignore and 1 is to keep
-        bias: bool Whether to subtract the mean advantage per prompt (bias reduction)
+        variance_reduction: bool Whether to subtract the mean advantage per prompt (variance reduction)
         
     Returns:
         torch.Tensor: Advantages for each response (b,)
@@ -430,7 +430,7 @@ def calculate_majority_at_k_advantages(message_logs, prompts, rewards, valid_mas
             
             advantages[idx] = advantage
     
-    if bias:
+    if variance_reduction:
         for i in range(len(unique_prompts)):
             is_matching_prompt = (prompts == unique_prompts[i]).all(1)
             prompt_idx = torch.arange(len(prompts), device=reward_device)[is_matching_prompt]

@@ -177,7 +177,7 @@ def majority_at_k_train(
                     input_ids,
                     rewards,
                     torch.ones_like(rewards),
-                    bias=master_config["grpo"]["use_majority_at_k_bias_reduction"],
+                    variance_reduction=master_config["grpo"]["use_majority_at_k_variance_reduction"],
                 ).unsqueeze(-1)
 
                 # Calculate statistics for logging
