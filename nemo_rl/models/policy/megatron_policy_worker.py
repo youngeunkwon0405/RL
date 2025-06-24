@@ -1003,8 +1003,8 @@ class MegatronPolicyWorker:
         final_key_to_global_keys = {}
 
         import time
-        time.time = lambda: 0.0  # Monkey patch time.time to return constant value
-        print = lambda *args, **kwargs: None
+        # time.time = lambda: 0.0  # Monkey patch time.time to return constant value
+        # print = lambda *args, **kwargs: None
         st = time.time()
             
         for param_info, size in state_dict_info:
@@ -1173,8 +1173,8 @@ class MegatronPolicyWorker:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
         import time
-        time.time = lambda: 0.0  # Monkey patch time.time to return constant value
-        print = lambda *args, **kwargs: None
+        # time.time = lambda: 0.0  # Monkey patch time.time to return constant value
+        # print = lambda *args, **kwargs: None
         st = time.time()
 
         gathered_megatron_params = gather_params(

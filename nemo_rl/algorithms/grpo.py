@@ -294,8 +294,8 @@ def refit_policy_generation(
 ) -> None:
     """Refit the policy generation interface with the latest policy weights."""
     import time
-    time.time = lambda: 0.0  # Monkey patch time.time to return constant value
-    print = lambda *args, **kwargs: None
+    # time.time = lambda: 0.0  # Monkey patch time.time to return constant value
+    # print = lambda *args, **kwargs: None
     st = time.time()
 
     policy.offload_before_refit()
