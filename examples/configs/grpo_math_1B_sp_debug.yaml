@@ -3,7 +3,7 @@ grpo:
   num_prompts_per_step: 32
   num_generations_per_prompt: 16
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
-  max_num_steps: 5
+  max_num_steps: 1
   normalize_rewards: true
   use_leave_one_out_baseline: true
   val_period: 10
@@ -42,7 +42,6 @@ policy:
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
-  refit_buffer_size_gb: 4 # used for refitting inference engine, the unit is GB
 
   dtensor_cfg:
     enabled: true
@@ -50,7 +49,11 @@ policy:
     sequence_parallel: false
     activation_checkpointing: false
     tensor_parallel_size: 1
+    context_parallel_size: 1
     custom_parallel_plan: null
+
+  megatron_cfg:
+    enabled: false
 
   # dynamic_batching improves performance by ensuring logprob and training microbatches
   # have a sufficent number of tokens to maximize GPU utilization. Specifically, variable length
@@ -61,6 +64,13 @@ policy:
     enabled: True
     train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
     logprob_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}}
+    sequence_length_round: 64
+
+  sequence_packing:
+    enabled: True
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    logprob_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}}
+    algorithm: "concatenative"
     sequence_length_round: 64
 
   # makes the training sequence length divisible by the tensor parallel size
@@ -107,6 +117,14 @@ policy:
       pipeline_parallel_size: 1
       gpu_memory_utilization: 0.6
       max_model_len: ${policy.max_total_sequence_length}
+    colocated:
+      # true: generation shares training GPUs
+      # false: uses dedicated generation resources
+      enabled: true
+      # only relevant when enabled is false
+      resources:
+        gpus_per_node: null # Decides num gpus to be dedicated to generation when there is one node in the cluster i.e cluster.num_nodes == 1
+        num_nodes: null # Decides number of nodes to be dedicated to generation
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len

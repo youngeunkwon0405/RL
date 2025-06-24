@@ -46,8 +46,7 @@ policy:
 
   sequence_packing:
     enabled: True
-    train_mb_tokens: 8192 # ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}} # FIXME(ahmadki): unsupported mul operation ?
-    logprob_mb_tokens: 8192 # ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}} # FIXME(ahmadki): unsupported mul operation ?
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
     algorithm: "concatenative" # "concatenative", "first_fit_decreasing", "first_fit_shuffle", "modified_first_fit_decreasing"
     sequence_length_round: 64
 
