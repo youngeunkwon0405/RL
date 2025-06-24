@@ -996,6 +996,10 @@ class MegatronPolicyWorker:
         tp_world_size = torch.distributed.get_world_size(tp_group)
         tp_group_rank_ids = get_all_rank_ids_in_group(tp_group)
 
+        etp_group = parallel_state.get_expert_tensor_parallel_group()
+        etp_world_size = torch.distributed.get_world_size(etp_group)
+        etp_group_rank_ids = get_all_rank_ids_in_group(etp_group)
+
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
         pp_group_rank_ids = get_all_rank_ids_in_group(pp_group)
@@ -1018,11 +1022,17 @@ class MegatronPolicyWorker:
             if "_extra_state" in name:
                 continue
 
+            use_etp = True if ep_pattern.search(name) else False
+            if use_etp:
+                tensor_mp_rank_ids = etp_group_rank_ids
+            else:
+                tensor_mp_rank_ids = tp_group_rank_ids
+
             shape = list(param.shape)
             tp_dim = get_tp_dim(self.model, name, named_modules_dict)
             if tp_dim is not None:
                 # TODO(yifu): take care of expert_tensor_parallel_size which may be different from tensor_model_parallel_size
-                tp_rank_ids = tuple(sorted(tp_group_rank_ids))
+                tp_rank_ids = tuple(sorted(tensor_mp_rank_ids))
                 shape[tp_dim] *= len(tp_rank_ids)
             else:
                 tp_rank_ids = (torch.distributed.get_rank(),)
@@ -1045,7 +1055,7 @@ class MegatronPolicyWorker:
             size_in_bytes = (
                 param.element_size()
                 * param.numel()
-                * len(tp_rank_ids)
+                * len(tensor_mp_rank_ids)
                 * len(pp_rank_ids)
                 * len(ep_rank_ids)
                 * scale
