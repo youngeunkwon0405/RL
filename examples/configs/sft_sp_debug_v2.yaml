@@ -21,7 +21,6 @@ checkpointing:
 
 policy:
   model_name: "meta-llama/Llama-3.2-1B"
-  enable_seq_packing: true  # Enable sequence packing
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
     chat_template: "{% for message in messages %}{%- if message['role'] == 'system'  %}{{'Context: ' + message['content'].strip()}}{%- elif message['role'] == 'user'  %}{{' Question: ' + message['content'].strip() + ' Answer:'}}{%- elif message['role'] == 'assistant'  %}{{' ' + message['content'].strip()}}{%- endif %}{% endfor %}"
@@ -49,7 +48,7 @@ policy:
     enabled: True
     train_mb_tokens: 8192 # ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}} # FIXME(ahmadki): unsupported mul operation ?
     logprob_mb_tokens: 8192 # ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}} # FIXME(ahmadki): unsupported mul operation ?
-    algorithm: "concatenative"
+    algorithm: "concatenative" # "concatenative", "first_fit_decreasing", "first_fit_shuffle", "modified_first_fit_decreasing"
     sequence_length_round: 64
 
   # makes the training sequence length divisible by the tensor parallel size

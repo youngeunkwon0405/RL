@@ -142,9 +142,6 @@ class PolicyConfig(TypedDict):
     max_grad_norm: Optional[Union[float, int]]
     fsdp_offload_enabled: bool
     activation_checkpointing_enabled: bool
-    enable_seq_packing: Optional[bool] = (
-        False  # Enable sequence packing # TODO(ahmadki): seq packing config
-    )
     optimizer: NotRequired[PytorchOptimizerConfig] = None
     scheduler: NotRequired[list[SinglePytorchSchedulerConfig] | SchedulerMilestones] = (
         None

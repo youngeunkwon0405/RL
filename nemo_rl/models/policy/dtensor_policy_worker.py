@@ -390,8 +390,8 @@ class DTensorPolicyWorker:
             raise ValueError(f"Unknown precision: {self.cfg['precision']}")
 
         print(f"[Rank {self.rank}] Loading model {model_name} on CPU...")
-        self.enable_seq_paccking = self.cfg.get("enable_seq_packing", False)
-        if self.enable_seq_paccking:
+        self.enable_seq_packing = self.cfg["sequence_packing"]["enabled"]
+        if self.enable_seq_packing:
             print(
                 f"[Rank {self.rank}] Sequence packing is enabled for model {model_name}"
             )
@@ -408,7 +408,7 @@ class DTensorPolicyWorker:
                 model_name
             ),  # due to https://github.com/huggingface/transformers/issues/38002
             attn_implementation="flash_attention_2"
-            if self.enable_seq_paccking
+            if self.enable_seq_packing
             else None,
         )
         # caching since this property is not always preserved after FSDP
@@ -705,7 +705,7 @@ class DTensorPolicyWorker:
 
                 for mb in mb_iterator:
                     with torch.autocast(device_type="cuda", dtype=self.dtype):
-                        if self.enable_seq_paccking:
+                        if self.enable_seq_packing:
                             input_ids = mb.get("input_ids").cuda()
                             input_ids, position_ids, _ = pack_sequences(
                                 input_ids=input_ids,
@@ -813,7 +813,7 @@ class DTensorPolicyWorker:
                             )
                             logits = logits_dtensor.full_tensor()[:, sorted_indices]
 
-                        if self.enable_seq_paccking:
+                        if self.enable_seq_packing:
                             logits = unpack_tensor(logits, mb["input_lengths"])
 
                         loss, loss_metrics = loss_fn(
