@@ -96,11 +96,13 @@ def gather_params(
 
     tp_group = parallel_state.get_tensor_model_parallel_group()
     tp_world_size = torch.distributed.get_world_size(tp_group)
+    etp_group = parallel_state.get_expert_tensor_parallel_group()
+    etp_world_size = torch.distributed.get_world_size(etp_group)
     pp_group = parallel_state.get_pipeline_model_parallel_group()
-    ep_group = parallel_state.get_expert_model_parallel_group()
     pp_world_size = torch.distributed.get_world_size(pp_group)
     pp_global_ranks = torch.distributed.get_process_group_ranks(group=pp_group)
     pp_local_rank_id = parallel_state.get_pipeline_model_parallel_rank()
+    ep_group = parallel_state.get_expert_model_parallel_group()
     ep_world_size = torch.distributed.get_world_size(ep_group)
 
     named_modules_dict = dict(model.named_modules())
@@ -112,18 +114,23 @@ def gather_params(
         if local_key in state_dict and owner_pp_local_rank_id == pp_local_rank_id:
             param = state_dict[local_key]
 
-            # Check if param is TP-sharded
             tp_dim = get_tp_dim(model, local_key, named_modules_dict)
 
             # If the parameter is TP-sharded, gather its slices on GPU.
             if tp_dim is not None:
+                if ep_pattern.search(local_key):
+                    world_size = etp_world_size
+                    group = etp_group
+                else:
+                    world_size = tp_world_size
+                    group = tp_group
+
                 gathered_slices = [
-                    torch.empty_like(param) for _ in range(tp_world_size)
+                    torch.empty_like(param) for _ in range(world_size)
                 ]
-                torch.distributed.all_gather(gathered_slices, param, group=tp_group)
+                torch.distributed.all_gather(gathered_slices, param, group=group)
                 # TODO: why cast to torch.bfloat16 instead of param.dtype?
                 full_param = torch.cat(gathered_slices, dim=tp_dim)
-                
             else:
                 # TODO: why do we need to clone?
                 full_param = param
@@ -140,6 +147,7 @@ def gather_params(
         # gather across EP group
         if ep_pattern.search(local_key):
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
+
             ep_gathered_params = [
                 torch.empty(
                     stacked_pp_gathered_params.shape,
@@ -151,8 +159,8 @@ def gather_params(
             torch.distributed.all_gather(
                 ep_gathered_params, stacked_pp_gathered_params, group=ep_group
             )
-
             flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
+
         else:
             flat_gathered_params = pp_gathered_params
 
