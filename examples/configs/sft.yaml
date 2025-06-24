@@ -1,3 +1,4 @@
+# SFT Algorithm Configuration
 sft:
   ## total number of steps to train will equal
   ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
@@ -117,6 +118,7 @@ policy:
       overlap_param_gather: false
       average_in_collective: true
       data_parallel_sharding_strategy: "optim_grads_params"
+
 
 data:
   max_input_seq_length: ${policy.max_total_sequence_length}
