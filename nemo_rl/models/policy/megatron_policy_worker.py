@@ -271,7 +271,10 @@ class MegatronPolicyWorker:
         if megatron_checkpoint_home is not None:
             pretrained_path = f"{megatron_checkpoint_home}/{hf_model_subdir}"
         else:
-            pretrained_path = f"/opt/checkpoints/tron/{hf_model_subdir}"
+            if "megatron_checkpoint_home" in self.cfg:
+                pretrained_path = self.cfg["megatron_checkpoint_home"]
+            else:
+                pretrained_path = f"/opt/checkpoints/tron/{hf_model_subdir}"
         print("PRETRAINED PATH: ", pretrained_path)
         pt_checkpoint_exists = os.path.exists(pretrained_path) and os.path.exists(
             os.path.join(pretrained_path, "iter_0000000")
