@@ -29,6 +29,7 @@ from typing import (
 import torch
 from typing_extensions import Self
 
+from nemo_rl.data.packing import get_packer
 from nemo_rl.distributed.collectives import (
     gather_jagged_object_lists,
     rebalance_nd_tensor,
@@ -46,7 +47,7 @@ class SequencePackingArgs(TypedDict):
     max_tokens_per_microbatch: int
     input_key: str
     input_lengths_key: str
-    algorithm: str  # "modified_ffd" supported right now
+    algorithm: str
     sequence_length_pad_multiple: (
         int  # pad each sequence to a multiple of this value (for CP/TP alignment)
     )
@@ -375,7 +376,6 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                                                 which holds the sequence length per value.
                                                 The sequence dim index is assumed to be 1.
                                             4. algorithm (str): the algorithm to use for sequence packing.
-                                                "modified_ffd" supported right now.
                                           Cannot be passed with dynamic_batching_args.
 
         Returns:
@@ -488,16 +488,13 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                     sorted_v = [v[i] for i in batch_sorted_indices]
                 data[k] = sorted_v
 
-        # FIXME(ahmadki): needs a re-write
         elif sequence_packing_args is not None:
-            # Modified-FFD is Johnson & Garey (1985) Modified First-Fit Decreasing heuristic
-            assert sequence_packing_args["algorithm"] == "modified_ffd", (
-                f"Only 'modified_ffd' algorithm is supported, got {sequence_packing_args['algorithm']}"
+            bin_packer = get_packer(
+                algorithm=sequence_packing_args["algorithm"],
+                bin_capacity=sequence_packing_args["max_tokens_per_microbatch"],
+                collect_metrics=False,  # TODO(ahmadki): make configurable
             )
 
-            max_tokens_per_microbatch = sequence_packing_args[
-                "max_tokens_per_microbatch"
-            ]
             input_lengths_key = sequence_packing_args["input_lengths_key"]
             input_lens = self.data[input_lengths_key]
             if not isinstance(input_lens, torch.Tensor):
@@ -522,13 +519,11 @@ class BatchedDataDict(UserDict, Generic[DictT]):
                     _get_padded_seqlen(seq_len.item()) for seq_len in chunk_seqlens
                 ]
 
-                # FIXME(ahmadki): no longer exists. keeping the code until I refactor the function
-                # Apply sequence-aware MFFD bin packing
-                # bin_assignments = mffd_pack(
-                #     chunk_padded_seqlens_list, max_tokens_per_microbatch
-                # )
-                bin_assignments = None
-                all_chunk_bin_assignments.append(bin_assignments)
+                # Pack sequences in this chunk into bins
+                chunk_bin_assignments = bin_packer.pack(
+                    sequence_lengths=chunk_padded_seqlens_list,
+                )
+                all_chunk_bin_assignments.append(chunk_bin_assignments)
 
             # create shards with the packed bins
             sharded_data: list[list[dict]] = [[] for _ in range(shards)]
