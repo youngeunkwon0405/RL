@@ -126,8 +126,6 @@ data:
   add_bos: true
   add_eos: true
   add_generation_prompt: false
-  shuffle_train: false  # Set to false for debugging purposes
-  shuffle_val: false
   
   train_bin_packing:
     enabled: true

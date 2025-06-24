@@ -405,7 +405,7 @@ class DTensorPolicyWorker:
         if mbs is None:
             mbs = self.cfg["train_micro_batch_size"]
         local_gbs = gbs // self.dp_size
-        dataset_size = data.size
+        dataset_size = data["input_ids"].shape[0]
         num_global_batches = dataset_size // local_gbs
 
         # dim 1 is always assumed to be the sequence dim, sanity check this here
@@ -472,6 +472,24 @@ class DTensorPolicyWorker:
                 # so its safe to not check for the case where the last data slice is smaller than mbs
                 if self.cfg["dynamic_batching"]["enabled"]:
                     mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
+                # TODO(ahmadki)
+                elif self.enable_seq_packing:
+                    mb_iterator = (
+                        batch.make_microbatch_iterator_for_packable_sequences()
+                    )
+                    # data_iterator_len, seq_dim_size = (
+                    #     batch.get_microbatch_iterator_for_packable_sequences_len()
+                    # )
+                    # micro_batch_size = 1
+                    # pack_seqs = True
+                    # seqlen_key = "input_lengths"
+                    # tp_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
+                    # cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
+                    # pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
+                    # if self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
+                    #     _, pad_full_seq_to = (
+                    #         batch.get_microbatch_iterator_for_packable_sequences_len()
+                    #     )
                 else:
                     mb_iterator = batch.make_microbatch_iterator(mbs)
 
