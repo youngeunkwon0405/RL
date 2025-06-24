@@ -1187,18 +1187,46 @@ class MegatronPolicyWorker:
         from torch.multiprocessing.reductions import reduce_tensor
 
         # Create IPC handles for each parameter
-        all_handles = []
+        
+        # pack tensors in gathered_hf_params to a big tensor
+        type_to_packed_big_tensor_size = defaultdict(lambda : 0)
+        key_to_type_and_offset_and_size_in_big_tensor = []
         for key, tensor in gathered_hf_params.items():
+            key_to_type_and_offset_and_size_in_big_tensor.append(
+                (
+                    key,
+                    tensor.shape,
+                    tensor.dtype, 
+                    type_to_packed_big_tensor_size[tensor.dtype], 
+                    tensor.numel()
+                )
+            )
+            type_to_packed_big_tensor_size[tensor.dtype] += tensor.numel()
+            
+        type_to_packed_big_tensor_size = {
+            k: torch.empty(v, device=tensor.device, dtype=k, requires_grad=False)
+            for k, v in type_to_packed_big_tensor_size.items()
+        }
+        for i, (key, tensor) in enumerate(gathered_hf_params.items()):
+            k, shape, dtype, offset, size = key_to_type_and_offset_and_size_in_big_tensor[i]
+            assert k == key
+            type_to_packed_big_tensor_size[dtype][offset:offset+size] = tensor.detach().view(-1)
+
+        all_handles = []
+        for dtype, tensor in type_to_packed_big_tensor_size.items():
             handle = reduce_tensor(tensor.detach())
-            all_handles.append((key, handle))
+            all_handles.append((dtype, handle))
 
         # Store references to avoid premature garbage collection
-        self._held_gather_buffer = gathered_hf_params
-        shapes = {}
-        for key, tensor in gathered_hf_params.items():
-            shapes[key] = tensor.shape
 
-        return {device_uuid: all_handles}
+        self._held_gather_buffer = type_to_packed_big_tensor_size
+        # shapes = {}
+        # for key, tensor in gathered_hf_params.items():
+        #     shapes[key] = tensor.shape
+        
+        serielized = (all_handles, key_to_type_and_offset_and_size_in_big_tensor)
+
+        return {device_uuid: serielized}
 
     def prepare_for_lp_inference(self):
         self.model = self.move_model(self.model, "cuda", move_grads=False)
