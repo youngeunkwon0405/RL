@@ -21,7 +21,12 @@ from typing import Any, Generator, Iterable, List, Optional, Set, Union, cast
 
 import ray
 import torch
+from accelerate import init_empty_weights
 from torch import nn
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    set_model_state_dict,
+)
 from torch.distributed.fsdp import (
     FSDPModule,
 )
@@ -58,10 +63,6 @@ from nemo_rl.models.policy.utils import (
 from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
     save_checkpoint,
-)
-from torch.distributed.checkpoint.state_dict import (
-    StateDictOptions,
-    set_model_state_dict,
 )
 
 
@@ -162,8 +163,13 @@ class DTensorPolicyWorker:
 
         model_config = AutoConfig.from_pretrained(
             model_name,
+            # Always load the model in float32 to keep master weights in float32.
+            # Keeping the master weights in lower precision has shown to cause issues with convergence.
+            torch_dtype=torch.float32,
             trust_remote_code=True,
-            **sliding_window_overwrite(model_name),  # due to https://github.com/huggingface/transformers/issues/38002
+            **sliding_window_overwrite(
+                model_name
+            ),  # due to https://github.com/huggingface/transformers/issues/38002
         )
 
         full_state_dict = None
@@ -172,27 +178,19 @@ class DTensorPolicyWorker:
             model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 device_map="cpu",  # load weights onto CPU initially
-                # Always load the model in float32 to keep master weights in float32.
-                # Keeping the master weights in lower precision has shown to cause issues with convergence.
-                # https://github.com/NVIDIA/NeMo-RL/issues/279 will fix the issue of CPU OOM for larger models.
-                torch_dtype=torch.float32,
                 trust_remote_code=True,
                 config=model_config,
             )
             full_state_dict = model.state_dict()
             del model
-            torch.cuda.empty_cache()
 
         print(f"[Rank {self.rank}] Initializing empty model for FSDP...")
         # All ranks initialize model on meta device, so FSDP can shard it.
         # The actual weights will be broadcast from rank 0.
-        from accelerate import init_empty_weights
 
         with init_empty_weights():
             self.model = AutoModelForCausalLM.from_config(
                 model_config,
-                torch_dtype=self.dtype,
-                trust_remote_code=True,
             )
 
         # caching since this property is not always preserved after FSDP
