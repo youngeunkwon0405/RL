@@ -157,7 +157,7 @@ class Policy(ColocatablePolicyInterface, GenerationInterface):
         if config["sequence_packing"]["enabled"]:
             assert (
                 config["megatron_cfg"]["enabled"] or config["dtensor_cfg"]["enabled"]
-            ), "Sequence packing requires for Megatron or DTensor policies."
+            ), "Sequence packing requires Megatron or DTensor policies."
             self.use_sequence_packing = True
             self.sequence_packing_args: SequencePackingArgs = {
                 "train_mb_tokens": config["sequence_packing"]["train_mb_tokens"],
