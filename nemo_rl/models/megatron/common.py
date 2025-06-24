@@ -316,7 +316,11 @@ def forward_step_arbitrary_loss(
         # Unpack the output tensor if we did packed sequences
         if pack_sequences and packed_seq_params is not None:
             # remove padding
-            loss_fn = SequencePackingLossWrapper(loss_fn, packed_seq_params)
+            loss_fn = SequencePackingLossWrapper(
+                loss_fn=loss_fn,
+                cu_seqlens_q=packed_seq_params.cu_seqlens_q,
+                cu_seqlens_q_padded=packed_seq_params.cu_seqlens_q,
+            )
 
         loss_data = data_dict
 

@@ -35,6 +35,7 @@ from transformers.integrations.accelerate import find_tied_parameters
 from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
+from nemo_rl.algorithms.loss_functions import SequencePackingLossWrapper
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
 from nemo_rl.models.dtensor.parallelize import (
@@ -48,7 +49,6 @@ from nemo_rl.models.huggingface.common import (
     ModelFlag,
     get_flash_attention_kwargs,
     pack_sequences,
-    unpack_tensor,
 )
 from nemo_rl.models.policy import PolicyConfig
 from nemo_rl.models.policy.interfaces import (
@@ -472,24 +472,10 @@ class DTensorPolicyWorker:
                 # so its safe to not check for the case where the last data slice is smaller than mbs
                 if self.cfg["dynamic_batching"]["enabled"]:
                     mb_iterator = batch.make_microbatch_iterator_with_dynamic_shapes()
-                # TODO(ahmadki)
                 elif self.enable_seq_packing:
                     mb_iterator = (
                         batch.make_microbatch_iterator_for_packable_sequences()
                     )
-                    # data_iterator_len, seq_dim_size = (
-                    #     batch.get_microbatch_iterator_for_packable_sequences_len()
-                    # )
-                    # micro_batch_size = 1
-                    # pack_seqs = True
-                    # seqlen_key = "input_lengths"
-                    # tp_size = self.cfg["megatron_cfg"]["tensor_model_parallel_size"]
-                    # cp_size = self.cfg["megatron_cfg"]["context_parallel_size"]
-                    # pad_factor = cp_size * 2 * tp_size if cp_size > 1 else tp_size
-                    # if self.cfg["megatron_cfg"]["pipeline_model_parallel_size"] > 1:
-                    #     _, pad_full_seq_to = (
-                    #         batch.get_microbatch_iterator_for_packable_sequences_len()
-                    #     )
                 else:
                     mb_iterator = batch.make_microbatch_iterator(mbs)
 
@@ -506,6 +492,7 @@ class DTensorPolicyWorker:
                                 padding_value=self.tokenizer.eos_token_id,
                                 return_attention_mask=False,
                             )
+                            seq_len = input_ids.shape[1]
                             attention_mask = None
                             flash_attn_kwargs = get_flash_attention_kwargs(
                                 input_lengths=mb["input_lengths"],
@@ -604,14 +591,19 @@ class DTensorPolicyWorker:
                             logits = logits_dtensor.full_tensor()[:, sorted_indices]
 
                         if self.enable_seq_packing:
-                            logits = unpack_tensor(logits, mb["input_lengths"])
+                            loss_fn_ = SequencePackingLossWrapper(
+                                loss_fn=loss_fn,
+                                cu_seqlens_q=flash_attn_kwargs.cu_seqlens_q,
+                                cu_seqlens_q_padded=flash_attn_kwargs.cu_seqlens_q,
+                            )
+                        else:
+                            loss_fn_ = loss_fn
 
-                        loss, loss_metrics = loss_fn(
+                        loss, loss_metrics = loss_fn_(
                             logits,
                             mb,
                             global_valid_seqs,
                             global_valid_toks,
-                            max_seq_len=max(mb["input_lengths"]),
                         )
 
                         ## scale by the number of global batches so we get the correct

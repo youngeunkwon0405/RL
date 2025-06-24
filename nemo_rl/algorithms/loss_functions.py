@@ -11,7 +11,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-from dataclasses import dataclass
 from typing import Any, Optional, TypedDict, TypeVar
 
 import torch
@@ -113,17 +112,16 @@ class ClippedPGLossFn(LossFunction):
         data: BatchedDataDict[ClippedPGLossDataDict],
         global_valid_seqs: torch.Tensor,
         global_valid_toks: torch.Tensor,
-        max_seq_len: int | None = None,
         vocab_parallel_rank: Optional[int] = None,
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
     ) -> tuple[torch.Tensor, dict]:
         """Clipped Policy Gradient RL loss function."""
-        token_mask = data["token_mask"][:, 1:max_seq_len]
+        token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
-        advantages = data["advantages"][:, 1:max_seq_len]
-        prev_logprobs = data["prev_logprobs"][:, 1:max_seq_len]
-        generation_logprobs = data["generation_logprobs"][:, 1:max_seq_len]
-        reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:max_seq_len]
+        advantages = data["advantages"][:, 1:]
+        prev_logprobs = data["prev_logprobs"][:, 1:]
+        generation_logprobs = data["generation_logprobs"][:, 1:]
+        reference_policy_logprobs = data["reference_policy_logprobs"][:, 1:]
 
         mask = token_mask * sample_mask.unsqueeze(-1)
 
@@ -153,7 +151,7 @@ class ClippedPGLossFn(LossFunction):
             )
         elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             curr_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"][:, :max_seq_len]
+                next_token_logits, data["input_ids"]
             )
         else:
             next_token_logits_wo_last = next_token_logits[
@@ -162,7 +160,7 @@ class ClippedPGLossFn(LossFunction):
             next_token_logprobs = torch.nn.functional.log_softmax(
                 next_token_logits_wo_last, dim=-1
             )
-            next_tokens = data["input_ids"][:, 1:max_seq_len].cuda()  # Skip first token
+            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
             curr_logprobs = next_token_logprobs.gather(
                 dim=-1, index=next_tokens.unsqueeze(-1)
             ).squeeze(-1)
@@ -315,11 +313,10 @@ class NLLLoss(LossFunction):
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
         dpo_loss: bool = False,
         dpo_average_log_probs: bool = False,
-        max_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, dict[str, Any]]:
         # logits shape: [batch_size, seq_len, vocab_size]
         # Get the next token logits for each position
-        token_mask = data["token_mask"][:, 1:max_seq_len]
+        token_mask = data["token_mask"][:, 1:]
         sample_mask = data["sample_mask"]
         mask = token_mask * sample_mask.unsqueeze(-1)
 
@@ -340,10 +337,10 @@ class NLLLoss(LossFunction):
             )
         elif isinstance(next_token_logits, torch.distributed.tensor.DTensor):
             token_logprobs = get_logprobs_from_vocab_parallel_logits(
-                next_token_logits, data["input_ids"][:, :max_seq_len]
+                next_token_logits, data["input_ids"]
             )
         else:
-            next_tokens = data["input_ids"][:, 1:max_seq_len].cuda()  # Skip first token
+            next_tokens = data["input_ids"][:, 1:].cuda()  # Skip first token
             next_token_logprobs = torch.nn.functional.log_softmax(
                 next_token_logits, dim=-1
             )
@@ -605,21 +602,16 @@ class DPOLossFn(LossFunction):
         }
 
 
-@dataclass
-class PackedSeqParams:
-    cu_seqlens_q: Tensor
-    cu_seqlens_q_padded: Tensor
-    cu_seqlens_kv: Tensor
-    cu_seqlens_kv_padded: Tensor
-    max_seqlen_q: int
-    max_seqlen_kv: int
-    qkv_format: str
-
-
 class SequencePackingLossWrapper:
-    def __init__(self, loss_fn: LossFunction, packed_seq_params: PackedSeqParams):
+    def __init__(
+        self,
+        loss_fn: LossFunction,
+        cu_seqlens_q: Tensor,
+        cu_seqlens_q_padded: Optional[Tensor] = None,
+    ):
         self.loss_fn = loss_fn
-        self.packed_seq_params = packed_seq_params
+        self.cu_seqlens_q = cu_seqlens_q
+        self.cu_seqlens_q_padded = cu_seqlens_q_padded
 
     def __call__(
         self,
@@ -631,16 +623,12 @@ class SequencePackingLossWrapper:
         vocab_parallel_group: Optional[torch.distributed.ProcessGroup] = None,
     ) -> tuple[Tensor, dict[str, Any]]:
         """Wraps a loss function to handle sequence packing by doing one sequence at a time to avoid padding."""
-        unpadded_cu_seqlens = self.packed_seq_params.cu_seqlens_q
-        unpadded_seq_lengths = (
-            self.packed_seq_params.cu_seqlens_q[1:]
-            - self.packed_seq_params.cu_seqlens_q[:-1]
-        )
-        if self.packed_seq_params.cu_seqlens_q_padded is not None:
-            padded_cu_seqlens = self.packed_seq_params.cu_seqlens_q_padded
+        unpadded_cu_seqlens = self.cu_seqlens_q
+        unpadded_seq_lengths = self.cu_seqlens_q[1:] - self.cu_seqlens_q[:-1]
+        if self.cu_seqlens_q_padded is not None:
+            padded_cu_seqlens = self.cu_seqlens_q_padded
             padded_seq_lengths = (
-                self.packed_seq_params.cu_seqlens_q_padded[1:]
-                - self.packed_seq_params.cu_seqlens_q_padded[:-1]
+                self.cu_seqlens_q_padded[1:] - self.cu_seqlens_q_padded[:-1]
             )
         else:
             padded_cu_seqlens = unpadded_cu_seqlens
