@@ -12,11 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Optional, Tuple
+from typing import Optional, Tuple, TypeVar
 
 import torch
 from transformers import AutoConfig
+
+Tensor = TypeVar("Tensor", bound=torch.Tensor)
+
+
+@dataclass
+class FlashAttentionKwargs:
+    """Dataclass to hold FlashAttention v2 kwargs."""
+
+    cu_seqlens_q: Tensor
+    cu_seqlens_k: Tensor
+    max_seqlen_q: int
+    max_seqlen_k: int
 
 
 class ModelFlag(Enum):
@@ -214,7 +227,8 @@ def pack_sequences(
     return input_ids_packed, position_ids_packed, attention_mask
 
 
-# TODO(ahmadki): actually support 2D mode
+# TODO(ahmadki): the function doesn't actually handle returning 2D tensors because none of the backends support this.
+#  but we should support this anyways
 def unpack_tensor(tensor, input_lengths):
     """Unpacks a packed tensor into individual sequences padded to the same length.
 
@@ -258,7 +272,7 @@ def unpack_tensor(tensor, input_lengths):
     return torch.cat(tensor_stacked, dim=0)
 
 
-def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> dict:
+def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> FlashAttentionKwargs:
     """Returns kwargs required for FlashAttention v2 forward functions.
 
     Args:
@@ -279,9 +293,9 @@ def get_flash_attention_kwargs(input_lengths: torch.Tensor) -> dict:
     )  # prepend 0
     max_len = input_lengths.max().item()
 
-    return {
-        "cu_seqlens_q": cu_seqlens,
-        "cu_seqlens_k": cu_seqlens.clone(),  # same for self-attention
-        "max_seqlen_q": max_len,
-        "max_seqlen_k": max_len,
-    }
+    return FlashAttentionKwargs(
+        cu_seqlens_q=cu_seqlens,
+        cu_seqlens_k=cu_seqlens.clone(),  # same for self-attention
+        max_seqlen_q=max_len,
+        max_seqlen_k=max_len,
+    )
