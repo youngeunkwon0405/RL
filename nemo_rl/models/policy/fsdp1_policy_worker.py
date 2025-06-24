@@ -75,6 +75,7 @@ class FSDP1PolicyWorker:
         optimizer_path: Optional[str] = None,
         init_optimizer: bool = True,
         init_reference_model: bool = True,
+        **kwargs: Any,
     ):
         self.cfg = config
         # torch distributed init. Envars for rank, world_size, and master_addr and master_port are set from the ray remote call
@@ -1057,4 +1058,12 @@ class FSDP1PolicyWorker:
 
     def shutdown(self) -> None:
         """Shutdown the policy."""
-        #
+        pass
+
+    def start_gpu_profiling(self) -> None:
+        """Start GPU profiling."""
+        torch.cuda.profiler.start()
+
+    def stop_gpu_profiling(self) -> None:
+        """Stop GPU profiling."""
+        torch.cuda.profiler.stop()

@@ -27,6 +27,7 @@ from nemo_rl.distributed.ray_actor_environment_registry import (
     get_actor_python_env,
 )
 from nemo_rl.distributed.virtual_cluster import RayVirtualCluster
+from nemo_rl.distributed.worker_group_utils import recursive_merge_options
 from nemo_rl.utils.venvs import create_local_venv_on_each_node
 
 
@@ -55,7 +56,7 @@ class MultiWorkerFuture:
         Returns:
             List of results, deduplicated by tied workers if respect_tied_workers is True
         """
-        from ray._raylet import ObjectRef, ObjectRefGenerator
+        from ray import ObjectRef, ObjectRefGenerator
 
         # Flatten futures into a list of ObjectRefs
         object_refs: list[ObjectRef] = []
@@ -142,7 +143,8 @@ class RayWorkerBuilder:
             module = importlib.import_module(module_name)
             worker_class = getattr(module, class_name)
             worker_kwargs = dict(self.init_kwargs)
-            options: dict[str, Any] = deepcopy(extra_options)
+            default_options = getattr(worker_class, "_default_options", {})
+            options = recursive_merge_options(default_options, extra_options)
 
             # Use the worker's configuration interface if available
             if hasattr(worker_class, "configure_worker"):
@@ -590,7 +592,7 @@ class RayWorkerGroup:
 
             if should_run:
                 method = getattr(worker, method_name)
-                futures.append(method.remote(data[data_idx], **common_kwargs))
+                futures.append(method.remote(data=data[data_idx], **common_kwargs))
                 data_idx += 1
 
         assert data_idx == len(data), (
@@ -736,7 +738,7 @@ class RayWorkerGroup:
 
                 # Call the method on the worker with its data slice
                 future = getattr(worker, method_name).remote(
-                    worker_data, **common_kwargs
+                    data=worker_data, **common_kwargs
                 )
                 futures.append(future)
                 called_workers.append(worker_idx)
@@ -744,7 +746,9 @@ class RayWorkerGroup:
                 # If this worker doesn't need data:
                 if make_dummy_calls_to_free_axes:
                     # If make_dummy_calls_to_free_axes is True, just call the method with None
-                    future = getattr(worker, method_name).remote(None, **common_kwargs)
+                    future = getattr(worker, method_name).remote(
+                        data=None, **common_kwargs
+                    )
                     futures.append(future)
                     called_workers.append(worker_idx)
                 else:

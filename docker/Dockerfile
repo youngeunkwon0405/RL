@@ -77,14 +77,6 @@ uv sync --link-mode symlink --locked --extra mcore --no-install-project
 uv sync --link-mode symlink --locked --all-groups --no-install-project
 EOF
 
-# Prefetch all virtual environments
-# Copy entire source to temp location, run prefetch, then clean up
-COPY . /tmp/nemo-rl-prefetch
-RUN cd /tmp/nemo-rl-prefetch && \
-    UV_PROJECT_ENVIRONMENT="/tmp/nemo-rl-prefetch/.venv" uv run nemo_rl/utils/prefetch_venvs.py && \
-    cd / && \
-    rm -rf /tmp/nemo-rl-prefetch
-
 WORKDIR /opt/nemo-rl
 
 FROM hermetic AS release
@@ -100,7 +92,6 @@ LABEL com.nvidia.build.ref="${NVIDIA_BUILD_REF}"
 
 ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
 
+# Copy in source and prefetch all virtual environments
 COPY . /opt/nemo-rl
-
-# Make hermetic the default target instead of release since that's the recommended container
-FROM hermetic
+RUN UV_LINK_MODE=symlink uv run nemo_rl/utils/prefetch_venvs.py
