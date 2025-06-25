@@ -16,22 +16,35 @@ from nemo.lightning import io
 from nemo.lightning.io.state import TransformFns
 
 
-def get_export_mapping():
+def get_export_mapping(config):
     mapping = {
         "**.self_attention.linear_proj.weight": "**.self_attn.o_proj.weight",
         "**.self_attention.linear_qkv.layer_norm_weight": "**.input_layernorm.weight",
         "**.self_attention.q_layernorm.weight": "**.self_attn.q_norm.weight",
         "**.self_attention.k_layernorm.weight": "**.self_attn.k_norm.weight",
         "decoder.final_layernorm.weight": "model.norm.weight",
-        "**.mlp.experts.linear_fc2.weight*": "**.mlp.experts.*.down_proj.weight",
-        "**.mlp.router.weight": "**.mlp.gate.weight",
-        "**.pre_mlp_layernorm.weight": "**.post_attention_layernorm.weight",
     }
+    is_moe = getattr(config, "num_experts", 0) > 0
+    if is_moe:
+        mapping.update(
+            {
+                "**.mlp.experts.linear_fc2.weight*": "**.mlp.experts.*.down_proj.weight",
+                "**.mlp.router.weight": "**.mlp.gate.weight",
+                "**.pre_mlp_layernorm.weight": "**.post_attention_layernorm.weight",
+            }
+        )
+    else:
+        mapping.update(
+            {
+                "**.mlp.linear_fc2.weight": "**.mlp.down_proj.weight",
+                "**.mlp.linear_fc1.layer_norm_weight": "**.post_attention_layernorm.weight",
+            }
+        )
     return mapping
 
 
-## TODO: support dense
-def get_export_transforms():
+def get_export_transforms(config):
+    is_moe = getattr(config, "num_experts", 0) > 0
     transforms = [
         io.state_transform(
             source_key="**.self_attention.linear_qkv.weight",
@@ -42,13 +55,21 @@ def get_export_transforms():
             ),
             fn=TransformFns.split_qkv,
         ),
-        io.state_transform(
-            source_key="**.mlp.experts.linear_fc1.weight*",
-            target_key=(
-                "**.mlp.experts.*.gate_proj.weight",
-                "**.mlp.experts.*.up_proj.weight",
-            ),
-            fn=TransformFns.split_fc1,
+        (
+            io.state_transform(
+                source_key="**.mlp.linear_fc1.weight",
+                target_key=("**.mlp.gate_proj.weight", "**.mlp.up_proj.weight"),
+                fn=TransformFns.split_fc1,
+            )
+            if not is_moe
+            else io.state_transform(
+                source_key="**.mlp.experts.linear_fc1.weight*",
+                target_key=(
+                    "**.mlp.experts.*.gate_proj.weight",
+                    "**.mlp.experts.*.up_proj.weight",
+                ),
+                fn=TransformFns.split_fc1,
+            )
         ),
         io.state_transform(
             source_key="embedding.word_embeddings.weight",
@@ -56,9 +77,7 @@ def get_export_transforms():
             fn=TransformFns.prune_padding,
         ),
     ]
-
-    ## TODO!
-    if True:  # not self.config.tie_word_embeddings:
+    if not config.tie_word_embeddings:
         transforms.append(
             io.state_transform(
                 source_key="output_layer.weight",

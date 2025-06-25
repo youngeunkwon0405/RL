@@ -303,8 +303,8 @@ class MegatronToHFConverter:
                 source_state_dict
             )
         elif "qwen3" in hf_model_name.lower():
-            self.export_mapping = qwen3_converter.get_export_mapping()
-            self.export_transforms = qwen3_converter.get_export_transforms()
+            self.export_mapping = qwen3_converter.get_export_mapping(config)
+            self.export_transforms = qwen3_converter.get_export_transforms(config)
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )
