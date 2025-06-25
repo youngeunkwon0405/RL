@@ -17,11 +17,10 @@ cluster.num_nodes: [8]
 policy.model_name: ["deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"]
 policy.logprob_batch_size: [1]
 
-# Top P Variance
+# Masking
 grpo.top_p_std: [1.0]
-
-# Random Entropy Mask
-grpo.random_entropy_mask: [true]
+grpo.top_p_ent: [1.0]
+grpo.random_mask_prob: [0.20]
 
 # Training and Validation Dataset
 data.dataset_name: ["DAPOMath"]

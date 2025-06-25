@@ -1,7 +1,7 @@
 # GRPO Algorithm Configuration
 grpo:
-  random_entropy_mask: false
   reverse_entropy_mask: false
+  random_mask_prob: 0.20
   top_p_std: 0.20   # train on responses with top p variance
   top_p_ent: 0.20   # train on tokens with top p entropy
   num_prompts_per_step: 64
@@ -123,7 +123,7 @@ logger:
   tensorboard_enabled: false
   monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
-    project: "grpo-8020"
+    project: "grpo-token-mask"
     name: "grpo-dev-logger"
   tensorboard: {}
   gpu_monitoring:
