@@ -24,6 +24,7 @@ loss_fn:
   use_on_policy_kl_approximation: false
   use_importance_sampling_correction: false
   token_level_loss: true
+  random_mask_prob: ${grpo.random_mask_prob}
 
 checkpointing:
   enabled: true

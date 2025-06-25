@@ -22,9 +22,9 @@ from transformers import PreTrainedTokenizerBase
 
 from nemo_rl.algorithms.interfaces import LossFunction
 from nemo_rl.algorithms.loss_functions import (
-    ClippedPGLossConfig,
     ClippedPGLossDataDict,
-    ClippedPGLossFn,
+    RandomMaskClippedPGLossConfig,
+    RandomMaskClippedPGLossFn,
 )
 from nemo_rl.algorithms.utils import calculate_baseline_and_std_per_prompt
 from nemo_rl.data import DataConfig
@@ -97,7 +97,7 @@ class GRPOLoggerConfig(LoggerConfig):
 
 class MasterConfig(TypedDict):
     policy: PolicyConfig
-    loss_fn: ClippedPGLossConfig
+    loss_fn: RandomMaskClippedPGLossConfig
     env: dict[str, Any]
     data: DataConfig
     grpo: GRPOConfig
@@ -122,7 +122,7 @@ def setup(
     RayVirtualCluster,
     StatefulDataLoader,
     Optional[StatefulDataLoader],
-    ClippedPGLossFn,
+    RandomMaskClippedPGLossFn,
     Logger,
     CheckpointManager,
     GRPOSaveState,
@@ -261,7 +261,7 @@ def setup(
         init_optimizer=True,
     )
 
-    loss_fn = ClippedPGLossFn(loss_config)
+    loss_fn = RandomMaskClippedPGLossFn(loss_config)
 
     print("\n" + "=" * 60)
     print(" " * 18 + "SETUP COMPLETE")
@@ -541,11 +541,6 @@ def grpo_train(
                         entropy_mask = fprop_token_entropy >= entropy_threshold
                     train_data["token_mask"] *= entropy_mask
             
-            if master_config["grpo"]["random_mask_prob"] < 1.0:
-                print(f"▶ Taking {master_config['grpo']['random_mask_prob'] * 100}% tokens randomly...")
-                random_mask = torch.rand(fprop_token_entropy.shape) < master_config["grpo"]["random_mask_prob"]
-                train_data["token_mask"] *= random_mask
-
             print("▶ Preparing for training...")
             with timer.time("training_prep"):
                 policy.prepare_for_training()  # set model train and reload optim to GPU
