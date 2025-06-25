@@ -2,10 +2,11 @@ source /lustre/fsw/portfolios/coreai/users/zhiyul/secrets.sh
 export HF_HOME=/lustre/fsw/portfolios/coreai/users/zhiyul/hf
 #    +policy.megatron_checkpoint_home=/lustre/fsw/portfolios/coreai/users/yuya/root/checkpoints/tron/deepseek-ai/DeepSeek-V3 \
 #    +policy.megatron_checkpoint_home=/lustre/fsw/portfolios/coreai/users/zhiyul/benchmark-rl/modified_checkpoints/tron/deepseek-ai/DeepSeek-V3-bf16 \
+#    +policy.megatron_checkpoint_home=/lustre/fsw/portfolios/coreai/users/yifuw/nemo_rl_checkpoints/tron/model__lustre_fsw_portfolios_coreai_users_yifuw_hf_checkpoints_dsv3_DeepSeek-V3-BF16 \
 uv run python examples/run_grpo_math.py --config=examples/configs/grpo_math_1B_megatron.yaml \
     grpo.val_batch_size=2 \
     policy.model_name=/lustre/fsw/portfolios/coreai/users/zhiyul/hf/hub/models--deepseek-ai--DeepSeek-V3-bf16 \
-    +policy.megatron_checkpoint_home=/lustre/fsw/portfolios/coreai/users/yuya/root/checkpoints/tron/deepseek-ai/DeepSeek-V3 \
+    +policy.megatron_checkpoint_home=/lustre/fsw/portfolios/coreai/users/yifuw/nemo_rl_checkpoints/tron/model__lustre_fsw_portfolios_coreai_users_yifuw_hf_checkpoints_dsv3_DeepSeek-V3-BF16 \
     cluster.num_nodes=32 \
     cluster.gpus_per_node=8 \
     policy.megatron_cfg.pipeline_model_parallel_size=8 \
