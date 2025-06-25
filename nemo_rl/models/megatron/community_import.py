@@ -14,6 +14,7 @@
 
 import os
 
+
 def import_model_from_hf_name(hf_model_name: str, output_path: str):
     if "llama" in hf_model_name.lower():
         from nemo.tron.converter.llama import HFLlamaImporter
@@ -39,31 +40,30 @@ def import_model_from_hf_name(hf_model_name: str, output_path: str):
 
     megatron.core.rerun_state_machine.destroy_rerun_state_machine()
 
-def export_model_from_megatron(
-        hf_model_name: str,
-        input_path: str,
-        output_path: str,
-        hf_tokenizer_path: str,
-        overwrite: bool = False,
-    ):
 
+def export_model_from_megatron(
+    hf_model_name: str,
+    input_path: str,
+    output_path: str,
+    hf_tokenizer_path: str,
+    overwrite: bool = False,
+):
     if os.path.exists(output_path) and not overwrite:
         raise FileExistsError(
-            f"HF checkpoint already exists at {hf_ckpt_path}. Delete it to run or set overwrite=True."
+            f"HF checkpoint already exists at {output_path}. Delete it to run or set overwrite=True."
         )
 
     if "llama" in hf_model_name.lower():
         from nemo.tron.converter.llama import HFLlamaExporter
 
-        print(f"Exporting model {hf_model_name} to {output_path}...")
         exporter_cls = HFLlamaExporter
     elif "qwen" in hf_model_name.lower():
         from nemo.tron.converter.qwen import HFQwen2Exporter
 
-        print(f"Exporting model {hf_model_name} to {output_path}...")
         exporter_cls = HFQwen2Exporter
     else:
         raise ValueError(f"Unknown model: {hf_model_name}")
+    print(f"Exporting model {hf_model_name} to {output_path}...")
     exporter = exporter_cls(
         input_path=input_path,
         output_path=output_path,
@@ -74,4 +74,3 @@ def export_model_from_megatron(
     import megatron.core.rerun_state_machine
 
     megatron.core.rerun_state_machine.destroy_rerun_state_machine()
-
