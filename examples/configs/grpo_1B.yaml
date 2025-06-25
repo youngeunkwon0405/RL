@@ -134,10 +134,6 @@ data:
   max_input_seq_length: ${policy.max_total_sequence_length} # upper bound, real truncation occurs at vllm.max_model_len
 
 env:
-  ifeval:
-    enable: false
-    num_workers: 8
-
   math:
     enable: true
     num_workers: 8
