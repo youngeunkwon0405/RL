@@ -12,26 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections import defaultdict
 import re
+from collections import defaultdict
 
 import einops
 import numpy as np
 import torch
+from megatron.core import parallel_state
+from nemo.lightning.io.state import (
+    StateDictTransform,
+    TransformCTX,
+    _match_keys,
+    _ModelState,
+)
 from transformers import AutoConfig, AutoModelForCausalLM
 from transformers.integrations.accelerate import init_empty_weights
 
-from megatron.core import parallel_state
-from nemo.lightning.io.state import (
-    TransformCTX,
-    _ModelState,
-    StateDictTransform,
-    _match_keys,
-)
-import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
-import nemo_rl.models.megatron.converters.llama as llama_converter
-import nemo_rl.models.megatron.converters.qwen3 as qwen3_converter
 import nemo_rl.models.megatron.converters.deepseek as deepseek_converter
+import nemo_rl.models.megatron.converters.llama as llama_converter
+import nemo_rl.models.megatron.converters.qwen2 as qwen2_converter
+import nemo_rl.models.megatron.converters.qwen3 as qwen3_converter
 
 _GROUP_TO_RANKS_CACHE = {}
 
@@ -113,8 +113,9 @@ def get_global_layer_num(s, cfg):
 
 
 def get_global_expert_num(s, cfg):
-    """Assumes experts have 'experts.' in their name. Expert num succeeds '.weight'.
-    Assumes expert model parallel size is set.
+    """Get global expert number from local expert number and expert rank.
+
+    Assumes experts have 'experts.' in their name and expert num succeeds '.weight'.
     In the state dict, the expert number is the local expert number (expert local).
     This function converts the local expert number to the global expert number.
     """
@@ -127,14 +128,13 @@ def get_global_expert_num(s, cfg):
     )
     return global_expert_num
 
+
 def get_global_key_from_local_key(local_key, model_cfg):
     local_layer = get_local_layer_num(local_key)
     if local_layer is not None:
         global_layer = get_global_layer_num(local_key, model_cfg)
         # Replace the first occurrence of the digits after "layers." with the global layer number.
-        global_key = re.sub(
-            r"(?<=layers\.)\d+", str(global_layer), local_key, count=1
-        )
+        global_key = re.sub(r"(?<=layers\.)\d+", str(global_layer), local_key, count=1)
     else:
         global_key = local_key
     local_expert = get_local_expert_num(global_key)
@@ -174,8 +174,7 @@ def split_fc1_etp(ctx: TransformCTX, linear_fc1: torch.Tensor):
 
 
 def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
-    """
-    Split interleave-concatenated qkv to q, k, v
+    """Split interleave-concatenated qkv to q, k, v.
 
     Example: export layer linear_qkv to HF {q|k|v}_proj
     """
@@ -211,8 +210,7 @@ def split_qkv_gpu(ctx: TransformCTX, linear_qkv: torch.Tensor):
 
 
 def split_qkv_bias_gpu(ctx: TransformCTX, qkv_bias: torch.Tensor):
-    """
-    Split interleave-concatenated qkv bias to separate q, k, v bias
+    """Split interleave-concatenated qkv bias to separate q, k, v bias.
 
     Example: export layer linear_qkv bias to HF {q|k|v}_proj bias
     """
@@ -248,7 +246,7 @@ def update_transforms_for_nemorl(export_transforms):
     for transform in export_transforms:
         # if transform.transform.__name__ == "split_fc1" and transform.source_key not in ("decoder.layers.*.mlp.experts.linear_fc1.weight", ):
         if transform.transform.__name__ == "split_fc1":
-            if "experts" in transform.source_key:
+            if ".experts" in transform.source_key:
                 transform.transform = split_fc1_etp
             else:
                 transform.transform = split_fc1_tp
@@ -272,7 +270,9 @@ class MegatronToHFConverter:
             )
 
         local_keys = list(megatron_model.state_dict().keys())
-        global_keys = [get_global_key_from_local_key(k, megatron_model.config) for k in local_keys]
+        global_keys = [
+            get_global_key_from_local_key(k, megatron_model.config) for k in local_keys
+        ]
 
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
@@ -301,8 +301,8 @@ class MegatronToHFConverter:
                 source_state_dict
             )
         elif "qwen3" in hf_model_name.lower():
-            self.export_mapping = qwen3_converter.get_export_mapping()
-            self.export_transforms = qwen3_converter.get_export_transforms()
+            self.export_mapping = qwen3_converter.get_export_mapping(config)
+            self.export_transforms = qwen3_converter.get_export_transforms(config)
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )
@@ -312,7 +312,11 @@ class MegatronToHFConverter:
             self.get_source_fn = lambda source_state_dict, _: _ModelState(
                 source_state_dict
             )
-        elif "deepseek" in hf_model_name.lower() or "Moonlight-16B-A3B" in hf_model_name or hf_model_name in ("ByteDance-Seed/academic-ds-9B",):
+        elif (
+            "deepseek" in hf_model_name.lower()
+            or "Moonlight-16B-A3B" in hf_model_name
+            or hf_model_name in ("ByteDance-Seed/academic-ds-9B",)
+        ):
             self.export_mapping = deepseek_converter.get_export_mapping(
                 source=global_keys_map,
                 source_config=megatron_model.config.__dict__,
@@ -476,7 +480,9 @@ class MegatronToHFConverter:
                 )
 
         mapping_groups = [({k: v for k, v in main_mappings}, main_state_dict_keys)]
-        for (k, v), exception_state_dict_keys in zip( exception_mappings, exception_mappings_state_dict_keys_list):
+        for (k, v), exception_state_dict_keys in zip(
+            exception_mappings, exception_mappings_state_dict_keys_list
+        ):
             mapping_groups.append(({k: v}, exception_state_dict_keys))
         transform_groups = [(main_transforms, main_state_dict_keys)]
         for exception_transform, exception_state_dict_keys in zip(
