@@ -196,6 +196,7 @@ class VllmGenerationWorker:
             # Disable prefix caching for devices with compute capability < 8 (Volta) due to vllm segfault.
             enable_prefix_caching=torch.cuda.get_device_capability()[0] >= 8,
             dtype=self.cfg["vllm_cfg"]["precision"],
+            enable_chunked_prefill=False,
             seed=seed,
             # Don't use cuda-graph by default as it leads to convergence issue (see https://github.com/NVIDIA/NeMo-RL/issues/186)
             enforce_eager=True,
