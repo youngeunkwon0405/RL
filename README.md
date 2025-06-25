@@ -313,42 +313,10 @@ sbatch \
 
 NeMo RL supports multiple training backends to accommodate different model sizes and hardware configurations:
 
-### Available Backends
-
-- **FSDP1** - Fully Sharded Data Parallel (legacy implementation)
 - **DTensor (FSDP2)** - PyTorch's next-generation distributed training with improved memory efficiency
 - **Megatron** - NVIDIA's high-performance training framework for scaling to large models (>100B parameters)
 
-### Backend Selection
-
-The training backend is automatically determined based on your YAML configuration settings. Here's how to configure each backend:
-
-#### Megatron Backend
-To enable Megatron-based training:
-
-1. Add the `megatron_cfg` key to your policy configuration
-2. Set `policy.megatron_cfg.enabled=True`
-3. Refer to [examples/configs/grpo_math_1B_megatron.yaml](./examples/configs/grpo_math_1B_megatron.yaml) for a complete configuration example
-
-_Note_: When using Megatron, the optimizer and learning rate schedule are configured through `policy.megatron_cfg.optimizer` and `policy.megatron_cfg.scheduler`, respectively.
-
-#### DTensor Backend
-To enable DTensor (FSDP2) training:
-
-1. Set `policy.dtensor_config.enabled=True`
-2. Refer to [examples/configs/grpo_math_1B.yaml](./examples/configs/grpo_math_1B.yaml) for configuration examples
-
-#### FSDP1 Backend (Default)
-If both Megatron and DTensor are disabled, NeMo-RL automatically falls back to FSDP1 execution.
-
-### Backend Priority
-
-**Megatron takes precedence over DTensor.** If both backends are enabled simultaneously (`policy.megatron_cfg.enabled=True` and `policy.dtensor_config.enabled=True`), the Megatron backend will be used.
-
-### Configuration Examples
-
-For comprehensive examples of each algorithm with each backend, see the [examples/configs/recipes/llm](./examples/configs/recipes/llm/) folder. This directory contains ready-to-use configurations for various supported combinations.
-
+The training backend is automatically determined based on your YAML configuration settings. For detailed information on backend selection, configuration, and examples, see the [Supported Backends documentation](docs/design-docs/supported-backends.md).
 
 ## Evaluation
 
