@@ -125,6 +125,9 @@ class VllmGenerationWorker:
                 seed = node_idx * 1024 + bundle_id
 
             init_kwargs["seed"] = seed
+            # Need to give each DP group its own vllm cache to address:
+            # https://github.com/vllm-project/vllm/issues/18851
+            env_vars["VLLM_CACHE_ROOT"] = os.path.expanduser(f"~/.cache/vllm_{seed}")
 
         # Check if this worker is part of a parallel group (TP or TP+PP).
         # A worker is part of a parallel group if it's a secondary member (local_bundle_indices is None)
@@ -142,9 +145,6 @@ class VllmGenerationWorker:
         env_vars["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
         # Skip vllm P2P check and rely on driver to report peer to peer capability.
         env_vars["VLLM_SKIP_P2P_CHECK"] = "1"
-        # Need to give each DP group its own vllm cache to address:
-        # https://github.com/vllm-project/vllm/issues/18851
-        env_vars["VLLM_CACHE_ROOT"] = os.path.expanduser(f"~/.cache/vllm_{seed}")
 
         return resources, env_vars, init_kwargs
 
