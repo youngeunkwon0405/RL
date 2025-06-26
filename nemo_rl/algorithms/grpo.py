@@ -293,6 +293,11 @@ def refit_policy_generation(
     timer: Timer,
 ) -> None:
     """Refit the policy generation interface with the latest policy weights."""
+    # policy.offload_before_refit()
+    # policy_generation.prepare_for_generation(tags=["weights"])
+    # policy.offload_after_refit()
+    # policy_generation.prepare_for_generation(tags=["kv_cache"])
+    # return
     import time
     # time.time = lambda: 0.0  # Monkey patch time.time to return constant value
     # print = lambda *args, **kwargs: None
@@ -306,13 +311,13 @@ def refit_policy_generation(
     with timer.time("prepare_for_generation/reshard"):
         et = time.time()
         policy_generation.prepare_for_generation(tags=["weights"])
-        print(f"[Refit] Total time taken to prepare_for_generation: {et - st}")
+        print(f"[Refit] Total time taken to policy_generation.prepare_for_generation: {et - st}")
         st = et
 
         # Streaming update weights to save memory
         state_dict_info: list[tuple[str, int]] = policy.prepare_weights_for_ipc()
         et = time.time()
-        print(f"[Refit] Total time taken to prepare_for_generation: {et - st}")
+        print(f"[Refit] Total time taken to prepare_weights_for_ipc: {et - st}")
         st = et
 
         # group keys to save time
@@ -334,6 +339,7 @@ def refit_policy_generation(
         
         et = time.time()
         print(f"[Refit] Total time taken to split keys: {et - st}")
+        print(f"[Refit] Number of splits: {len(split_keys)}")
         st = et
 
         # do update

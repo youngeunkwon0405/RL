@@ -158,6 +158,8 @@ def gather_params(
     pp_group = parallel_state.get_pipeline_model_parallel_group()
     ep_group = parallel_state.get_expert_model_parallel_group()
     pp_world_size = torch.distributed.get_world_size(pp_group)
+    pp_global_ranks = torch.distributed.get_process_group_ranks(group=pp_group)
+    pp_local_rank_id = parallel_state.get_pipeline_model_parallel_rank()
     ep_world_size = torch.distributed.get_world_size(ep_group)
 
     named_modules_dict = dict(model.named_modules())
@@ -167,8 +169,8 @@ def gather_params(
 
     use_cached_key_to_global_key_map = key_to_global_keys is not None
 
-    for local_key, shape, dtype in sorted(keys):
-        if local_key in state_dict:
+    for local_key, owner_pp_local_rank_id, shape, dtype in sorted(keys):
+        if local_key in state_dict and owner_pp_local_rank_id == pp_local_rank_id:
             param = state_dict[local_key]
 
             # Check if param is TP-sharded
@@ -193,7 +195,6 @@ def gather_params(
                 global_key = get_global_key_from_local_key(local_key, model.config)
 
         else:
-            #  params that may not be on every rank, e.g. the embedding layer
             if not use_cached_key_to_global_key_map:
                 global_key = None
             full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
@@ -211,11 +212,12 @@ def gather_params(
             _rank_0_print(f"{local_key} {shape} gather pp global key time: {et - st}")
             st = et
 
-        pp_gathered_params = [
-            torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
-            for _ in range(pp_world_size)
-        ]
-        torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
+        # Broadcast across PP group.
+        src_global_rank = pp_global_ranks[owner_pp_local_rank_id]
+
+        # Broadcast from the rank that has the parameter
+        torch.distributed.broadcast(full_param, src=src_global_rank, group=pp_group)
+        pp_gathered_params = [full_param]
 
         et = time.time()
         _rank_0_print(f"{local_key} {shape} gather pp params time: {et - st}")
@@ -255,7 +257,10 @@ def gather_params(
             flat_gathered_params = pp_gathered_params
 
         if use_cached_key_to_global_key_map:
-            flat_gathered_global_keys = key_to_global_keys[local_key]
+            flat_gathered_global_keys = key_to_global_keys[(local_key, owner_pp_local_rank_id)]
+
+        # if local_key in ("embedding.word_embeddings.weight", "output_layer.weight"):
+        #     flat_gathered_global_keys = flat_gathered_global_keys[src_rank:src_rank+1]
 
         for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
             if k is not None:
