@@ -24,7 +24,7 @@ _Note_: When using Megatron, the optimizer and learning rate schedule are config
 To enable DTensor (FSDP2) training:
 
 1. Set `policy.dtensor_config.enabled=True`
-2. Refer to [examples/configs/grpo_math_1B.yaml](../../examples/configs/grpo_math_1B.yaml) for configuration examples
+2. Refer to [examples/configs/grpo_math_1B.yaml](../../examples/configs/grpo_math_1B.yaml) for a configuration example
 
 ## Backend Priority
 
