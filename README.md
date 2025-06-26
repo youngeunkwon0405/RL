@@ -16,7 +16,7 @@
   - [DPO](#dpo)
     - [DPO Single Node](#dpo-single-node)
     - [DPO Multi-node](#dpo-multi-node)
-  - [Supported Backends](#supported-backends)
+  - [Supported Training Backends](#training-backends)
   - [Evaluation](#evaluation)
     - [Convert Model Format (Optional)](#convert-model-format-optional)
     - [Run Evaluation](#run-evaluation)
@@ -309,14 +309,14 @@ sbatch \
     ray.sub
 ```
 
-## Supported Backends
+## Training Backends
 
 NeMo RL supports multiple training backends to accommodate different model sizes and hardware configurations:
 
 - **DTensor (FSDP2)** - PyTorch's next-generation distributed training with improved memory efficiency
 - **Megatron** - NVIDIA's high-performance training framework for scaling to large models (>100B parameters)
 
-The training backend is automatically determined based on your YAML configuration settings. For detailed information on backend selection, configuration, and examples, see the [Supported Backends documentation](docs/design-docs/supported-backends.md).
+The training backend is automatically determined based on your YAML configuration settings. For detailed information on backend selection, configuration, and examples, see the [Training Backends documentation](docs/design-docs/training-backends.md).
 
 ## Evaluation
 

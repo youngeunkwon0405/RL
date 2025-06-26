@@ -1,4 +1,4 @@
-# Supported Backends
+# Training Backends
 
 NeMo RL supports multiple training backends to accommodate different model sizes and hardware configurations.
 
