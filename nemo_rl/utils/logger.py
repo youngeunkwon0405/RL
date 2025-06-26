@@ -229,7 +229,9 @@ class WandbLogger(LoggerInterface):
             tracked_files = result.stdout.strip().split("\n")
 
             if not tracked_files:
-                print("No git-tracked files found")
+                print(
+                    "Warning: No git repository found. Wandb logs will not track code changes for reproducibility."
+                )
                 return
 
             code_artifact = wandb.Artifact(
