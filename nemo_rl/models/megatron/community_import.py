@@ -34,7 +34,8 @@ def import_model_from_hf_name(hf_model_name: str, output_path: str):
         )
     else:
         raise ValueError(
-            f"Unknown model: {hf_model_name}. Currently, only Qwen2 and Llama are supported."
+            f"Unknown model: {hf_model_name}. Currently, only Qwen2 and Llama are supported. "
+            "If you'd like to run with a different model, please raise an issue or consider adding your own converter."
         )
     importer.apply()
     # resetting mcore state
@@ -65,7 +66,8 @@ def export_model_from_megatron(
         exporter_cls = HFQwen2Exporter
     else:
         raise ValueError(
-            f"Unknown model: {hf_model_name}. Currently, only Qwen2 and Llama are supported."
+            f"Unknown model: {hf_model_name}. Currently, only Qwen2 and Llama are supported. "
+            "If you'd like to run with a different model, please raise an issue or consider adding your own converter."
         )
     print(f"Exporting model {hf_model_name} to {output_path}...")
     exporter = exporter_cls(
