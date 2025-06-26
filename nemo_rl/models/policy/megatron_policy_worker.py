@@ -206,13 +206,6 @@ def setup_megatron_model(
         optimizer = None
         scheduler = None
 
-    _update_model_config_funcs(
-        model,
-        cfg.model_config,
-        cfg.ddp_config,
-        optimizer,
-        align_grad_reduce=cfg.dist_config.align_grad_reduce,
-    )
     print("Model, optimizer, and learning rate scheduler built")
     torch.distributed.barrier()
 
@@ -641,6 +634,14 @@ class MegatronPolicyWorker:
                 print("Reference model not loaded")
 
             self.model = self.move_model(self.model, "cuda")
+
+        _update_model_config_funcs(
+            [self.model],
+            self.megatron_cfg.model_config,
+            self.megatron_cfg.ddp_config,
+            self.optimizer,
+            align_grad_reduce=self.megatron_cfg.dist_config.align_grad_reduce,
+        )
 
         from nemo.tron.tokenizers.tokenizer import build_tokenizer
 
