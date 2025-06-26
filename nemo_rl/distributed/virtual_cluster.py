@@ -46,7 +46,7 @@ class PY_EXECUTABLES:
     VLLM = "uv run --extra vllm"
 
     # Use NeMo-RL direct dependencies and ifeval dependencies.
-    IFEVAL = "uv run --locked --extra ifeval"
+    IFEVAL = "uv run --extra ifeval"
 
 
 @ray.remote
