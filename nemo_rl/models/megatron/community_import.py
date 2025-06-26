@@ -33,7 +33,9 @@ def import_model_from_hf_name(hf_model_name: str, output_path: str):
             output_path=output_path,
         )
     else:
-        raise ValueError(f"Unknown model: {hf_model_name}")
+        raise ValueError(
+            f"Unknown model: {hf_model_name}. Currently, only Qwen2 and Llama are supported."
+        )
     importer.apply()
     # resetting mcore state
     import megatron.core.rerun_state_machine
@@ -62,7 +64,9 @@ def export_model_from_megatron(
 
         exporter_cls = HFQwen2Exporter
     else:
-        raise ValueError(f"Unknown model: {hf_model_name}")
+        raise ValueError(
+            f"Unknown model: {hf_model_name}. Currently, only Qwen2 and Llama are supported."
+        )
     print(f"Exporting model {hf_model_name} to {output_path}...")
     exporter = exporter_cls(
         input_path=input_path,
