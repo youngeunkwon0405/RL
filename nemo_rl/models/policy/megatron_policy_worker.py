@@ -1235,6 +1235,8 @@ class MegatronPolicyWorker:
 
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
+        pp_global_ranks = torch.distributed.get_process_group_ranks(group=pp_group)
+        pp_local_rank_id = parallel_state.get_pipeline_model_parallel_rank()
 
         ep_group = parallel_state.get_expert_model_parallel_group()
         ep_world_size = torch.distributed.get_world_size(ep_group)
@@ -1251,21 +1253,22 @@ class MegatronPolicyWorker:
         st = time.time()
 
         for param_info, size in state_dict_info:
-            local_key, _, _ = param_info
+            local_key, owner_pp_local_rank_id, _, _ = param_info
 
             # Step 1: create global key from local key
             # if: for if a parameter is sharded along PP or EP;
             # else: not sharded (like embedding)
-            if local_key in state_dict:
-                global_key = get_global_key_from_local_key(local_key, self.model.config)
-            else:
-                global_key = None
-
+            pp_gathered_objs = [None]
+            if local_key in state_dict and owner_pp_local_rank_id == pp_local_rank_id:
+                pp_gathered_objs[0] = get_global_key_from_local_key(local_key, self.model.config)
+            
             # Step 2: gather global keys from ranks in PP group
-            pp_gathered_objs = [None] * pp_world_size
-            torch.distributed.all_gather_object(
-                pp_gathered_objs, global_key, group=pp_group
-            )
+            # pp_gathered_objs = [None] * pp_world_size
+            # torch.distributed.all_gather_object(
+            #     pp_gathered_objs, global_key, group=pp_group
+            # )
+            src_global_rank = pp_global_ranks[owner_pp_local_rank_id]
+            torch.distributed.broadcast_object_list(pp_gathered_objs, src=src_global_rank, group=pp_group)
 
             # Step 3: gather global keys from ranks in EP group
             if ep_pattern.search(local_key):
@@ -1276,8 +1279,8 @@ class MegatronPolicyWorker:
                 flat_gathered_objs = [x for y in ep_gathered_objs for x in y]
             else:
                 flat_gathered_objs = pp_gathered_objs
-
-            final_key_to_global_keys[local_key] = flat_gathered_objs
+            
+            final_key_to_global_keys[(local_key, owner_pp_local_rank_id)] = flat_gathered_objs
 
         et = time.time()
         if (
@@ -1309,6 +1312,7 @@ class MegatronPolicyWorker:
         pp_group = parallel_state.get_pipeline_model_parallel_group()
         pp_world_size = torch.distributed.get_world_size(pp_group)
         pp_group_rank_ids = get_process_group_ranks(pp_group)
+        pp_local_rank_id = parallel_state.get_pipeline_model_parallel_rank()
 
         ep_group = parallel_state.get_expert_model_parallel_group()
         ep_world_size = torch.distributed.get_world_size(ep_group)
@@ -1356,7 +1360,7 @@ class MegatronPolicyWorker:
                 param.element_size()
                 * param.numel()
                 * len(tp_rank_ids)
-                * len(pp_rank_ids)
+                # * len(pp_rank_ids)
                 * len(ep_rank_ids)
                 * scale
             )
@@ -1364,6 +1368,7 @@ class MegatronPolicyWorker:
                 (
                     (
                         name,
+                        pp_local_rank_id,
                         tuple(shape),
                         param.dtype,
                     ),
@@ -1412,8 +1417,9 @@ class MegatronPolicyWorker:
         device_idx = torch.cuda.current_device()
         ## Get device free memory using NVML
         total_available_bytes = get_free_memory_bytes(device_idx)
-        ## Use 80% of the free memory for safety
-        total_available_bytes *= 0.8
+        # TODO: setting to low value (10%) since
+        # more buckets seems to have better perf
+        total_available_bytes *= 0.1
 
         return param_info, total_available_bytes
 
