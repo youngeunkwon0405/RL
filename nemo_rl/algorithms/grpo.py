@@ -13,7 +13,7 @@
 # limitations under the License.
 import os
 from pathlib import Path
-from typing import Any, Optional, Tuple, TypedDict, cast
+from typing import Any, Optional, Tuple, TypedDict, TypeVar, cast
 
 import numpy as np
 import ray
@@ -45,26 +45,30 @@ from nemo_rl.distributed.virtual_cluster import (
 from nemo_rl.environments.interfaces import (
     EnvironmentInterface,
 )
-from nemo_rl.experience.rollouts import run_multi_turn_rollout
+from nemo_rl.experience.rollouts import (
+    run_async_multi_turn_rollout,
+    run_multi_turn_rollout,
+)
 from nemo_rl.models.generation.interfaces import (
     GenerationInterface,
 )
 from nemo_rl.models.generation.vllm import VllmConfig, VllmGeneration
 from nemo_rl.models.policy import PolicyConfig
-from nemo_rl.models.policy.hf_policy import HfPolicy
 from nemo_rl.models.policy.interfaces import ColocatablePolicyInterface
+from nemo_rl.models.policy.lm_policy import Policy
 from nemo_rl.utils.checkpoint import CheckpointingConfig, CheckpointManager
 from nemo_rl.utils.logger import (
     Logger,
     LoggerConfig,
     print_message_log_samples,
 )
+from nemo_rl.utils.nsys import maybe_gpu_profile_step
 from nemo_rl.utils.timer import Timer
 
 # ===============================================================================
 # Configuration
 # ===============================================================================
-TokenizerType = PreTrainedTokenizerBase
+TokenizerType = TypeVar("TokenizerType", bound=PreTrainedTokenizerBase)
 
 
 class GRPOConfig(TypedDict):
@@ -225,7 +229,7 @@ def setup(
             use_gpus=True,
             num_gpus_per_node=cluster_config["gpus_per_node"],
             max_colocated_worker_groups=1
-            if generation_config["backend"] == "hf"
+            if generation_config["backend"] in ("hf", "megatron")
             else 2,
         )
         train_cluster = cluster
@@ -233,8 +237,8 @@ def setup(
         print(f"  ✓ Ray cluster initialized with {cluster_config['num_nodes']} nodes")
 
     else:
-        assert generation_config["backend"] != "hf", (
-            "Non-colocated inference is not supported for HF generation backend. "
+        assert generation_config["backend"] not in ("hf", "megatron"), (
+            "Non-colocated inference is not supported for either the HF or Megatron generation backends. "
             "Please use vLLM backend for generation."
         )
 
@@ -310,9 +314,11 @@ def setup(
     backend = generation_config["backend"]
     generation_config["model_name"] = policy_config["model_name"]  # Needed for vLLM
 
-    if backend == "hf":
+    if backend in ("hf", "megatron"):
         policy_generation = None
-        print(f"  ✓ Using HF backend for generation with {policy_config['model_name']}")
+        print(
+            f"  ✓ Using {backend} backend for generation with {policy_config['model_name']}"
+        )
     elif backend == "vllm":
         generation_config = cast(VllmConfig, generation_config)
         policy_generation = VllmGeneration(
@@ -325,16 +331,19 @@ def setup(
             f"  ✓ Using vLLM backend for generation with {policy_config['model_name']}"
         )
 
-    policy = HfPolicy(
+    if last_checkpoint_path:
+        weights_path = Path(last_checkpoint_path) / "policy" / "weights"
+        optimizer_path = Path(last_checkpoint_path) / "policy" / "optimizer"
+    else:
+        weights_path = None
+        optimizer_path = None
+
+    policy = Policy(
         cluster=train_cluster,
         config=policy_config,
         tokenizer=tokenizer,
-        weights_path=Path(last_checkpoint_path) / "policy" / "weights"
-        if last_checkpoint_path
-        else None,
-        optimizer_path=Path(last_checkpoint_path) / "policy" / "optimizer"
-        if last_checkpoint_path
-        else None,
+        weights_path=weights_path,
+        optimizer_path=optimizer_path,
         init_optimizer=True,
     )
 
@@ -373,6 +382,23 @@ def setup(
 # ===============================================================================
 # Core Algorithm Functions
 # ===============================================================================
+
+
+def _should_use_async_rollouts(master_config: MasterConfig) -> bool:
+    """Determine if async rollouts should be used based on the configuration.
+
+    Returns True if vLLM backend is used with async_engine enabled.
+    """
+    generation_config = master_config["policy"]["generation"]
+    if generation_config is None:
+        return False
+
+    backend = generation_config.get("backend", "")
+    if backend != "vllm":
+        return False
+
+    vllm_cfg = generation_config.get("vllm_cfg", {})
+    return vllm_cfg.get("async_engine", False)
 
 
 def refit_policy_generation(
@@ -497,6 +523,9 @@ def grpo_train(
         print(
             f"\n{'=' * 25} Step {step + 1}/{min(len(dataloader), master_config['grpo']['max_num_steps'])} {'=' * 25}"
         )
+        maybe_gpu_profile_step(policy, step + 1)
+        if policy != policy_generation:
+            maybe_gpu_profile_step(policy_generation, step + 1)
         val_metrics, validation_timings = None, None
 
         with timer.time("total_step_time"):
@@ -526,15 +555,34 @@ def grpo_train(
                     policy_generation.prepare_for_generation()
 
             with timer.time("generation"):
-                repeated_batch, rollout_metrics = run_multi_turn_rollout(
-                    policy_generation=policy_generation,
-                    input_batch=repeated_batch,
-                    tokenizer=tokenizer,
-                    task_to_env=task_to_env,
-                    max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
-                    greedy=False,
-                )
+                # Use async rollouts if vLLM async engine is enabled
+                if _should_use_async_rollouts(master_config):
+                    (
+                        repeated_batch,
+                        rollout_metrics,
+                    ) = run_async_multi_turn_rollout(
+                        policy_generation=policy_generation,
+                        input_batch=repeated_batch,
+                        tokenizer=tokenizer,
+                        task_to_env=task_to_env,
+                        max_seq_len=master_config["policy"][
+                            "max_total_sequence_length"
+                        ],
+                        max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                        greedy=False,
+                    )
+                else:
+                    repeated_batch, rollout_metrics = run_multi_turn_rollout(
+                        policy_generation=policy_generation,
+                        input_batch=repeated_batch,
+                        tokenizer=tokenizer,
+                        task_to_env=task_to_env,
+                        max_seq_len=master_config["policy"][
+                            "max_total_sequence_length"
+                        ],
+                        max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                        greedy=False,
+                    )
                 policy_generation.finish_generation()
 
             # Calculate rewards & advantages
@@ -700,7 +748,7 @@ def grpo_train(
         }
         metrics.update(train_results["all_mb_metrics"])
         for k, v in metrics.items():
-            if k in {"lr", "reward", "global_valid_seqs", "global_valid_toks"}:
+            if k in {"lr", "wd", "reward", "global_valid_seqs", "global_valid_toks"}:
                 metrics[k] = np.mean(v).item()
             else:
                 metrics[k] = np.sum(v).item()
@@ -782,15 +830,27 @@ def validate(
                 break
 
             # Generate responses (updates the LLMMessageLogType in batch_with_msg_logs)
-            val_batch, gen_metrics = run_multi_turn_rollout(
-                policy_generation,
-                val_batch,
-                tokenizer,
-                val_task_to_env,
-                max_seq_len=master_config["policy"]["max_total_sequence_length"],
-                max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
-                greedy=False,
-            )
+            # Use async rollouts if vLLM async engine is enabled
+            if _should_use_async_rollouts(master_config):
+                val_batch, gen_metrics = run_async_multi_turn_rollout(
+                    policy_generation,
+                    val_batch,
+                    tokenizer,
+                    val_task_to_env,
+                    max_seq_len=master_config["policy"]["max_total_sequence_length"],
+                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                    greedy=False,
+                )
+            else:
+                val_batch, gen_metrics = run_multi_turn_rollout(
+                    policy_generation,
+                    val_batch,
+                    tokenizer,
+                    val_task_to_env,
+                    max_seq_len=master_config["policy"]["max_total_sequence_length"],
+                    max_rollout_turns=master_config["grpo"]["max_rollout_turns"],
+                    greedy=False,
+                )
             rewards = val_batch["total_reward"]
 
             total_rewards.extend(rewards.tolist())
