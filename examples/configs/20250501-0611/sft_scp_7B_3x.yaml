@@ -3,9 +3,9 @@ sft:
   ## total number of steps to train will equal
   ## min((max_num_epochs * len(train_dataloader)), max_num_steps)
   max_num_epochs: 2
-  max_num_steps: 1200
+  max_num_steps: 900
 
-  val_period: 200
+  val_period: 100
   val_batches: 20
   val_global_batch_size: 128
   val_micro_batch_size: 1
@@ -14,16 +14,16 @@ sft:
 
 checkpointing:
   enabled: true
-  checkpoint_dir: "results/Qwen3-8B-Base-sft-scp-16k-3x"
+  checkpoint_dir: "results/Qwen2.5-7B-Instruct-sft-scp-16k-3x"
   metric_name: "val_loss"
   higher_is_better: false
   keep_top_k: null
-  save_period: 200
+  save_period: 100
 
 policy:
-  model_name: "Qwen/Qwen3-8B-Base"
+  model_name: "Qwen/Qwen2.5-7B-Instruct"
   tokenizer:
-    name: "Qwen/Qwen3-8B" ## specify if you'd like to use a tokenizer different from the model's default
+    name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
   train_global_batch_size: 128
   train_micro_batch_size: 1
   max_total_sequence_length: 16384
@@ -34,7 +34,7 @@ policy:
   dtensor_cfg:
     enabled: true
     cpu_offload: false
-    sequence_parallel: false
+    sequence_parallel: true
     activation_checkpointing: false
     tensor_parallel_size: 8
     custom_parallel_plan: null
@@ -71,10 +71,10 @@ logger:
   log_dir: "logs"  # Base directory for all logs
   wandb_enabled: true # Make sure you do a ``wandb login [Your API key]'' before running
   tensorboard_enabled: true
-  monitor_gpus: true  # If true, will monitor GPU usage and log to wandb and/or tensorboard
+  monitor_gpus: false  # If true, will monitor GPU usage and log to wandb and/or tensorboard
   wandb:
     project: "sft-scp"
-    name: "Qwen3-8B-Base"
+    name: "Qwen2.5-7B-Instruct"
   tensorboard:
     log_dir: "tb_logs-sft-dev-${data.dataset_name}"
   gpu_monitoring:

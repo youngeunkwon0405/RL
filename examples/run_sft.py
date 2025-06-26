@@ -112,6 +112,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: DataConfig):
     elif data_cls == "so":
         data = json_datasets.SODataset(
             data_config["data_path"]
+        )
     elif data_cls == "openmathinstruct2":
         data = hf_datasets.OpenMathInstruct2Dataset(
             split=data_config["split"],

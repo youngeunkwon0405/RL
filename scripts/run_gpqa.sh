@@ -1,16 +1,40 @@
-CHECKPOINT_DIR=${CHECKPOINT_DIR:-"/home/zhaochengz/lustre/reinforcer/results/Qwen2.5XXX"}
+if [ -z "$MODEL_NAME" ] && [ -z "$CHECKPOINT_DIR" ]; then
+    echo "Neither MODEL_NAME nor CHECKPOINT_DIR is specified."
+    exit 1
+elif [ -n "$MODEL_NAME" ] && [ -n "$CHECKPOINT_DIR" ]; then
+    echo "Both MODEL_NAME and CHECKPOINT_DIR are specified. Only one of them should be specificed."
+    exit 1
+fi
+# Examples:
+# MODEL_NAME: Qwen/Qwen2.5-size-Instruct
+# CHECKPOINT_DIR: /home/zhaochengz/lustre/reinforcer/results/Qwen2.5-3B-sft-xxx
+if [[ $MODEL_NAME == Qwen/Qwen2.5* ]]; then
+    SIZES=${SIZES:-"1.5B 3B 7B 14B"}
+elif [[ $MODEL_NAME == Qwen/Qwen3* ]]; then
+    SIZES=${SIZES:-"1.7B 4B 8B 14B"}
+fi
 TEMPERATURE=${TEMPERATURE:-0.0}
 TOP_P=${TOP_P:-1.0}
 TOP_K=${TOP_K:-"-1"}
-MAX_MODEL_LEN=${MAX_MODEL_LEN:-16384}
+NUM_GENERATION=${NUM_GENERATION:-4}
+if [[ $(awk "BEGIN {print ($TEMPERATURE == 0.0) ? 1 : 0}") -eq 1 || "$TOP_K" == "1" ]]; then
+    # for greedy decoding, NUM_GENERATION must be 1
+    NUM_GENERATION=1
+fi
+MAX_MODEL_LEN=${MAX_MODEL_LEN:-32768}
 if [ -n "$TAG" ]; then
-    TAG=${TAG}_ 
+    tag=_${TAG}
 fi
 
 set -e
-model_name=$(basename "$CHECKPOINT_DIR")
-summary_file=${SUMMARY_FILE:-"logs/${model_name}_${TAG}summary.txt"}
-hyperparameters="temperature: $TEMPERATURE, top_p: $TOP_P, top_k: $TOP_K, max_model_len: $MAX_MODEL_LEN"
+if [ -n "$MODEL_NAME" ]; then
+    model_family=$(basename "${MODEL_NAME/-size/}") # Qwen2.5-Instruct
+else
+    CHECKPOINT_DIR=$(realpath "$CHECKPOINT_DIR")
+    model_family=$(basename "$CHECKPOINT_DIR") # Qwen2.5-3B-sft-xxx
+fi
+summary_file="logs/${model_family}${tag}_summary.txt"
+hyperparameters="temperature: $TEMPERATURE, top_p: $TOP_P, top_k: $TOP_K, #generation: $NUM_GENERATION, max_model_len: $MAX_MODEL_LEN"
 if [ ! -f "$summary_file" ]; then
     echo "$hyperparameters" >> "$summary_file"
 elif ! grep -Fq "$hyperparameters" "$summary_file"; then
@@ -21,22 +45,31 @@ else
     echo "Resume from existing summary $summary_file."
 fi
 
-step_dirs=$(ls -d ${CHECKPOINT_DIR}/hf_step_* | sort -V)
-for step_dir in $step_dirs; do
-    step_dir=$(realpath "$step_dir")
-    step=$(basename "$step_dir") # hf_step_*
-    record="model_name='${step}'"
-    step=${step#hf_} # step_*
-    output_file=logs/${model_name}_${TAG}${step}.txt
+if [ -n "$MODEL_NAME" ]; then
+    models=""
+    for size in $SIZES; do
+        models+="${MODEL_NAME/size/$size} "
+    done
+else
+    models=$(ls -d ${CHECKPOINT_DIR}/hf_step_* | sort -V)
+fi
+for model in $models; do
+    model_name=$(basename $model)
+    record="model_name='$model_name'"
+    if [[ $model_name == hf_step_* ]]; then
+        # expand hf_step_* to Qwen2.5-3B-sft-xxx_step_*
+        model_name=${model_name/hf/$model_family}
+    fi
+    output_file="logs/${model_name}${tag}.txt"
     if [ -f "$output_file" ]; then
-        output_line_num=$(grep -n "$record" "$output_file" | head -n1 | cut -d: -f1)
-        summary_line_num=$(grep -n "$record" "$summary_file" | head -n1 | cut -d: -f1)
+        output_line_num=$(grep -Fn "$record" "$output_file" | head -n1 | cut -d: -f1)
+        summary_line_num=$(grep -Fn "$record" "$summary_file" | head -n1 | cut -d: -f1)
         if [ -n "$output_line_num" ]; then
             # if output contains a record
             if [ -n "$summary_line_num" ]; then
                 # if summary also contains a record
-                output_record=$(tail -n +"$((output_line_num + 1))" "$output_file" | head -n4)
-                summary_record=$(tail -n +"$((summary_line_num + 1))" "$summary_file" | head -n4)
+                output_record=$(tail -n +"$((output_line_num + 1))" "$output_file" | head -n6)
+                summary_record=$(tail -n +"$((summary_line_num + 1))" "$summary_file" | head -n6)
                 # if the record is already in the summary, skip
                 if [ "$output_record" == "$summary_record" ]; then
                     continue
@@ -51,8 +84,9 @@ for step_dir in $step_dirs; do
         fi
     fi
     uv run python examples/run_eval.py --config examples/configs/eval_gpqa.yaml \
+        eval.num_tests_per_prompt=$NUM_GENERATION \
         generation.temperature=$TEMPERATURE generation.top_p=$TOP_P generation.top_k=$TOP_K \
-        generation.model_name="$step_dir" generation.vllm_cfg.max_model_len=$MAX_MODEL_LEN \
+        generation.model_name="$model" generation.vllm_cfg.max_model_len=$MAX_MODEL_LEN \
         | tee "$output_file"
     # add evaluation results to summary
     line_num=$(grep -a -n "============================================================" "$output_file" \

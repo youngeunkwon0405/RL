@@ -237,5 +237,5 @@ def run_env_eval(vllm_generation, dataloader, env, master_config):
     print(f"{max_new_tokens=} {temperature=} {top_p=} {top_k=}\n")
     print(f"{metric=} {num_tests_per_prompt=}\n")
     print(f"score={average_score:.4f} ({score}/{count})")
-    print(f"ratio of valid predictions={prediction_ratio:.2f} ({has_prediction}/{count})")
+    print(f"ratio of valid predictions={prediction_ratio:.3f} ({has_prediction}/{count})")
     print("=" * 60 + "\n")

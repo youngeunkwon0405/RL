@@ -19,7 +19,7 @@ from torch import Tensor
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 
 
-class EnvironmentReturn:
+class EnvironmentReturn(NamedTuple):
     """Standard batched return type for environment step methods.
 
     **All elements are batched.**
@@ -43,7 +43,12 @@ class EnvironmentReturn:
     terminateds: Tensor
 
 
-class MathEnvironmentReturn(EnvironmentReturn):
+class MathEnvironmentReturn(NamedTuple):
+    observations: list[dict[str, str]]
+    metadata: list[Optional[dict]]
+    next_stop_strings: list[list[str] | None] | list[None]
+    rewards: Tensor
+    terminateds: Tensor
     has_predictions: Tensor
 
 
