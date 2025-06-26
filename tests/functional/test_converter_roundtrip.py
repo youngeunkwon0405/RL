@@ -11,6 +11,7 @@ This test:
 """
 
 import os
+import tempfile
 from typing import Any, Dict
 
 import torch
@@ -26,13 +27,12 @@ from nemo_rl.models.policy.lm_policy import Policy
 from nemo_rl.utils.native_checkpoint import convert_dcp_to_hf
 
 
-## TODO: cleanup
 def create_test_config() -> Dict[str, Any]:
     """Create a test configuration for SFT training."""
     return {
         "sft": {
-            "max_num_epochs": 1,
-            "max_num_steps": 2,  # Very short training for testing
+            "max_num_epochs": 1,  ## unused, no training is actually done
+            "max_num_steps": 2,
             "val_period": 2,
             "val_batches": 1,
             "val_global_batch_size": 4,
@@ -264,106 +264,105 @@ def main():
     # TODO(@ashors): test more models
     model_name = "Qwen/Qwen2-0.5B"
 
-    # with tempfile.TemporaryDirectory() as temp_dir:
-    temp_dir = "/opt/test/test_converter_checkpoints"
-    print(f"Using temporary directory: {temp_dir}")
+    with tempfile.TemporaryDirectory() as temp_dir:
+        print(f"Using temporary directory: {temp_dir}")
 
-    # Step 1: Load original HF model
-    print("\n" + "=" * 60)
-    print("STEP 1: Loading original HuggingFace model")
-    print("=" * 60)
-    original_model, original_tokenizer = load_model_and_tokenizer(model_name)
-    original_state_dict = get_model_state_dict(original_model)
+        # Step 1: Load original HF model
+        print("\n" + "=" * 60)
+        print("STEP 1: Loading original HuggingFace model")
+        print("=" * 60)
+        original_model, original_tokenizer = load_model_and_tokenizer(model_name)
+        original_state_dict = get_model_state_dict(original_model)
 
-    # Step 2: Create DCP checkpoint
-    print("\n" + "=" * 60)
-    print("STEP 2: Creating DCP checkpoint")
-    print("=" * 60)
-    config = create_test_config()
-    dcp_checkpoint_path = create_dcp_checkpoint(model_name, config, temp_dir)
+        # Step 2: Create DCP checkpoint
+        print("\n" + "=" * 60)
+        print("STEP 2: Creating DCP checkpoint")
+        print("=" * 60)
+        config = create_test_config()
+        dcp_checkpoint_path = create_dcp_checkpoint(model_name, config, temp_dir)
 
-    # Step 3: Create Megatron checkpoint
-    print("\n" + "=" * 60)
-    print("STEP 3: Creating Megatron checkpoint")
-    print("=" * 60)
-    megatron_checkpoint_path = create_megatron_checkpoint(model_name, temp_dir)
+        # Step 3: Create Megatron checkpoint
+        print("\n" + "=" * 60)
+        print("STEP 3: Creating Megatron checkpoint")
+        print("=" * 60)
+        megatron_checkpoint_path = create_megatron_checkpoint(model_name, temp_dir)
 
-    # Step 4: Convert DCP to HF
-    print("\n" + "=" * 60)
-    print("STEP 4: Converting DCP to HF format")
-    print("=" * 60)
-    dcp_to_hf_path = convert_dcp_to_hf_checkpoint(
-        dcp_checkpoint_path, model_name, temp_dir
-    )
+        # Step 4: Convert DCP to HF
+        print("\n" + "=" * 60)
+        print("STEP 4: Converting DCP to HF format")
+        print("=" * 60)
+        dcp_to_hf_path = convert_dcp_to_hf_checkpoint(
+            dcp_checkpoint_path, model_name, temp_dir
+        )
 
-    # Step 5: Convert Megatron to HF
-    print("\n" + "=" * 60)
-    print("STEP 5: Converting Megatron to HF format")
-    print("=" * 60)
-    megatron_to_hf_path = convert_megatron_to_hf_checkpoint(
-        megatron_checkpoint_path, model_name, temp_dir
-    )
+        # Step 5: Convert Megatron to HF
+        print("\n" + "=" * 60)
+        print("STEP 5: Converting Megatron to HF format")
+        print("=" * 60)
+        megatron_to_hf_path = convert_megatron_to_hf_checkpoint(
+            megatron_checkpoint_path, model_name, temp_dir
+        )
 
-    # Step 6: Load converted models and compare
-    print("\n" + "=" * 60)
-    print("STEP 6: Loading converted models and comparing")
-    print("=" * 60)
+        # Step 6: Load converted models and compare
+        print("\n" + "=" * 60)
+        print("STEP 6: Loading converted models and comparing")
+        print("=" * 60)
 
-    # Load DCP-converted model
-    dcp_converted_model = AutoModelForCausalLM.from_pretrained(
-        dcp_to_hf_path, torch_dtype=torch.bfloat16, trust_remote_code=True
-    )
-    dcp_converted_state_dict = get_model_state_dict(dcp_converted_model)
+        # Load DCP-converted model
+        dcp_converted_model = AutoModelForCausalLM.from_pretrained(
+            dcp_to_hf_path, torch_dtype=torch.bfloat16, trust_remote_code=True
+        )
+        dcp_converted_state_dict = get_model_state_dict(dcp_converted_model)
 
-    # Load Megatron-converted model
-    megatron_converted_model = AutoModelForCausalLM.from_pretrained(
-        megatron_to_hf_path, torch_dtype=torch.bfloat16, trust_remote_code=True
-    )
-    megatron_converted_state_dict = get_model_state_dict(megatron_converted_model)
+        # Load Megatron-converted model
+        megatron_converted_model = AutoModelForCausalLM.from_pretrained(
+            megatron_to_hf_path, torch_dtype=torch.bfloat16, trust_remote_code=True
+        )
+        megatron_converted_state_dict = get_model_state_dict(megatron_converted_model)
 
-    # Step 7: Assertions
-    print("\n" + "=" * 60)
-    print("STEP 7: Running assertions")
-    print("=" * 60)
+        # Step 7: Assertions
+        print("\n" + "=" * 60)
+        print("STEP 7: Running assertions")
+        print("=" * 60)
 
-    # Compare DCP-converted vs Megatron-converted
-    print("Comparing DCP-converted HF model with Megatron-converted HF model...")
-    assert_state_dicts_equal(
-        dcp_converted_state_dict,
-        megatron_converted_state_dict,
-        "DCP-converted HF model",
-        "Megatron-converted HF model",
-    )
+        # Compare DCP-converted vs Megatron-converted
+        print("Comparing DCP-converted HF model with Megatron-converted HF model...")
+        assert_state_dicts_equal(
+            dcp_converted_state_dict,
+            megatron_converted_state_dict,
+            "DCP-converted HF model",
+            "Megatron-converted HF model",
+        )
 
-    print("✓ DCP and Megatron roundtrip checkpoints are identical!")
+        print("✓ DCP and Megatron roundtrip checkpoints are identical!")
 
-    # Verify that both converted models have the expected structure
-    expected_keys = set(original_state_dict.keys())
-    dcp_keys = set(dcp_converted_state_dict.keys())
-    megatron_keys = set(megatron_converted_state_dict.keys())
+        # Verify that both converted models have the expected structure
+        expected_keys = set(original_state_dict.keys())
+        dcp_keys = set(dcp_converted_state_dict.keys())
+        megatron_keys = set(megatron_converted_state_dict.keys())
 
-    assert dcp_keys == expected_keys, (
-        f"DCP converted model missing keys: {expected_keys - dcp_keys}"
-    )
-    assert megatron_keys == expected_keys, (
-        f"Megatron converted model missing keys: {expected_keys - megatron_keys}"
-    )
+        assert dcp_keys == expected_keys, (
+            f"DCP converted model missing keys: {expected_keys - dcp_keys}"
+        )
+        assert megatron_keys == expected_keys, (
+            f"Megatron converted model missing keys: {expected_keys - megatron_keys}"
+        )
 
-    print("✓ All converted models have the expected structure")
+        print("✓ All converted models have the expected structure")
 
-    # Test that we can do a forward pass with both converted models
-    print("Testing forward passes...")
-    test_input = torch.randint(0, 1000, (1, 10))
+        # Test that we can do a forward pass with both converted models
+        print("Testing forward passes...")
+        test_input = torch.randint(0, 1000, (1, 10))
 
-    with torch.no_grad():
-        dcp_output = dcp_converted_model(test_input)
-        megatron_output = megatron_converted_model(test_input)
+        with torch.no_grad():
+            dcp_output = dcp_converted_model(test_input)
+            megatron_output = megatron_converted_model(test_input)
 
-    print("✓ Both converted models can perform forward passes")
+        print("✓ Both converted models can perform forward passes")
 
-    print("\n" + "=" * 80)
-    print("✓ ALL TESTS PASSED!")
-    print("=" * 80)
+        print("\n" + "=" * 80)
+        print("✓ ALL TESTS PASSED!")
+        print("=" * 80)
 
 
 if __name__ == "__main__":
