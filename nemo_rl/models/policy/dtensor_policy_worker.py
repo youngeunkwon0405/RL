@@ -36,6 +36,7 @@ from transformers.models.gemma3.modeling_gemma3 import Gemma3ForCausalLM
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.distributed.worker_group_utils import get_nsight_config_if_pattern_matches
 from nemo_rl.models.dtensor.parallelize import (
     _parallelize_model,
     clip_grad_by_total_norm_,
@@ -109,7 +110,11 @@ def get_cpu_state_dict(
 
 
 @ray.remote(
-    runtime_env={"env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}}
+    runtime_env={
+        # TODO: This option causes a crash on Ampere. It's okay to enable on Hopper.
+        # "env_vars": {"PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"},
+        **get_nsight_config_if_pattern_matches("dtensor_policy_worker"),
+    }
 )
 class DTensorPolicyWorker:
     def __repr__(self) -> str:
@@ -229,9 +234,6 @@ class DTensorPolicyWorker:
         if init_reference_model:
             self.reference_model_state_dict = get_cpu_state_dict(
                 self.model.state_dict().items(), pin_memory=True
-            )
-            self.reference_model_buffers = get_cpu_state_dict(
-                self.model.named_buffers(), pin_memory=True
             )
 
         if init_optimizer:
@@ -763,31 +765,25 @@ class DTensorPolicyWorker:
         """
         with torch.no_grad():
             try:
+                # Save train model state_dict
                 curr_state_dict = get_cpu_state_dict(
                     self.model.state_dict().items(), pin_memory=True
                 )
-                curr_buffers = get_cpu_state_dict(
-                    self.model.named_buffers(), pin_memory=True
-                )
 
+                # Swap reference model state_dict to self.model
                 for k, v in self.model.state_dict().items():
                     val = to_local_if_dtensor(v)
                     val.copy_(self.reference_model_state_dict[k])
 
-                for k, v in self.model.named_buffers():
-                    val = to_local_if_dtensor(v)
-                    val.copy_(self.reference_model_buffers[k])
-
+                # - self.model is the original reference_model, now on CUDA
+                # - curr_state_dict is the train model, now on CPU
                 yield
 
             finally:
+                # Restore train model state_dict
                 for k, v in self.model.state_dict().items():
                     val = to_local_if_dtensor(v)
                     val.copy_(curr_state_dict[k])
-
-                for k, v in self.model.named_buffers():
-                    val = to_local_if_dtensor(v)
-                    val.copy_(curr_buffers[k])
 
     def get_reference_policy_logprobs(
         self, data: BatchedDataDict[Any], micro_batch_size: Optional[int] = None
@@ -1067,3 +1063,11 @@ class DTensorPolicyWorker:
 
     def shutdown(self) -> None:
         """Shutdown the policy."""
+
+    def start_gpu_profiling(self) -> None:
+        """Start GPU profiling."""
+        torch.cuda.profiler.start()
+
+    def stop_gpu_profiling(self) -> None:
+        """Stop GPU profiling."""
+        torch.cuda.profiler.stop()
