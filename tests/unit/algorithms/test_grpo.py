@@ -11,28 +11,37 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import pytest
-import torch
-import ray
-from typing import Dict, List, Tuple
 
-from nemo_reinforcer.algorithms.grpo import calculate_rewards
-from nemo_reinforcer.distributed.batched_data_dict import BatchedDataDict
-from nemo_reinforcer.data.interfaces import DatumSpec, LLMMessageLogType
-from nemo_reinforcer.environments.interfaces import EnvironmentInterface
+import pytest
+import ray
+import torch
+
+from nemo_rl.data.interfaces import DatumSpec, LLMMessageLogType
+from nemo_rl.distributed.batched_data_dict import BatchedDataDict
+from nemo_rl.environments.interfaces import (
+    EnvironmentInterface,
+    EnvironmentReturn,
+)
+from nemo_rl.experience.rollouts import calculate_rewards
 
 
 @ray.remote(num_cpus=0)
 class MockEnvironment(EnvironmentInterface):
-    def __init__(self, rewards: List[float]):
+    def __init__(self, rewards: list[float]):
         self.rewards = rewards
         self._calls = 0
 
     def step(
-        self, messages: List[LLMMessageLogType], env_info: List[dict]
-    ) -> Tuple[None, None, List[float], None]:
+        self, messages: list[LLMMessageLogType], env_info: list[dict]
+    ) -> EnvironmentReturn:
         self._calls += 1
-        return None, None, self.rewards, None
+        return (
+            [{"role": "environment", "content": "observation"}] * len(messages),
+            [{}] * len(messages),
+            [[]] * len(messages),
+            self.rewards,
+            [True] * len(messages),
+        )
 
     def get_calls(self):
         return self._calls
@@ -43,15 +52,15 @@ class MockEnvironment(EnvironmentInterface):
 
     def global_post_process_and_metrics(
         self, batch: BatchedDataDict
-    ) -> Tuple[BatchedDataDict, dict]:
+    ) -> tuple[BatchedDataDict, dict]:
         return batch, {}
 
 
 def create_mock_batch(
     num_samples: int,
-    task_names: List[str],
-    message_logs: List[LLMMessageLogType],
-    extra_env_info: List[dict] = None,
+    task_names: list[str],
+    message_logs: list[LLMMessageLogType],
+    extra_env_info: list[dict] = None,
 ) -> BatchedDataDict[DatumSpec]:
     """Helper function to create a mock batch for testing."""
     if extra_env_info is None:
@@ -117,11 +126,17 @@ def test_calculate_rewards_single_task(mock_env):
     batch = create_mock_batch(2, task_names, message_logs)
 
     # Calculate rewards
-    rewards, to_env = calculate_rewards(batch, task_to_env)
+    env_observations, metadata, next_stop_strings, rewards, terminateds = (
+        calculate_rewards(batch, task_to_env)
+    )
 
     # Verify results
     assert torch.allclose(rewards, torch.tensor([1.0, 2.0]))
-    assert len(to_env) == 2
+    assert len(env_observations) == 2
+    assert len(terminateds) == 2
+    assert len(next_stop_strings) == 2
+    assert len(metadata) == 2
+    assert torch.allclose(rewards, torch.tensor([1.0, 2.0]))
     assert (
         ray.get(mock_env.get_calls.remote()) == 1
     )  # Should only call once for all samples of same task
@@ -146,11 +161,17 @@ def test_calculate_rewards_multiple_tasks(mock_envs):
     batch = create_mock_batch(4, task_names, message_logs)
 
     # Calculate rewards
-    rewards, to_env = calculate_rewards(batch, mock_envs)
+    env_observations, metadata, next_stop_strings, rewards, terminateds = (
+        calculate_rewards(batch, mock_envs)
+    )
 
     # Verify results
     assert torch.allclose(rewards, torch.tensor([1.0, 2.0, 3.0, 4.0]))
-    assert len(to_env) == 4
+    assert len(env_observations) == 4
+    assert len(terminateds) == 4
+    assert len(next_stop_strings) == 4
+    assert len(metadata) == 4
+    assert torch.allclose(rewards, torch.tensor([1.0, 2.0, 3.0, 4.0]))
     assert (
         ray.get(mock_envs["math"].get_calls.remote()) == 1
     )  # One call for all math samples
@@ -167,11 +188,16 @@ def test_calculate_rewards_empty_batch(mock_env):
     batch = create_mock_batch(0, [], [])
 
     # Calculate rewards
-    rewards, to_env = calculate_rewards(batch, task_to_env)
+    env_observations, metadata, next_stop_strings, rewards, terminateds = (
+        calculate_rewards(batch, task_to_env)
+    )
 
     # Verify results
     assert len(rewards) == 0
-    assert len(to_env) == 0
+    assert len(env_observations) == 0
+    assert len(terminateds) == 0
+    assert len(next_stop_strings) == 0
+    assert len(metadata) == 0
     assert (
         ray.get(mock_env.get_calls.remote()) == 0
     )  # Should not call environment for empty batch

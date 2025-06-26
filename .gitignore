@@ -15,9 +15,12 @@ apidocs/
 dist/
 *.egg-info/
 *.vscode/
+release_run*
+ckpts/
 
 # Test
-.coverage
+coverage.json
+.coverage*
 test_assets/
 
 # Cache
@@ -26,8 +29,14 @@ hf_home/
 hf_datasets_cache/
 *logs/
 datasets/
-docker/
+docker/*
+!docker/Dockerfile
+!docker/README.md
 wandb/
 checkpoints/
 results/
 code_snapshots/
+
+# Runtime env
+*runtime_env.yaml
+!default_runtime_env.yaml

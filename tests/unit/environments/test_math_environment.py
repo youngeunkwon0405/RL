@@ -11,11 +11,16 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import os
+import time
+
 import pytest
 import ray
-from nemo_reinforcer.environments.math_environment import MathEnvironment
-import time
-import os
+
+from nemo_rl.distributed.ray_actor_environment_registry import (
+    get_actor_python_env,
+)
+from nemo_rl.environments.math_environment import MathEnvironment
 
 
 @pytest.fixture(scope="module")
@@ -23,7 +28,9 @@ def math_env():
     """Create a MathEnvironment actor for testing."""
     env = MathEnvironment.options(
         runtime_env={
-            "py_executable": MathEnvironment.DEFAULT_PY_EXECUTABLE,
+            "py_executable": get_actor_python_env(
+                "nemo_rl.environments.math_environment.MathEnvironment"
+            ),
             "env_vars": dict(os.environ),
         }
     ).remote({"num_workers": 2})
@@ -109,74 +116,82 @@ def multiple_assistant_test_data():
 
 def test_math_env_step_basic(math_env, basic_test_data):
     """Test basic functionality of MathEnvironment step with simple messages."""
-    observations, updated_metadata, rewards, done = ray.get(
+    result = ray.get(
         math_env.step.remote(
             basic_test_data["message_log_batch"], basic_test_data["metadata"]
         )
     )
 
-    # Check observations
-    assert len(observations) == 3, "Should return observations for all 3 messages"
-    assert all(obs["role"] == "user" for obs in observations), (
-        "All observations should be from user"
+    # Check observations using field access
+    assert len(result.observations) == 3, (
+        "Should return observations for all 3 messages"
     )
-    assert all(obs["content"] == "correct" for obs in observations), (
-        "All responses should be correct"
+    assert all(obs["role"] == "environment" for obs in result.observations), (
+        "All observations should be from environment"
     )
+    assert all(
+        obs["content"] == "Environment: correct" for obs in result.observations
+    ), "All responses should be correct"
 
     # Check metadata
-    assert len(updated_metadata) == 3, "Should return metadata for all 3 messages"
-    assert updated_metadata == basic_test_data["metadata"], (
+    assert len(result.metadata) == 3, "Should return metadata for all 3 messages"
+    assert result.metadata == basic_test_data["metadata"], (
         "Metadata should be unchanged"
     )
 
     # Check rewards and done flags
-    assert rewards.shape == (3,), "Rewards should be a tensor of shape (3,)"
-    assert all(rewards == 1.0), "All rewards should be 1.0 for correct answers"
-    assert done.shape == (3,), "Done flags should be a tensor of shape (3,)"
-    assert all(done == 1.0), "All done flags should be 1.0"
+    assert result.rewards.shape == (3,), "Rewards should be a tensor of shape (3,)"
+    assert all(result.rewards == 1.0), "All rewards should be 1.0 for correct answers"
+    assert result.terminateds.shape == (3,), (
+        "Terminated flags should be a tensor of shape (3,)"
+    )
+    assert all(result.terminateds == 1.0), "All terminated flags should be 1.0"
 
 
 def test_math_env_step_mixed(math_env, mixed_test_data):
     """Test MathEnvironment step with a mix of correct and incorrect responses."""
-    observations, updated_metadata, rewards, done = ray.get(
+    result = ray.get(
         math_env.step.remote(
             mixed_test_data["message_log_batch"], mixed_test_data["metadata"]
         )
     )
 
     # Check observations and rewards
-    assert len(observations) == 3, "Should return observations for all 3 messages"
-    assert observations[0]["content"] == "correct", "First response should be correct"
-    assert observations[1]["content"] == "incorrect", (
+    assert len(result.observations) == 3, (
+        "Should return observations for all 3 messages"
+    )
+    assert result.observations[0]["content"] == "Environment: correct", (
+        "First response should be correct"
+    )
+    assert result.observations[1]["content"] == "Environment: incorrect", (
         "Second response should be incorrect"
     )
-    assert observations[2]["content"] == "correct", "Third response should be correct"
+    assert result.observations[2]["content"] == "Environment: correct", (
+        "Third response should be correct"
+    )
 
-    assert rewards.shape == (3,), "Rewards should be a tensor of shape (3,)"
-    assert rewards[0] == 1.0, "First reward should be 1.0"
-    assert rewards[1] == 0.0, "Second reward should be 0.0"
-    assert rewards[2] == 1.0, "Third reward should be 1.0"
+    assert result.rewards.shape == (3,), "Rewards should be a tensor of shape (3,)"
+    assert result.rewards[0] == 1.0, "First reward should be 1.0"
+    assert result.rewards[1] == 0.0, "Second reward should be 0.0"
+    assert result.rewards[2] == 1.0, "Third reward should be 1.0"
 
 
 def test_math_env_step_empty(math_env):
     """Test MathEnvironment step with empty input."""
-    observations, updated_metadata, rewards, done = ray.get(
-        math_env.step.remote([], [])
-    )
+    result = ray.get(math_env.step.remote([], []))
 
     # Check all outputs are empty
-    assert len(observations) == 0, "Should return empty observations list"
-    assert len(updated_metadata) == 0, "Should return empty metadata list"
-    assert rewards.shape == (0,), "Should return empty rewards tensor"
-    assert done.shape == (0,), "Should return empty done tensor"
+    assert len(result.observations) == 0, "Should return empty observations list"
+    assert len(result.metadata) == 0, "Should return empty metadata list"
+    assert result.rewards.shape == (0,), "Should return empty rewards tensor"
+    assert result.terminateds.shape == (0,), "Should return empty terminateds tensor"
 
 
 def test_math_env_step_multiple_assistant_messages(
     math_env, multiple_assistant_test_data
 ):
     """Test MathEnvironment step with multiple assistant messages in a conversation."""
-    observations, updated_metadata, rewards, done = ray.get(
+    result = ray.get(
         math_env.step.remote(
             multiple_assistant_test_data["message_log_batch"],
             multiple_assistant_test_data["metadata"],
@@ -184,11 +199,13 @@ def test_math_env_step_multiple_assistant_messages(
     )
 
     # Check that only the last assistant message is used
-    assert len(observations) == 2, "Should return observations for both conversations"
-    assert all(obs["content"] == "correct" for obs in observations), (
-        "All responses should be correct"
+    assert len(result.observations) == 2, (
+        "Should return observations for both conversations"
     )
-    assert all(rewards == 1.0), "All rewards should be 1.0"
+    assert all(
+        obs["content"] == "Environment: correct" for obs in result.observations
+    ), "All responses should be correct"
+    assert all(result.rewards == 1.0), "All rewards should be 1.0"
 
 
 @pytest.mark.parametrize("batch_size", [1, 2, 10, 25, 101])
@@ -202,16 +219,86 @@ def test_math_env_various_batches(math_env, batch_size):
     ] * batch_size
     metadata = [{"ground_truth": "3.33333333"}] * batch_size
 
-    observations, updated_metadata, rewards, done = ray.get(
-        math_env.step.remote(message_log_batch, metadata)
-    )
+    result = ray.get(math_env.step.remote(message_log_batch, metadata))
 
     # Check outputs
-    assert len(observations) == batch_size, (
+    assert len(result.observations) == batch_size, (
         f"Should return observations for all {batch_size} messages"
     )
-    assert all(obs["content"] == "correct" for obs in observations), (
-        "All responses should be correct"
+    assert all(
+        obs["content"] == "Environment: correct" for obs in result.observations
+    ), "All responses should be correct"
+    assert result.rewards.shape == (batch_size,), (
+        "Rewards should be a tensor of shape (batch_size,)"
     )
-    assert all(rewards == 1.0), "All rewards should be 1.0"
-    assert all(done == 1.0), "All done flags should be 1.0"
+    assert all(result.rewards == 1.0), "All rewards should be 1.0"
+    assert result.terminateds.shape == (batch_size,), (
+        "Terminated flags should be a tensor of shape (batch_size,)"
+    )
+    assert all(result.terminateds == 1.0), "All terminated flags should be 1.0"
+
+
+def test_math_exception_handling(math_env):
+    """Test MathEnvironment step with an exception in the verify function."""
+    message_log_batch = [
+        [
+            {"role": "user", "content": "Question"},
+            {"role": "assistant", "content": "\\boxed{Eq(x**2/16 + y**2/12, 1)}"},
+        ]
+    ]
+    metadata = [{"ground_truth": "Eq(x**2/4 + y**2/3, 1)"}]
+
+    result = ray.get(math_env.step.remote(message_log_batch, metadata))
+
+    # Program should not crash
+    assert result.rewards.shape == (1,), "Rewards should be a tensor of shape (1,)"
+    assert result.rewards[0] == 0.0, "Reward should be 0.0"
+
+
+def test_math_timeout_handling(math_env):
+    """Test MathEnvironment step with content that causes TimeoutException."""
+    # This content contains complex symbolic math that causes sympy to timeout
+    timeout_content = r"""We are given that \(x = (2 + \sqrt{3})^{1000}\), so \(n = \lfloor x \rfloor\), and \(f = x - n\). We want to find the value of \(x(1 - f)\).
+
+First, let's examine the binomial expansion of \(x = (2 + \sqrt{3})^{1000}\). Notice that:
+\[
+(2 + \sqrt{3}) = 2 + \sqrt{3} = \left(2 - (\sqrt{3})\right)^{-1}
+\]
+
+Using the binomial theorem, we can expand \(x\):
+\[
+x = \sum_{k=0}^{1000} \binom{1000}{k} (2)^{1000-k} (\sqrt{3})^k
+\]
+
+Notice that \((2 - \sqrt{3}) = -1\), so we can use this to our advantage. We can rewrite \(x - 1\) as:
+\[
+x - 1 = (2 + \sqrt{3})^{1000} - 1 = \sum_{k=0}^{1000} \binom{1000}{k} (2)^{1000-k} (\sqrt{3})^k - 1
+\]
+
+Now, let's consider \(f = x - n = (2 + \sqrt{3})^{1000} - \lfloor (2 + \sqrt{3})^{10"""
+
+    message_log_batch = [
+        [
+            {"role": "user", "content": "Solve this complex problem"},
+            {"role": "assistant", "content": timeout_content},
+        ]
+    ]
+    metadata = [{"ground_truth": "13"}]
+
+    # This should complete without hanging, even though it contains timeout-inducing content
+    result = ray.get(math_env.step.remote(message_log_batch, metadata))
+
+    # Program should not crash and should handle timeout gracefully
+    assert result.rewards.shape == (1,), "Rewards should be a tensor of shape (1,)"
+    assert result.rewards[0] == 0.0, "Reward should be 0.0 due to timeout"
+    assert len(result.observations) == 1, "Should return one observation"
+    assert result.observations[0]["role"] == "environment", (
+        "Observation should be from environment"
+    )
+    assert result.observations[0]["content"] == "Environment: incorrect", (
+        "Should be marked as incorrect due to timeout"
+    )
+    assert result.terminateds.shape == (1,), (
+        "Terminated flags should be a tensor of shape (1,)"
+    )
+    assert result.terminateds[0] == 1.0, "Terminated flag should be 1.0"

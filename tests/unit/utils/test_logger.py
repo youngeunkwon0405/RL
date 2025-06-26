@@ -17,12 +17,13 @@ import tempfile
 from unittest.mock import patch
 
 import pytest
+import torch
 
-from nemo_reinforcer.utils.logger import (
+from nemo_rl.utils.logger import (
     Logger,
+    RayGpuMonitorLogger,
     TensorboardLogger,
     WandbLogger,
-    RayGpuMonitorLogger,
     flatten_dict,
 )
 
@@ -62,7 +63,7 @@ class TestTensorboardLogger:
         yield temp_dir
         shutil.rmtree(temp_dir)
 
-    @patch("nemo_reinforcer.utils.logger.SummaryWriter")
+    @patch("nemo_rl.utils.logger.SummaryWriter")
     def test_init(self, mock_summary_writer, temp_dir):
         """Test initialization of TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
@@ -71,7 +72,7 @@ class TestTensorboardLogger:
         # The log_dir is passed to SummaryWriter but not stored as an attribute
         mock_summary_writer.assert_called_once_with(log_dir=temp_dir)
 
-    @patch("nemo_reinforcer.utils.logger.SummaryWriter")
+    @patch("nemo_rl.utils.logger.SummaryWriter")
     def test_log_metrics(self, mock_summary_writer, temp_dir):
         """Test logging metrics to TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
@@ -87,7 +88,7 @@ class TestTensorboardLogger:
         mock_writer.add_scalar.assert_any_call("loss", 0.5, 10)
         mock_writer.add_scalar.assert_any_call("accuracy", 0.8, 10)
 
-    @patch("nemo_reinforcer.utils.logger.SummaryWriter")
+    @patch("nemo_rl.utils.logger.SummaryWriter")
     def test_log_metrics_with_prefix(self, mock_summary_writer, temp_dir):
         """Test logging metrics with a prefix to TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
@@ -104,7 +105,7 @@ class TestTensorboardLogger:
         mock_writer.add_scalar.assert_any_call("train/loss", 0.5, 10)
         mock_writer.add_scalar.assert_any_call("train/accuracy", 0.8, 10)
 
-    @patch("nemo_reinforcer.utils.logger.SummaryWriter")
+    @patch("nemo_rl.utils.logger.SummaryWriter")
     def test_log_hyperparams(self, mock_summary_writer, temp_dir):
         """Test logging hyperparameters to TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
@@ -135,7 +136,7 @@ class TestWandbLogger:
         yield temp_dir
         shutil.rmtree(temp_dir)
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_init_custom_config(self, mock_wandb, temp_dir):
         """Test initialization of WandbLogger with custom config."""
         cfg = {
@@ -156,7 +157,7 @@ class TestWandbLogger:
             dir=temp_dir,
         )
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_log_metrics(self, mock_wandb):
         """Test logging metrics to WandbLogger."""
         cfg = {}
@@ -170,7 +171,7 @@ class TestWandbLogger:
         mock_run = mock_wandb.init.return_value
         mock_run.log.assert_called_once_with(metrics, step=step)
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_log_metrics_with_prefix(self, mock_wandb):
         """Test logging metrics with a prefix to WandbLogger."""
         cfg = {}
@@ -186,7 +187,7 @@ class TestWandbLogger:
         expected_metrics = {"train/loss": 0.5, "train/accuracy": 0.8}
         mock_run.log.assert_called_once_with(expected_metrics, step=step)
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_log_metrics_with_step_metric(self, mock_wandb):
         """Test logging metrics with a step metric to WandbLogger."""
         cfg = {}
@@ -206,7 +207,7 @@ class TestWandbLogger:
         mock_run = mock_wandb.init.return_value
         mock_run.log.assert_called_once_with(metrics, commit=False)
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_log_metrics_with_prefix_and_step_metric(self, mock_wandb):
         """Test logging metrics with both prefix and step metric."""
         cfg = {}
@@ -232,7 +233,7 @@ class TestWandbLogger:
         }
         mock_run.log.assert_called_once_with(expected_metrics, commit=False)
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_define_metric(self, mock_wandb):
         """Test defining a metric with a custom step metric."""
         cfg = {}
@@ -247,7 +248,7 @@ class TestWandbLogger:
             "ray/*", step_metric="ray/ray_step"
         )
 
-    @patch("nemo_reinforcer.utils.logger.wandb")
+    @patch("nemo_rl.utils.logger.wandb")
     def test_log_hyperparams(self, mock_wandb):
         """Test logging hyperparameters to WandbLogger."""
         cfg = {}
@@ -290,7 +291,7 @@ class TestRayGpuMonitorLogger:
 
         return MockLogger()
 
-    @patch("nemo_reinforcer.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.ray")
     def test_init(self, mock_ray):
         """Test initialization of RayGpuMonitorLogger."""
         # Mock ray.is_initialized to return True
@@ -315,8 +316,8 @@ class TestRayGpuMonitorLogger:
         assert monitor.is_running is False
         assert monitor.collection_thread is None
 
-    @patch("nemo_reinforcer.utils.logger.ray")
-    @patch("nemo_reinforcer.utils.logger.threading.Thread")
+    @patch("nemo_rl.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.threading.Thread")
     def test_start(self, mock_thread, mock_ray):
         """Test start method of RayGpuMonitorLogger."""
         # Mock ray.is_initialized to return True
@@ -342,7 +343,7 @@ class TestRayGpuMonitorLogger:
         assert monitor.is_running is True
         assert monitor.collection_thread is mock_thread.return_value
 
-    @patch("nemo_reinforcer.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.ray")
     def test_start_ray_not_initialized(self, mock_ray):
         """Test start method when Ray is not initialized."""
         # Mock ray.is_initialized to return False
@@ -361,8 +362,8 @@ class TestRayGpuMonitorLogger:
         with pytest.raises(ValueError):
             monitor.start()
 
-    @patch("nemo_reinforcer.utils.logger.ray")
-    @patch("nemo_reinforcer.utils.logger.threading.Thread")
+    @patch("nemo_rl.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.threading.Thread")
     def test_stop(self, mock_thread, mock_ray):
         """Test stop method of RayGpuMonitorLogger."""
         # Mock ray.is_initialized to return True
@@ -391,9 +392,9 @@ class TestRayGpuMonitorLogger:
             # Verify monitor state
             assert monitor.is_running is False
 
-    @patch("nemo_reinforcer.utils.logger.ray")
-    def test_parse_gpu_metric(self, mock_ray):
-        """Test _parse_gpu_metric method."""
+    @patch("nemo_rl.utils.logger.ray")
+    def test_parse_metric(self, mock_ray):
+        """Test _parse_metric method."""
         # Mock ray.is_initialized to return True
         mock_ray.is_initialized.return_value = True
 
@@ -418,25 +419,55 @@ class TestRayGpuMonitorLogger:
         )
 
         # Parse the sample
-        result = monitor._parse_gpu_metric(utilization_sample, node_idx=1)
+        result = monitor._parse_metric(utilization_sample, node_idx=1)
 
         # Verify the result
-        assert result == {"node.1.gpu.0.gpu": 75.5}
+        assert result == {"node.1.gpu.0.util": 75.5}
 
-        # Create a sample with GPU memory metric
+        # Create a sample with GPU memory metric (in MB)
         memory_sample = Sample(
             name="ray_node_gram_used",
             labels={"GpuIndex": "0", "GpuDeviceName": "NVIDIA Test GPU"},
-            value=4096.0,
+            value=80.0 * 1024,
             timestamp=None,
             exemplar=None,
         )
 
         # Parse the sample
-        result = monitor._parse_gpu_metric(memory_sample, node_idx=1)
+        result = monitor._parse_metric(memory_sample, node_idx=1)
 
         # Verify the result
-        assert result == {"node.1.gpu.0.memory": 4096.0}
+        assert result == {"node.1.gpu.0.mem_gb": 80.0}
+
+        # Create a sample with system memory metric
+        system_memory_sample = Sample(
+            name="ray_node_mem_used",
+            labels={"InstanceId": "n/a"},
+            value=100.0 * 1024 * 1024 * 1024,
+            timestamp=None,
+            exemplar=None,
+        )
+
+        # Parse the sample
+        result = monitor._parse_metric(system_memory_sample, node_idx=1)
+
+        # Verify the result
+        assert result == {"node.1.mem_gb": 100.0}
+
+        # Create a sample with total system memory metric
+        total_memory_sample = Sample(
+            name="ray_node_mem_total",
+            labels={"InstanceId": "n/a"},
+            value=200.0 * 1024 * 1024 * 1024,
+            timestamp=None,
+            exemplar=None,
+        )
+
+        # Parse the sample
+        result = monitor._parse_metric(total_memory_sample, node_idx=1)
+
+        # Verify the result
+        assert result == {"node.1.mem_total_gb": 200.0}
 
         # Test with an unexpected metric name
         other_sample = Sample(
@@ -448,28 +479,13 @@ class TestRayGpuMonitorLogger:
         )
 
         # Parse the sample
-        result = monitor._parse_gpu_metric(other_sample, node_idx=1)
+        result = monitor._parse_metric(other_sample, node_idx=1)
 
         # Verify the result is empty
         assert result == {}
 
-        # Test with missing GpuIndex label
-        invalid_sample = Sample(
-            name="ray_node_gpus_utilization",
-            labels={"OtherLabel": "value"},
-            value=75.5,
-            timestamp=None,
-            exemplar=None,
-        )
-
-        # Parse the sample
-        result = monitor._parse_gpu_metric(invalid_sample, node_idx=1)
-
-        # Verify the result is empty
-        assert result == {}
-
-    @patch("nemo_reinforcer.utils.logger.ray")
-    @patch("nemo_reinforcer.utils.logger.requests.get")
+    @patch("nemo_rl.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.requests.get")
     def test_fetch_and_parse_metrics(self, mock_get, mock_ray):
         """Test _fetch_and_parse_metrics method."""
         # Mock ray.is_initialized to return True
@@ -479,13 +495,13 @@ class TestRayGpuMonitorLogger:
         mock_response = mock_get.return_value
         mock_response.status_code = 200
         # Simplified Prometheus format text with GPU metrics
-        mock_response.text = """
+        mock_response.text = f"""
 # HELP ray_node_gpus_utilization GPU utilization
 # TYPE ray_node_gpus_utilization gauge
-ray_node_gpus_utilization{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 75.5
+ray_node_gpus_utilization{{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"}} 75.5
 # HELP ray_node_gram_used GPU memory used
 # TYPE ray_node_gram_used gauge
-ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
+ray_node_gram_used{{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"}} {80.0 * 1024}
         """
 
         # Initialize the monitor
@@ -497,18 +513,18 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
             parent_logger=None,
         )
 
-        # Mock the _parse_gpu_metric method to return expected values
-        with patch.object(monitor, "_parse_gpu_metric") as mock_parse:
+        # Mock the _parse_metric method to return expected values
+        with patch.object(monitor, "_parse_metric") as mock_parse:
             mock_parse.side_effect = [
-                {"node.2.gpu.0.gpu": 75.5},
-                {"node.2.gpu.0.memory": 4096.0},
+                {"node.2.gpu.0.util": 75.5},
+                {"node.2.gpu.0.mem_gb": 80.0},
             ]
 
             # Call the method
             result = monitor._fetch_and_parse_metrics(
                 node_idx=2,
                 metric_address="test_ip:test_port",
-                parser_fn=monitor._parse_gpu_metric,
+                parser_fn=monitor._parse_metric,
             )
 
             # Verify request was made correctly
@@ -520,9 +536,12 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
             assert mock_parse.call_count == 2
 
             # Verify the result combines both metrics
-            assert result == {"node.2.gpu.0.gpu": 75.5, "node.2.gpu.0.memory": 4096.0}
+            assert result == {
+                "node.2.gpu.0.util": 75.5,
+                "node.2.gpu.0.mem_gb": 80.0,
+            }
 
-    @patch("nemo_reinforcer.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.ray")
     def test_collect_metrics(self, mock_ray):
         """Test _collect_metrics method."""
         # Mock ray.is_initialized to return True
@@ -546,8 +565,8 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         # Mock the _fetch_and_parse_metrics method
         with patch.object(monitor, "_fetch_and_parse_metrics") as mock_fetch:
             mock_fetch.side_effect = [
-                {"node.0.gpu.0.gpu": 75.5, "node.0.gpu.0.memory": 4096.0},
-                {"node.1.gpu.0.gpu": 50.0, "node.1.gpu.0.memory": 2048.0},
+                {"node.0.gpu.0.util": 75.5, "node.0.gpu.0.mem_gb": 80.0},
+                {"node.1.gpu.0.util": 50.0, "node.1.gpu.0.mem_gb": 20.0},
             ]
 
             # Call the method
@@ -555,18 +574,18 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
 
             # Verify _fetch_and_parse_metrics was called for each node
             assert mock_fetch.call_count == 2
-            mock_fetch.assert_any_call(0, "10.0.0.1:8080", monitor._parse_gpu_metric)
-            mock_fetch.assert_any_call(1, "10.0.0.2:8080", monitor._parse_gpu_metric)
+            mock_fetch.assert_any_call(0, "10.0.0.1:8080", monitor._parse_metric)
+            mock_fetch.assert_any_call(1, "10.0.0.2:8080", monitor._parse_metric)
 
             # Verify the result combines metrics from all nodes
             assert result == {
-                "node.0.gpu.0.gpu": 75.5,
-                "node.0.gpu.0.memory": 4096.0,
-                "node.1.gpu.0.gpu": 50.0,
-                "node.1.gpu.0.memory": 2048.0,
+                "node.0.gpu.0.util": 75.5,
+                "node.0.gpu.0.mem_gb": 80.0,
+                "node.1.gpu.0.util": 50.0,
+                "node.1.gpu.0.mem_gb": 20.0,
             }
 
-    @patch("nemo_reinforcer.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.ray")
     def test_flush_empty_buffer(self, mock_ray, mock_parent_logger):
         """Test flush method with empty buffer."""
         # Mock ray.is_initialized to return True
@@ -587,7 +606,7 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         # Verify parent logger's log_metrics was not called
         assert len(mock_parent_logger.logged_metrics) == 0
 
-    @patch("nemo_reinforcer.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.ray")
     def test_flush(self, mock_ray, mock_parent_logger):
         """Test flush method with metrics in buffer."""
         # Mock ray.is_initialized to return True
@@ -606,11 +625,11 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         monitor.metrics_buffer = [
             {
                 "step": 10,
-                "metrics": {"node.0.gpu.0.gpu": 75.5, "node.0.gpu.0.memory": 4096.0},
+                "metrics": {"node.0.gpu.0.util": 75.5, "node.0.gpu.0.mem_gb": 80.0},
             },
             {
                 "step": 20,
-                "metrics": {"node.0.gpu.0.gpu": 80.0, "node.0.gpu.0.memory": 5120.0},
+                "metrics": {"node.0.gpu.0.util": 80.0, "node.0.gpu.0.mem_gb": 5120.0},
             },
         ]
 
@@ -622,8 +641,8 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
 
         # First metrics entry should include the step metric
         expected_first_metrics = {
-            "node.0.gpu.0.gpu": 75.5,
-            "node.0.gpu.0.memory": 4096.0,
+            "node.0.gpu.0.util": 75.5,
+            "node.0.gpu.0.mem_gb": 80.0,
             "ray/ray_step": 10,  # Step metric added
         }
         assert mock_parent_logger.logged_metrics[0] == expected_first_metrics
@@ -633,8 +652,8 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
 
         # Second metrics entry should include the step metric
         expected_second_metrics = {
-            "node.0.gpu.0.gpu": 80.0,
-            "node.0.gpu.0.memory": 5120.0,
+            "node.0.gpu.0.util": 80.0,
+            "node.0.gpu.0.mem_gb": 5120.0,
             "ray/ray_step": 20,  # Step metric added
         }
         assert mock_parent_logger.logged_metrics[1] == expected_second_metrics
@@ -645,7 +664,7 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         # Verify buffer was cleared
         assert monitor.metrics_buffer == []
 
-    @patch("nemo_reinforcer.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.ray")
     def test_flush_with_custom_prefix(self, mock_ray, mock_parent_logger):
         """Test flush method with custom metric prefix."""
         # Mock ray.is_initialized to return True
@@ -666,7 +685,7 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         monitor.metrics_buffer = [
             {
                 "step": 15,
-                "metrics": {"node.0.gpu.0.gpu": 60.0},
+                "metrics": {"node.0.gpu.0.util": 60.0},
             }
         ]
 
@@ -675,14 +694,14 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
 
         # Verify parent logger's log_metrics was called with the custom prefix
         assert len(mock_parent_logger.logged_metrics) == 1
-        expected_metrics = {"node.0.gpu.0.gpu": 60.0, "custom_metrics/step": 15}
+        expected_metrics = {"node.0.gpu.0.util": 60.0, "custom_metrics/step": 15}
         assert mock_parent_logger.logged_metrics[0] == expected_metrics
         assert mock_parent_logger.logged_steps[0] == 15
         assert mock_parent_logger.logged_prefixes[0] == custom_prefix
         assert mock_parent_logger.logged_step_metrics[0] == custom_step_metric
 
-    @patch("nemo_reinforcer.utils.logger.ray")
-    @patch("nemo_reinforcer.utils.logger.time")
+    @patch("nemo_rl.utils.logger.ray")
+    @patch("nemo_rl.utils.logger.time")
     def test_collection_loop(self, mock_time, mock_ray):
         """Test _collection_loop method (one iteration)."""
         # Mock ray.is_initialized to return True
@@ -715,7 +734,7 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         def side_effect():
             if not monitor.iteration_done:
                 monitor.iteration_done = True
-                return {"node.0.gpu.0.gpu": 75.5}
+                return {"node.0.gpu.0.util": 75.5}
             else:
                 monitor.is_running = False
                 return {}
@@ -733,15 +752,15 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
                     monitor.metrics_buffer[0]["step"] == 10
                 )  # relative time (110 - 100)
                 assert monitor.metrics_buffer[0]["metrics"] == {
-                    "node.0.gpu.0.gpu": 75.5
+                    "node.0.gpu.0.util": 75.5
                 }
 
                 # Verify flush was called (flush_interval elapsed)
                 mock_flush.assert_called_once()
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
-    @patch("nemo_reinforcer.utils.logger.RayGpuMonitorLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.RayGpuMonitorLogger")
     def test_init_with_gpu_monitoring(
         self, mock_gpu_monitor, mock_tb_logger, mock_wandb_logger, temp_dir
     ):
@@ -784,9 +803,9 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
             "ray/*", step_metric="ray/ray_step"
         )
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
-    @patch("nemo_reinforcer.utils.logger.RayGpuMonitorLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.RayGpuMonitorLogger")
     def test_gpu_monitoring_without_wandb(
         self, mock_gpu_monitor, mock_tb_logger, mock_wandb_logger, temp_dir
     ):
@@ -822,6 +841,49 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         mock_wandb_instance = mock_wandb_logger.return_value
         assert not mock_wandb_instance.define_metric.called
 
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.RayGpuMonitorLogger")
+    def test_gpu_monitoring_no_main_loggers(
+        self, mock_gpu_monitor, mock_tb_logger, mock_wandb_logger, temp_dir
+    ):
+        """Test GPU monitoring initialization when no main loggers (wandb/tensorboard) are enabled."""
+        cfg = {
+            "wandb_enabled": False,
+            "tensorboard_enabled": False,
+            "monitor_gpus": True,
+            "gpu_monitoring": {
+                "collection_interval": 15.0,
+                "flush_interval": 45.0,
+            },
+            "log_dir": temp_dir,
+        }
+        logger = Logger(cfg)
+
+        # Check that regular loggers were NOT initialized
+        assert len(logger.loggers) == 0
+        mock_wandb_logger.assert_not_called()
+        mock_tb_logger.assert_not_called()
+
+        # Check that GPU monitor was initialized with correct parameters
+        mock_gpu_monitor.assert_called_once_with(
+            collection_interval=15.0,
+            flush_interval=45.0,
+            metric_prefix="ray",
+            step_metric="ray/ray_step",
+            parent_logger=logger,  # Logger instance is passed as parent
+        )
+
+        # Check that GPU monitor was started
+        mock_gpu_instance = mock_gpu_monitor.return_value
+        mock_gpu_instance.start.assert_called_once()
+
+        # Since wandb is disabled, self.wandb_logger would be None,
+        # and define_metric should not be called on it.
+        # We access the mock_wandb_logger.return_value which is the mock object itself.
+        mock_wandb_instance = mock_wandb_logger.return_value
+        assert not mock_wandb_instance.define_metric.called
+
 
 class TestLogger:
     """Test the main Logger class."""
@@ -833,8 +895,8 @@ class TestLogger:
         yield temp_dir
         shutil.rmtree(temp_dir)
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_init_no_loggers(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test initialization with no loggers enabled."""
         cfg = {
@@ -849,8 +911,8 @@ class TestLogger:
         mock_tb_logger.assert_not_called()
         mock_wandb_logger.assert_not_called()
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_init_wandb_only(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test initialization with only WandbLogger enabled."""
         cfg = {
@@ -868,8 +930,8 @@ class TestLogger:
         assert wandb_cfg == {"project": "test-project"}
         mock_tb_logger.assert_not_called()
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_init_tensorboard_only(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test initialization with only TensorboardLogger enabled."""
         cfg = {
@@ -887,8 +949,8 @@ class TestLogger:
         assert tb_cfg == {"log_dir": "test_logs"}
         mock_wandb_logger.assert_not_called()
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_init_both_loggers(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test initialization with both loggers enabled."""
         cfg = {
@@ -910,8 +972,8 @@ class TestLogger:
         tb_cfg = mock_tb_logger.call_args[0][0]
         assert tb_cfg == {"log_dir": "test_logs"}
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_log_metrics(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test logging metrics to all enabled loggers."""
         cfg = {
@@ -936,8 +998,8 @@ class TestLogger:
         mock_wandb_instance.log_metrics.assert_called_once_with(metrics, step, "", None)
         mock_tb_instance.log_metrics.assert_called_once_with(metrics, step, "", None)
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_log_hyperparams(self, mock_tb_logger, mock_wandb_logger, temp_dir):
         """Test logging hyperparameters to all enabled loggers."""
         cfg = {
@@ -961,9 +1023,9 @@ class TestLogger:
         mock_wandb_instance.log_hyperparams.assert_called_once_with(params)
         mock_tb_instance.log_hyperparams.assert_called_once_with(params)
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
-    @patch("nemo_reinforcer.utils.logger.RayGpuMonitorLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.RayGpuMonitorLogger")
     def test_init_with_gpu_monitoring(
         self, mock_gpu_monitor, mock_tb_logger, mock_wandb_logger, temp_dir
     ):
@@ -1006,8 +1068,8 @@ class TestLogger:
             "ray/*", step_metric="ray/ray_step"
         )
 
-    @patch("nemo_reinforcer.utils.logger.WandbLogger")
-    @patch("nemo_reinforcer.utils.logger.TensorboardLogger")
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
     def test_log_metrics_with_prefix_and_step_metric(
         self, mock_tb_logger, mock_wandb_logger, temp_dir
     ):
@@ -1042,3 +1104,58 @@ class TestLogger:
         mock_tb_instance.log_metrics.assert_called_once_with(
             metrics, step, prefix, step_metric
         )
+
+    @patch("nemo_rl.utils.logger.WandbLogger")
+    @patch("nemo_rl.utils.logger.TensorboardLogger")
+    def test_log_plot_token_mult_prob_error(
+        self, mock_tb_logger, mock_wandb_logger, temp_dir
+    ):
+        """Test logging token probability error plots."""
+        cfg = {
+            "wandb_enabled": True,
+            "tensorboard_enabled": True,
+            "monitor_gpus": False,
+            "wandb": {"project": "test-project"},
+            "tensorboard": {"log_dir": "test_logs"},
+            "log_dir": temp_dir,
+        }
+        logger = Logger(cfg)
+
+        # Create mock logger instances
+        mock_wandb_instance = mock_wandb_logger.return_value
+        mock_tb_instance = mock_tb_logger.return_value
+
+        # Create sample data
+        data = {
+            "token_mask": torch.ones((1, 10)),
+            "sample_mask": torch.ones(1),
+            "generation_logprobs": torch.randn((1, 10)),
+            "prev_logprobs": torch.randn((1, 10)),
+            "prompt_lengths": torch.tensor([2]),
+            "full_lengths": torch.tensor([8]),
+        }
+        step = 10
+        name = "test_plot"
+
+        # Log the plot
+        logger.log_plot_token_mult_prob_error(data, step, name)
+
+        # Check that log_plot was called on both loggers
+        mock_wandb_instance.log_plot.assert_called_once()
+        mock_tb_instance.log_plot.assert_called_once()
+
+        # Verify the plot was created with correct data
+        wandb_call_args = mock_wandb_instance.log_plot.call_args[0]
+        fig = wandb_call_args[0]
+        ax = fig.axes[0]
+
+        # Check plot elements
+        assert len(ax.lines) == 5  # Three lines for data + two points for max errors
+        assert ax.get_xlabel() == "Token Position (starting from prompt end)"
+        assert ax.get_ylabel() == "Log Probability/Difference"
+        assert ax.get_legend() is not None  # Legend should exist
+
+        # Verify the legend labels
+        legend_texts = [text.get_text() for text in ax.get_legend().get_texts()]
+        assert any("Max abs error" in text for text in legend_texts)
+        assert any("Max rel error (prob)" in text for text in legend_texts)
