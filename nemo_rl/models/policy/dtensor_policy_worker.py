@@ -142,6 +142,8 @@ class DTensorPolicyWorker:
         init_reference_model: bool = True,
         **kwargs: Any,
     ):
+        # Disable NCCL SHM : https://github.com/NVIDIA-NeMo/RL/issues/564
+        os.environ["NCCL_SHM_DISABLE"] = "1"
         self.cfg = config
         # torch distributed init. Envars for rank, world_size, and master_addr and master_port are set from the ray remote call
         torch.distributed.init_process_group(backend="nccl")
