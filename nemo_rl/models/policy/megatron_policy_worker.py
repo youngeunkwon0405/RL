@@ -666,7 +666,7 @@ class MegatronPolicyWorker:
         # Create a map that maps any local parameter name to a list of global parameter names.
         # This map is repeatedly used by parameter gatherring phase during refit of every step.
         self.local_key_to_global_keys = self.get_local_key_to_global_keys(
-            state_dict_info = self.prepare_weights_for_ipc()
+            state_dict_info=self.prepare_weights_for_ipc()[0]
         )
 
     def configure_worker(self, num_gpus: int, bundle_indices: Optional[tuple] = None):
@@ -973,7 +973,9 @@ class MegatronPolicyWorker:
                 token_logprobs = torch.cat(
                     [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
                 )
-                return torch.tensor(0.0), {"logprobs": token_logprobs}
+                return torch.tensor(0.0, device=token_logprobs.device), {
+                    "logprobs": token_logprobs
+                }
 
             return output_tensor, collection_fn
 
@@ -1223,11 +1225,10 @@ class MegatronPolicyWorker:
         device_idx = torch.cuda.current_device()
         # Get device UUID using NVML
         return get_device_uuid(device_idx)
-    
+
     @torch.no_grad()
     def get_local_key_to_global_keys(self, state_dict_info: List[Tuple[Any, int]]):
-        """ Get the local key to global keys mapping.
-        """
+        """Get the local key to global keys mapping."""
         # Get parallel info
         tp_group = parallel_state.get_tensor_model_parallel_group()
         tp_world_size = torch.distributed.get_world_size(tp_group)
@@ -1237,28 +1238,29 @@ class MegatronPolicyWorker:
 
         ep_group = parallel_state.get_expert_model_parallel_group()
         ep_world_size = torch.distributed.get_world_size(ep_group)
-        
+
         # start calculating the global key
         ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
         state_dict = self.model.state_dict()
         final_key_to_global_keys = {}
 
         import time
+
         time.time = lambda: 0.0  # Monkey patch time.time to return constant value
         print = lambda *args, **kwargs: None
         st = time.time()
-            
+
         for param_info, size in state_dict_info:
             local_key, _, _ = param_info
 
             # Step 1: create global key from local key
-            # if: for if a parameter is sharded along PP or EP; 
+            # if: for if a parameter is sharded along PP or EP;
             # else: not sharded (like embedding)
             if local_key in state_dict:
                 global_key = get_global_key_from_local_key(local_key, self.model.config)
             else:
                 global_key = None
-            
+
             # Step 2: gather global keys from ranks in PP group
             pp_gathered_objs = [None] * pp_world_size
             torch.distributed.all_gather_object(
@@ -1274,14 +1276,14 @@ class MegatronPolicyWorker:
                 flat_gathered_objs = [x for y in ep_gathered_objs for x in y]
             else:
                 flat_gathered_objs = pp_gathered_objs
-            
+
             final_key_to_global_keys[local_key] = flat_gathered_objs
 
         et = time.time()
         if (
-            parallel_state.get_tensor_model_parallel_rank() == 0 and 
-            parallel_state.get_pipeline_model_parallel_rank() == 0 and 
-            parallel_state.get_expert_model_parallel_rank() == 0
+            parallel_state.get_tensor_model_parallel_rank() == 0
+            and parallel_state.get_pipeline_model_parallel_rank() == 0
+            and parallel_state.get_expert_model_parallel_rank() == 0
         ):
             print("[Rank 0] ", f"Time taken to get local key to global keys: {et - st}")
         return final_key_to_global_keys
@@ -1425,6 +1427,7 @@ class MegatronPolicyWorker:
             Dict mapping device UUID to list of (mapped_key, handle) tuples
         """
         import time
+
         time.time = lambda: 0.0  # Monkey patch time.time to return constant value
         print = lambda *args, **kwargs: None
         st = time.time()
