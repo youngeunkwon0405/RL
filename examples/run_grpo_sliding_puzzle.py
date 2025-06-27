@@ -62,7 +62,7 @@ def generate_puzzle_datum(
 
     def generate_random_config(max_config: dict[str, Any]) -> dict[str, Any]:
         """Generate a random config for the sliding puzzle game."""
-        shuffle_moves = random.randint(1, max_config.get("shuffle_moves"))
+        shuffle_moves = random.randint(1, max_config["shuffle_moves"])
         if shuffle_moves % 2 == 0:
             shuffle_moves += 1
         return {
@@ -161,7 +161,9 @@ def setup_puzzle_data(
     env_config = env_cfg[task_name]
 
     print(f"Instantiating environment for task '{task_name}'...")
-    env = SlidingPuzzleEnv.options(num_gpus=0).remote(cfg=dict(env_config["cfg"]))
+    env = SlidingPuzzleEnv.options(  # ty: ignore[unresolved-attribute]  # Ray adds .options/.remote dynamically, not visible to static type checkers
+        num_gpus=0
+    ).remote(cfg=dict(env_config["cfg"]))
     task_to_env = {task_name: env}
     print(f"Environment '{task_name}' created.")
 

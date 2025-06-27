@@ -24,6 +24,7 @@ from typing import (
     TypedDict,
     TypeVar,
     Union,
+    overload,
 )
 
 import torch
@@ -198,6 +199,26 @@ class BatchedDataDict(UserDict, Generic[DictT]):
             else:
                 sorted_v = [v[i] for i in reordered_indices]
             self.data[k] = sorted_v
+
+    @overload
+    def shard_by_batch_size(
+        self,
+        shards: int,
+        batch_size: Optional[int] = None,
+        allow_uneven_shards: bool = False,
+        *,
+        dynamic_batching_args: None = None,
+    ) -> list["SlicedDataDict[DictT]"]: ...
+
+    @overload
+    def shard_by_batch_size(
+        self,
+        shards: int,
+        batch_size: Optional[int] = None,
+        allow_uneven_shards: bool = False,
+        *,
+        dynamic_batching_args: DynamicBatchingArgs,
+    ) -> tuple[list["SlicedDataDict[DictT]"], list[int]]: ...
 
     def shard_by_batch_size(
         self,

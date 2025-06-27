@@ -41,6 +41,7 @@ repos:
       - id: ty
         name: ty check
         # TODO: for now always use the latest version of ty since it changes frequently
-        entry: uvx ty@latest check .
+        entry: uvx ty@latest check
+        require_serial: true  # avoid multiprocess batching so we see all errors together for clarity (ty is fast enough)
         language: python
         types: [python]
