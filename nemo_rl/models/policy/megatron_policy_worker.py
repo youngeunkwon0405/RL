@@ -1263,10 +1263,6 @@ class MegatronPolicyWorker:
                 pp_gathered_objs[0] = get_global_key_from_local_key(local_key, self.model.config)
             
             # Step 2: gather global keys from ranks in PP group
-            # pp_gathered_objs = [None] * pp_world_size
-            # torch.distributed.all_gather_object(
-            #     pp_gathered_objs, global_key, group=pp_group
-            # )
             src_global_rank = pp_global_ranks[owner_pp_local_rank_id]
             torch.distributed.broadcast_object_list(pp_gathered_objs, src=src_global_rank, group=pp_group)
 

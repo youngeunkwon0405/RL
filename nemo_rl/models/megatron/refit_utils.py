@@ -90,7 +90,7 @@ def get_tp_dim(model, param_name, named_modules_dict):
 def gather_params(
     model,
     keys,
-    key_to_global_keys: Optional[Dict[str, List[str]]] = None,
+    key_to_global_keys: Dict[str, List[str]]
 ):
     st = time.perf_counter()
 
@@ -107,8 +107,6 @@ def gather_params(
     state_dict = model.state_dict()
     gathered_params = {}
     ep_pattern = re.compile(r"mlp\.experts.*\.weight\d*$")
-
-    use_cached_key_to_global_key_map = key_to_global_keys is not None
 
     for local_key, owner_pp_local_rank_id, shape, dtype in sorted(keys):
         if local_key in state_dict and owner_pp_local_rank_id == pp_local_rank_id:
@@ -129,22 +127,8 @@ def gather_params(
             else:
                 # TODO: why do we need to clone?
                 full_param = param
-            if not use_cached_key_to_global_key_map:
-                global_key = get_global_key_from_local_key(local_key, model.config)
-
         else:
-            if not use_cached_key_to_global_key_map:
-                global_key = None
             full_param = torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
-
-        # gather across PP group
-        if not use_cached_key_to_global_key_map:
-            pp_gathered_global_keys = [None] * pp_world_size
-            torch.distributed.all_gather_object(
-                pp_gathered_global_keys, global_key, group=pp_group
-            )
-            # To test no gather:
-            # pp_gathered_global_keys = [global_key] * pp_world_size
 
         # Broadcast across PP group.
         src_global_rank = pp_global_ranks[owner_pp_local_rank_id]
@@ -155,14 +139,6 @@ def gather_params(
 
         # gather across EP group
         if ep_pattern.search(local_key):
-            if not use_cached_key_to_global_key_map:
-                ep_gathered_global_keys = [None] * ep_world_size
-                torch.distributed.all_gather_object(
-                    ep_gathered_global_keys, pp_gathered_global_keys, group=ep_group
-                )
-                # To test no gather:
-                # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
-
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
             ep_gathered_params = [
                 torch.empty(
@@ -176,17 +152,11 @@ def gather_params(
                 ep_gathered_params, stacked_pp_gathered_params, group=ep_group
             )
 
-            if not use_cached_key_to_global_key_map:
-                flat_gathered_global_keys = [x for y in ep_gathered_global_keys for x in y]
             flat_gathered_params = [x for y in ep_gathered_params for x in torch.unbind(y)]
         else:
-            if not use_cached_key_to_global_key_map:
-                flat_gathered_global_keys = pp_gathered_global_keys
             flat_gathered_params = pp_gathered_params
 
-        if use_cached_key_to_global_key_map:
-            flat_gathered_global_keys = key_to_global_keys[(local_key, owner_pp_local_rank_id)]
-
+        flat_gathered_global_keys = key_to_global_keys[(local_key, owner_pp_local_rank_id)]
         for k, p in zip(flat_gathered_global_keys, flat_gathered_params):
             if k is not None:
                 gathered_params[k] = p
