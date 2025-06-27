@@ -21,6 +21,7 @@
     - [Convert Model Format (Optional)](#convert-model-format-optional)
     - [Run Evaluation](#run-evaluation)
   - [Set Up Clusters](#set-up-clusters)
+  - [Tips and Tricks](#tips-and-tricks)
   - [Citation](#citation)
   - [Contributing](#contributing)
   - [Licenses](#licenses)
@@ -377,6 +378,25 @@ Refer to `examples/configs/eval.yaml` for a full list of parameters that can be 
 ## Set Up Clusters
 
 For detailed instructions on how to set up and launch NeMo RL on Slurm or Kubernetes clusters, please refer to the dedicated [Cluster Start](docs/cluster.md) documentation.
+
+## Tips and Tricks
+- If you forget to initialize the NeMo and Megatron submodules when cloning the NeMo-RL repository, you may run into an error like this:
+  
+  ```sh
+  ModuleNotFoundError: No module named 'megatron'
+  ```
+  
+  If you see this error, there is likely an issue with your virtual environments. To fix this, first intialize the submodules:
+
+  ```sh
+  git submodule update --init --recursive
+  ```
+
+  and then force a rebuild of the virutal environments by setting `NRL_FORCE_REBUILD_VENVS=true` next time you launch a run:
+
+  ```sh
+  NRL_FORCE_REBUILD_VENVS=true uv run examples/run_grpo.py ...
+  ```
 
 ## Citation
 
