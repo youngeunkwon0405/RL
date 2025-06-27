@@ -92,7 +92,7 @@ def gather_params(
     keys,
     key_to_global_keys: Optional[Dict[str, List[str]]] = None,
 ):
-    st = time.time()
+    st = time.perf_counter()
 
     tp_group = parallel_state.get_tensor_model_parallel_group()
     tp_world_size = torch.distributed.get_world_size(tp_group)
@@ -124,9 +124,6 @@ def gather_params(
                 # TODO: why cast to torch.bfloat16 instead of param.dtype?
                 full_param = torch.cat(gathered_slices, dim=tp_dim)
                 
-                et = time.time()
-                _rank_0_print(f"{local_key} {shape} gather tp time: {et - st}")
-                st = et
             else:
                 # TODO: why do we need to clone?
                 full_param = param
@@ -148,19 +145,11 @@ def gather_params(
             # To test no gather:
             # pp_gathered_global_keys = [global_key] * pp_world_size
 
-            et = time.time()
-            _rank_0_print(f"{local_key} {shape} gather pp global key time: {et - st}")
-            st = et
-
         pp_gathered_params = [
             torch.empty(*shape, dtype=dtype, device=torch.cuda.current_device())
             for _ in range(pp_world_size)
         ]
         torch.distributed.all_gather(pp_gathered_params, full_param, group=pp_group)
-
-        et = time.time()
-        _rank_0_print(f"{local_key} {shape} gather pp params time: {et - st}")
-        st = et
 
         # gather across EP group
         if ep_pattern.search(local_key):
@@ -171,10 +160,6 @@ def gather_params(
                 )
                 # To test no gather:
                 # ep_gathered_global_keys = [pp_gathered_global_keys] * ep_world_size
-
-                et = time.time()
-                _rank_0_print(f"{local_key} {shape} gather ep global keys time: {et - st}")
-                st = et
 
             stacked_pp_gathered_params = torch.stack(pp_gathered_params)
             ep_gathered_params = [
@@ -204,7 +189,5 @@ def gather_params(
             if k is not None:
                 gathered_params[k] = p
 
-    torch.cuda.empty_cache()
-    torch.cuda.synchronize()
-    print(f"Time taken to gather params: {time.time() - st}")
+    print(f"Time taken to gather params: {time.perf_counter() - st}")
     return gathered_params
