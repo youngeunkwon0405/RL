@@ -152,7 +152,9 @@ uv run python examples/run_grpo_math.py \
   logger.num_val_samples_to_print=10
 ```
 
-The default configuration uses the DTensor training backend. We also provide a config `examples/configs/grpo_math_1B_megatron.yaml` which is set up to use the Megatron backend out of the box. To train using this config on a single GPU,
+The default configuration uses the DTensor training backend. We also provide a config `examples/configs/grpo_math_1B_megatron.yaml` which is set up to use the Megatron backend out of the box.
+
+To train using this config on a single GPU:
 
 ```sh
 # Run a GRPO math example on 1 GPU using the Megatron backend
