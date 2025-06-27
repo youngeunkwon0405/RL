@@ -126,7 +126,7 @@ def test_dpo_loss():
             "sft_loss_weight": 0.0,
             "preference_average_log_probs": False,
             "sft_average_log_probs": False,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
 
     loss, metrics_dict = loss_fn(
@@ -148,7 +148,7 @@ def test_dpo_loss():
             "sft_loss_weight": 0.5,
             "preference_average_log_probs": False,
             "sft_average_log_probs": False,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
 
     expected_sft_loss = (
@@ -187,7 +187,7 @@ def test_dpo_loss_varying_sequence_lengths():
             "sft_loss_weight": 0.5,
             "preference_average_log_probs": False,
             "sft_average_log_probs": False,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
     dpo_loss_fn_avg = DPOLossFn(
         {
@@ -196,7 +196,7 @@ def test_dpo_loss_varying_sequence_lengths():
             "sft_loss_weight": 0.5,
             "preference_average_log_probs": True,
             "sft_average_log_probs": True,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
 
     # Create test data with varying sequence lengths
@@ -317,7 +317,7 @@ def test_dpo_sft_matches_nll_loss():
             "sft_loss_weight": 1.0,  # Only use SFT loss
             "preference_average_log_probs": False,
             "sft_average_log_probs": False,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
     dpo_loss, dpo_metrics = dpo_loss_fn(
         next_token_logits,
@@ -433,7 +433,9 @@ def test_clipped_pg_loss_ppo_clipping():
         "use_importance_sampling_correction": False,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     adv_masked = torch.tensor([[1.0, -1.0, 2.0]], device=device)
     # Use non-zero prev_lp to allow ratios > 1 with valid curr_lp <= 0
@@ -517,7 +519,9 @@ def test_clipped_pg_loss_reinforce_mode():
         "use_importance_sampling_correction": False,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     adv_masked = torch.tensor([[1.0, -1.0, 2.0]], device=device)
     curr_lp_masked = torch.tensor([[-0.5, -1.0, -1.5]], device=device)
@@ -574,7 +578,9 @@ def test_clipped_pg_loss_kl_penalty():
         "use_importance_sampling_correction": False,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     adv_masked = torch.tensor([[0.0, 0.0, 0.0]], device=device)
     curr_lp_masked = torch.tensor([[0.0, -1.0, -2.0]], device=device)
@@ -655,7 +661,9 @@ def test_clipped_pg_loss_masking():
         "use_importance_sampling_correction": False,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)  # Use original loss fn
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     # --- Test 1: Token Mask ---
     # Default mask: [[0, 1, 1, 1], [0, 1, 1, 1]] -> 3 tokens per sample
@@ -748,7 +756,9 @@ def test_clipped_pg_loss_zero_mask():
         "use_importance_sampling_correction": False,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)  # Use original loss fn
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     # Set token mask to all zeros
     data["token_mask"] = torch.zeros_like(data["token_mask"])
@@ -787,7 +797,9 @@ def test_clipped_pg_loss_on_policy_kl_importance_sampling():
         "use_importance_sampling_correction": True,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     adv_masked = torch.tensor([[1.0, -1.0, 2.0]], device=device)
     prev_lp_masked = torch.tensor([[-1.0, -1.0, -1.0]], device=device)
@@ -968,7 +980,9 @@ def test_clipped_pg_loss_dual_clip():
         "use_importance_sampling_correction": False,
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     # Create test data with a mix of advantages: positive, slightly negative, strongly negative
     adv_masked = torch.tensor([[1.0, -1.0, -4.0]], device=device)
@@ -1066,7 +1080,9 @@ def test_clipped_pg_loss_entropy():
         "use_importance_sampling_correction": False,  # This flag does not affect entropy calculation
         "token_level_loss": True,
     }
-    loss_fn = ClippedPGLossFn(cfg)
+    loss_fn = ClippedPGLossFn(
+        cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     # Log probs for 3 tokens (default token_mask is [0, 1, 1, 1], so 3 unmasked after slicing)
     # curr_lp_masked: log probabilities from the current policy (model output)

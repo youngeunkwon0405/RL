@@ -199,7 +199,9 @@ def test_checkpoint_without_keep_top_k(tmp_path):
         "higher_is_better": False,
         "keep_top_k": None,
     }
-    manager = CheckpointManager(config)
+    manager = CheckpointManager(
+        config  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )
 
     # Create multiple checkpoints
     steps = [1, 2, 3]

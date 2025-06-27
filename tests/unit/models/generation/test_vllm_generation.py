@@ -621,7 +621,7 @@ def test_vllm_generation_with_hf_training(
         )
         for i, (input_len, total_valid_len) in enumerate(
             zip(
-                test_input_data.get("input_lengths"),
+                test_input_data["input_lengths"],
                 generation_results["unpadded_sequence_lengths"],
             )
         ):
@@ -649,7 +649,7 @@ def test_vllm_generation_with_hf_training(
         train_input_ids = generation_results["output_ids"][:, :max_seq_len]
         token_loss_mask = torch.ones_like(train_input_ids)
         # Only compute loss on generated tokens, not input
-        input_len = test_input_data.get("input_ids").size(1)
+        input_len = test_input_data["input_ids"].size(1)
         token_loss_mask[:, :input_len] = 0
 
         for idx, length in enumerate(generation_results["unpadded_sequence_lengths"]):

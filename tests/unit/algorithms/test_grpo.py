@@ -89,7 +89,9 @@ def ray_init():
 @pytest.fixture(scope="module")
 def mock_env(ray_init):
     """Create a mock environment for single task tests."""
-    env = MockEnvironment.remote(rewards=[1.0, 2.0])
+    env = MockEnvironment.remote(
+        rewards=[1.0, 2.0]
+    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
     yield env
     ray.kill(env)
 
@@ -97,8 +99,12 @@ def mock_env(ray_init):
 @pytest.fixture(scope="module")
 def mock_envs(ray_init):
     """Create mock environments for multiple task tests."""
-    math_env = MockEnvironment.remote(rewards=[1.0, 2.0])
-    code_env = MockEnvironment.remote(rewards=[3.0, 4.0])
+    math_env = MockEnvironment.remote(  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
+        rewards=[1.0, 2.0]
+    )
+    code_env = MockEnvironment.remote(  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
+        rewards=[3.0, 4.0]
+    )
     yield {"math": math_env, "code": code_env}
     ray.kill(math_env)
     ray.kill(code_env)

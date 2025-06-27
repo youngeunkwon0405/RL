@@ -176,7 +176,9 @@ class RayWorkerBuilder:
                 placement_group_capture_child_tasks=True,
             )
             options["num_gpus"] = num_gpus
-            worker = worker_class.options(**options).remote(
+            worker = worker_class.options(
+                **options
+            ).remote(  # ty: ignore[unresolved-attribute]  # Ray adds .options/.remote dynamically, not visible to static type checkers
                 *self.init_args, **worker_kwargs
             )
             return worker
@@ -213,7 +215,7 @@ class RayWorkerBuilder:
         # Set up worker arguments and resources
         options = deepcopy(extra_options)
         initializer_options = {"runtime_env": options["runtime_env"]}
-        isolated_initializer = self.IsolatedWorkerInitializer.options(  # type: ignore # @ray.remote call
+        isolated_initializer = self.IsolatedWorkerInitializer.options(  # ty: ignore[unresolved-attribute]  # Ray adds .options/.remote dynamically, not visible to static type checkers
             **initializer_options
         ).remote(self.ray_actor_class_fqn, *self.args, **self.kwargs)
 

@@ -90,7 +90,7 @@ def multi_step_calculator_environment(rollout_cluster):
     env_actor = None
     print("Creating MultiStepCalculatorEnv actor...")
     try:
-        env_actor = MultiStepCalculatorEnv.remote()
+        env_actor = MultiStepCalculatorEnv.remote()  # ty: ignore[unresolved-attribute] # Ray adds .remote dynamically, not visible to static type checkers
         task_to_env = {"multi_step_calculator_game": env_actor}
         yield task_to_env, env_actor
     finally:
@@ -498,7 +498,7 @@ def sliding_puzzle_environment(rollout_cluster):
     print("Creating SlidingPuzzleEnv actor...")
     try:
         # Pass game config if needed, e.g., {"game_config": {"size": 3}}
-        env_actor = SlidingPuzzleEnv.remote()
+        env_actor = SlidingPuzzleEnv.remote()  # ty: ignore[unresolved-attribute] # Ray adds .remote dynamically, not visible to static type checkers
         task_to_env = {"sliding_puzzle_game": env_actor}
         yield task_to_env, env_actor
     finally:

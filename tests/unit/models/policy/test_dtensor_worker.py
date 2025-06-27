@@ -163,7 +163,9 @@ def test_hf_policy_init(policy_setup):
 
     # Get GPU info from both workers to verify GPU usage
     print("\nGetting GPU information from workers...")
-    gpu_infos = ray.get([w.get_gpu_info.remote() for w in policy.worker_group.workers])
+    gpu_infos = ray.get(
+        [w.get_gpu_info.remote() for w in policy.worker_group.workers]
+    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
     print("\nGPU Information:")
     for i, info in enumerate(gpu_infos):
         print(f"\nWorker {i} GPU Info:")
@@ -233,60 +235,52 @@ def training_setup(request, two_gpu_virtual_cluster):
     model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = (
         request.param
     )
-    policy = None
-    data = None
-    loss_fn = None
 
-    try:
-        config = create_test_config(
-            model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
-        )
-        tokenizer = get_tokenizer(config["tokenizer"])
-        print(
-            f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
-        )
-        policy = HfPolicy(
-            cluster=two_gpu_virtual_cluster,
-            config=config,
-            tokenizer=tokenizer,
-            init_reference_model=False,
-        )
+    config = create_test_config(
+        model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
+    )
+    tokenizer = get_tokenizer(config["tokenizer"])
+    print(
+        f"Creating training HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
+    )
+    policy = HfPolicy(
+        cluster=two_gpu_virtual_cluster,
+        config=config,
+        tokenizer=tokenizer,
+        init_reference_model=False,
+    )
 
-        # Create a test batch
-        print("Creating test batch...")
-        # set random seed
-        torch.manual_seed(42)
+    # Create a test batch
+    print("Creating test batch...")
+    # set random seed
+    torch.manual_seed(42)
 
-        # Create test input_ids and attention_mask
-        input_ids = torch.randint(0, 32000, (8, 128))  # 8 sequences, each of length 128
-        attention_mask = torch.ones(8, 128)
+    # Create test input_ids and attention_mask
+    input_ids = torch.randint(0, 32000, (8, 128))  # 8 sequences, each of length 128
+    attention_mask = torch.ones(8, 128)
 
-        # Calculate input_lengths (all sequences are full length in this test)
-        input_lengths = attention_mask.sum(dim=1).to(torch.int32)
+    # Calculate input_lengths (all sequences are full length in this test)
+    input_lengths = attention_mask.sum(dim=1).to(torch.int32)
 
-        data = BatchedDataDict(
-            {
-                "input_ids": input_ids,
-                "input_lengths": input_lengths,
-                "attention_mask": attention_mask,  # Keep for compatibility with loss functions
-                "labels": torch.randint(0, 32000, (8, 128)),
-                "sample_mask": torch.ones(8),
-            }
-        )
+    data = BatchedDataDict(
+        {
+            "input_ids": input_ids,
+            "input_lengths": input_lengths,
+            "attention_mask": attention_mask,  # Keep for compatibility with loss functions
+            "labels": torch.randint(0, 32000, (8, 128)),
+            "sample_mask": torch.ones(8),
+        }
+    )
 
-        # Create loss function
-        loss_fn: LossFunction = SimpleLoss()
+    # Create loss function
+    loss_fn: LossFunction = SimpleLoss()
 
-        # Provide the resources to the test
-        yield policy, data, loss_fn
+    # Provide the resources to the test
+    yield policy, data, loss_fn
 
-    except Exception as e:
-        print(f"Error during training setup: {e}")
-        pytest.skip(f"Training setup failed: {e}")
-    finally:
-        # Clean up after the test
-        print("Cleaning up resources for test")
-        policy.shutdown()
+    # Clean up after the test
+    print("Cleaning up resources for test")
+    policy.shutdown()
 
 
 @pytest.mark.timeout(60)
@@ -355,78 +349,71 @@ def logprob_setup(request, two_gpu_virtual_cluster):
     model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing = (
         request.param
     )
-    policy = None
-    data = None
 
-    try:
-        config = create_test_config(
-            model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
+    config = create_test_config(
+        model_name, tp, cpu_offload, sequence_parallel, activation_checkpointing
+    )
+    tokenizer = get_tokenizer(config["tokenizer"])
+    print(
+        f"Creating logprob HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
+    )
+    policy = HfPolicy(
+        cluster=two_gpu_virtual_cluster,
+        config=config,
+        tokenizer=tokenizer,
+        init_reference_model=False,
+    )
+
+    # Create a test batch
+    print("Creating test batch...")
+    # set random seed
+    torch.manual_seed(66)
+
+    # Create test input_ids and attention_mask
+    input_ids = torch.randint(
+        0, 32000, (8, 128)
+    ).cuda()  # 8 sequences, each of length 128
+    attention_mask = torch.ones(8, 128).cuda()
+
+    # Calculate input_lengths (all sequences are full length in this test)
+    input_lengths = attention_mask.sum(dim=1).to(torch.int32).cuda()
+
+    data = BatchedDataDict(
+        {
+            "input_ids": input_ids,
+            "input_lengths": input_lengths,
+            "attention_mask": attention_mask,  # Keep for compatibility with loss functions
+        }
+    )
+
+    with torch.no_grad():
+        # run the log prob of regular hf model here
+        hf_model = AutoModelForCausalLM.from_pretrained(
+            model_name, device_map="cuda", torch_dtype=torch.float32
         )
-        tokenizer = get_tokenizer(config["tokenizer"])
-        print(
-            f"Creating logprob HfPolicy with tp={tp}, cpu_offload={cpu_offload}, sequence_parallel={sequence_parallel}, activation_checkpointing={activation_checkpointing}..."
-        )
-        policy = HfPolicy(
-            cluster=two_gpu_virtual_cluster,
-            config=config,
-            tokenizer=tokenizer,
-            init_reference_model=False,
-        )
+        hf_model.eval()
+        outputs = hf_model(**data)
 
-        # Create a test batch
-        print("Creating test batch...")
-        # set random seed
-        torch.manual_seed(66)
+    log_probs = torch.nn.functional.log_softmax(
+        outputs.logits.to(torch.float32), dim=-1
+    )
+    next_tokens = input_ids[:, 1:]
+    log_probs = log_probs[:, :-1]
+    token_logprobs = log_probs.gather(dim=-1, index=next_tokens.unsqueeze(-1)).squeeze(
+        -1
+    )
+    token_logprobs = torch.cat(
+        [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
+    ).cpu()
 
-        # Create test input_ids and attention_mask
-        input_ids = torch.randint(
-            0, 32000, (8, 128)
-        ).cuda()  # 8 sequences, each of length 128
-        attention_mask = torch.ones(8, 128).cuda()
+    data = data.to("cpu")
 
-        # Calculate input_lengths (all sequences are full length in this test)
-        input_lengths = attention_mask.sum(dim=1).to(torch.int32).cuda()
+    # Provide the resources to the test
+    yield policy, data, token_logprobs
 
-        data = BatchedDataDict(
-            {
-                "input_ids": input_ids,
-                "input_lengths": input_lengths,
-                "attention_mask": attention_mask,  # Keep for compatibility with loss functions
-            }
-        )
-
-        with torch.no_grad():
-            # run the log prob of regular hf model here
-            hf_model = AutoModelForCausalLM.from_pretrained(
-                model_name, device_map="cuda", torch_dtype=torch.float32
-            )
-            hf_model.eval()
-            outputs = hf_model(**data)
-
-        log_probs = torch.nn.functional.log_softmax(
-            outputs.logits.to(torch.float32), dim=-1
-        )
-        next_tokens = input_ids[:, 1:]
-        log_probs = log_probs[:, :-1]
-        token_logprobs = log_probs.gather(
-            dim=-1, index=next_tokens.unsqueeze(-1)
-        ).squeeze(-1)
-        token_logprobs = torch.cat(
-            [torch.zeros_like(token_logprobs[:, :1]), token_logprobs], dim=1
-        ).cpu()
-
-        data = data.to("cpu")
-
-        # Provide the resources to the test
-        yield policy, data, token_logprobs
-
-    except Exception as e:
-        print(f"Error during training setup: {e}")
-        pytest.skip(f"Training setup failed: {e}")
-    finally:
-        # Clean up after the test
-        print("Cleaning up resources for test")
-        policy.shutdown()
+    # Clean up after the test
+    print("Cleaning up resources for test")
+    policy.shutdown()
 
 
 @pytest.mark.timeout(360)
@@ -487,7 +474,9 @@ def test_dtensor_tp_and_tied_model_with_custom_parallel_plan(two_gpu_virtual_clu
     )
 
     # Verify that the model is parallelized as expected
-    state_dict = ray.get(policy.worker_group.workers[0].return_state_dict.remote())
+    state_dict = ray.get(
+        policy.worker_group.workers[0].return_state_dict.remote()
+    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
     total_shape = state_dict["lm_head.weight"].shape
     sharded_shape = state_dict["lm_head.weight"].to_local().shape
     assert total_shape[0] == sharded_shape[0] * 2, (
@@ -559,7 +548,7 @@ def test_dtensor_loss_independent_of_microbatch_size_two_gpus(two_gpu_virtual_cl
             "use_on_policy_kl_approximation": False,
             "use_importance_sampling_correction": False,
             "token_level_loss": True,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
 
     policy_mbs1.prepare_for_training()

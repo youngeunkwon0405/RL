@@ -88,7 +88,11 @@ def two_node_cluster():
 @pytest.fixture(scope="function")
 def tokenizer():
     """Initialize tokenizer for the test model."""
-    tokenizer = get_tokenizer({"name": model_name})
+    tokenizer = get_tokenizer(
+        {
+            "name": model_name
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+    )  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     return tokenizer
 
 

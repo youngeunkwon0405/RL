@@ -202,12 +202,16 @@ def test_hf_policy_init(policy_setup, num_gpus):
     )
 
     # Check workers are alive
-    worker_alive = ray.get([w.is_alive.remote() for w in policy.worker_group.workers])
+    worker_alive = ray.get(
+        [w.is_alive.remote() for w in policy.worker_group.workers]
+    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
     assert all(worker_alive), f"Not all workers are alive: {worker_alive}"
 
     # Get GPU info from both workers to verify GPU usage
     print("\nGetting GPU information from workers...")
-    gpu_infos = ray.get([w.get_gpu_info.remote() for w in policy.worker_group.workers])
+    gpu_infos = ray.get(
+        [w.get_gpu_info.remote() for w in policy.worker_group.workers]
+    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
     print("\nGPU Information:")
     for i, info in enumerate(gpu_infos):
         print(f"\nWorker {i} GPU Info:")
@@ -361,7 +365,9 @@ def training_setup(tokenizer, request, num_gpus):
 def get_max_gpu_utilization(policy):
     max_memory_allocated = 0
     max_memory_reserved = 0
-    gpu_infos = ray.get([w.get_gpu_info.remote() for w in policy.worker_group.workers])
+    gpu_infos = ray.get(
+        [w.get_gpu_info.remote() for w in policy.worker_group.workers]
+    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
     for info in gpu_infos:
         max_memory_allocated = max(max_memory_allocated, info["memory_allocated_mb"])
         max_memory_reserved = max(max_memory_reserved, info["memory_reserved_mb"])
@@ -816,7 +822,7 @@ def test_loss_independent_of_microbatch_size(num_gpus, tokenizer):
             "use_on_policy_kl_approximation": False,
             "use_importance_sampling_correction": False,
             "token_level_loss": True,
-        }
+        }  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
     )
 
     # Compute loss with mbs1

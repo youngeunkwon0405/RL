@@ -68,7 +68,10 @@ class TestTensorboardLogger:
     def test_init(self, mock_summary_writer, temp_dir):
         """Test initialization of TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
-        logger = TensorboardLogger(cfg, log_dir=temp_dir)
+        logger = TensorboardLogger(
+            cfg,  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+            log_dir=temp_dir,
+        )
 
         # The log_dir is passed to SummaryWriter but not stored as an attribute
         mock_summary_writer.assert_called_once_with(log_dir=temp_dir)
@@ -77,7 +80,10 @@ class TestTensorboardLogger:
     def test_log_metrics(self, mock_summary_writer, temp_dir):
         """Test logging metrics to TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
-        logger = TensorboardLogger(cfg, log_dir=temp_dir)
+        logger = TensorboardLogger(
+            cfg,  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+            log_dir=temp_dir,
+        )
 
         metrics = {"loss": 0.5, "accuracy": 0.8}
         step = 10
@@ -93,7 +99,10 @@ class TestTensorboardLogger:
     def test_log_metrics_with_prefix(self, mock_summary_writer, temp_dir):
         """Test logging metrics with a prefix to TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
-        logger = TensorboardLogger(cfg, log_dir=temp_dir)
+        logger = TensorboardLogger(
+            cfg,  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+            log_dir=temp_dir,
+        )
 
         metrics = {"loss": 0.5, "accuracy": 0.8}
         step = 10
@@ -110,7 +119,10 @@ class TestTensorboardLogger:
     def test_log_hyperparams(self, mock_summary_writer, temp_dir):
         """Test logging hyperparameters to TensorboardLogger."""
         cfg = {"log_dir": temp_dir}
-        logger = TensorboardLogger(cfg, log_dir=temp_dir)
+        logger = TensorboardLogger(
+            cfg,  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+            log_dir=temp_dir,
+        )
 
         params = {"lr": 0.001, "batch_size": 32, "model": {"hidden_size": 128}}
         logger.log_hyperparams(params)
@@ -147,7 +159,10 @@ class TestWandbLogger:
             "group": "custom-group",
             "tags": ["tag1", "tag2"],
         }
-        WandbLogger(cfg, log_dir=temp_dir)
+        WandbLogger(
+            cfg,  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+            log_dir=temp_dir,
+        )
 
         mock_wandb.init.assert_called_once_with(
             project="custom-project",
@@ -162,7 +177,9 @@ class TestWandbLogger:
     def test_log_metrics(self, mock_wandb):
         """Test logging metrics to WandbLogger."""
         cfg = {}
-        logger = WandbLogger(cfg)
+        logger = WandbLogger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         metrics = {"loss": 0.5, "accuracy": 0.8}
         step = 10
@@ -176,7 +193,9 @@ class TestWandbLogger:
     def test_log_metrics_with_prefix(self, mock_wandb):
         """Test logging metrics with a prefix to WandbLogger."""
         cfg = {}
-        logger = WandbLogger(cfg)
+        logger = WandbLogger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         metrics = {"loss": 0.5, "accuracy": 0.8}
         step = 10
@@ -192,7 +211,9 @@ class TestWandbLogger:
     def test_log_metrics_with_step_metric(self, mock_wandb):
         """Test logging metrics with a step metric to WandbLogger."""
         cfg = {}
-        logger = WandbLogger(cfg)
+        logger = WandbLogger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Define step metric
         step_metric = "iteration"
@@ -212,7 +233,9 @@ class TestWandbLogger:
     def test_log_metrics_with_prefix_and_step_metric(self, mock_wandb):
         """Test logging metrics with both prefix and step metric."""
         cfg = {}
-        logger = WandbLogger(cfg)
+        logger = WandbLogger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Define prefix and step metric
         prefix = "train"
@@ -238,7 +261,9 @@ class TestWandbLogger:
     def test_define_metric(self, mock_wandb):
         """Test defining a metric with a custom step metric."""
         cfg = {}
-        logger = WandbLogger(cfg)
+        logger = WandbLogger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Define metric pattern and step metric
         logger.define_metric("ray/*", step_metric="ray/ray_step")
@@ -253,7 +278,9 @@ class TestWandbLogger:
     def test_log_hyperparams(self, mock_wandb):
         """Test logging hyperparameters to WandbLogger."""
         cfg = {}
-        logger = WandbLogger(cfg)
+        logger = WandbLogger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         params = {"lr": 0.001, "batch_size": 32, "model": {"hidden_size": 128}}
         logger.log_hyperparams(params)
@@ -715,7 +742,7 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
         monitor.iteration_done = False  # ty: ignore[unresolved-attribute]
 
         def side_effect():
-            if not monitor.iteration_done:
+            if not monitor.iteration_done:  # ty: ignore[possibly-unbound-attribute]
                 monitor.iteration_done = True
                 return {"node.0.gpu.0.gpu": 75.5}
             else:
@@ -760,7 +787,9 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Check that regular loggers were initialized
         assert len(logger.loggers) == 2
@@ -804,7 +833,9 @@ ray_node_gram_used{GpuIndex="0",GpuDeviceName="NVIDIA Test GPU"} 4096.0
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Check that only tensorboard logger was initialized
         assert len(logger.loggers) == 1
@@ -845,7 +876,9 @@ class TestLogger:
             "monitor_gpus": False,
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         assert len(logger.loggers) == 0
         mock_tb_logger.assert_not_called()
@@ -862,7 +895,9 @@ class TestLogger:
             "wandb": {"project": "test-project"},
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         assert len(logger.loggers) == 1
         mock_wandb_logger.assert_called_once()
@@ -881,7 +916,9 @@ class TestLogger:
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         assert len(logger.loggers) == 1
         mock_tb_logger.assert_called_once()
@@ -1025,7 +1062,9 @@ class TestLogger:
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Create mock logger instances
         mock_wandb_instance = mock_wandb_logger.return_value
@@ -1062,7 +1101,9 @@ class TestLogger:
             "tensorboard": {"log_dir": "test_logs"},
             "log_dir": temp_dir,
         }
-        logger = Logger(cfg)
+        logger = Logger(
+            cfg  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
+        )
 
         # Create mock logger instances
         mock_wandb_instance = mock_wandb_logger.return_value

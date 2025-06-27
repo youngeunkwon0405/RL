@@ -185,7 +185,7 @@ class MathEnvironment(EnvironmentInterface):
 
         return EnvironmentReturn(
             observations=observations,
-            metadata=metadata,
+            metadata=metadata,  # ty: ignore[invalid-argument-type] # TypedDict not supported yet
             next_stop_strings=next_stop_strings,
             rewards=rewards,
             terminateds=done,
