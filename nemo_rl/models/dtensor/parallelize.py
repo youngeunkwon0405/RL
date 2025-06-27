@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from functools import lru_cache
-from types import FunctionType
 from typing import Callable, Optional, Union
 
 import torch
@@ -419,19 +418,19 @@ def _parallelize_model(
         if custom_parallel_plan is not None:
             if isinstance(custom_parallel_plan, dict):
                 model_parallel_plan = custom_parallel_plan
+            elif isinstance(custom_parallel_plan, str):
+                model_parallel_plan = import_class_from_path(custom_parallel_plan)
+                if isinstance(model_parallel_plan, Callable):
+                    model_parallel_plan = model_parallel_plan()
+                assert isinstance(model_parallel_plan, dict)
             else:
-                try:
-                    model_parallel_plan = import_class_from_path(custom_parallel_plan)
-                    if isinstance(model_parallel_plan, FunctionType):
-                        model_parallel_plan = model_parallel_plan()
-                    assert isinstance(model_parallel_plan, dict)
-                except:
-                    raise ValueError(
-                        f"Your custom parallel plan is `{custom_parallel_plan}` which is not valid. Please ensure it is one of the following:\n"
-                        "1. A dictionary\n"
-                        "2. A path to a dictionary\n"
-                        "3. A path to a function that returns a dictionary"
-                    )
+                raise ValueError(
+                    f"Your custom parallel plan is `{custom_parallel_plan}` which is not valid. Please ensure it is one of the following:\n"
+                    "1. A dictionary\n"
+                    "2. A path to a dictionary\n"
+                    "3. A path to a function that returns a dictionary"
+                )
+
             print("Using custom parallel plan.")
 
         # second use our optimized parallel plan

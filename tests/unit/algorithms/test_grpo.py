@@ -89,9 +89,9 @@ def ray_init():
 @pytest.fixture(scope="module")
 def mock_env(ray_init):
     """Create a mock environment for single task tests."""
-    env = MockEnvironment.remote(
+    env = MockEnvironment.remote(  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
         rewards=[1.0, 2.0]
-    )  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
+    )
     yield env
     ray.kill(env)
 
