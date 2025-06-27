@@ -1365,7 +1365,6 @@ class MegatronPolicyWorker:
                 param.element_size()
                 * param.numel()
                 * len(tensor_mp_rank_ids)
-                # * len(pp_rank_ids)
                 * len(ep_rank_ids)
                 * scale
             )
