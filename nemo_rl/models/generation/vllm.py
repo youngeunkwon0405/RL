@@ -108,9 +108,13 @@ class VllmGeneration(GenerationInterface):
         cluster._init_placement_groups(use_unified_pg=needs_cross_node_parallelism)
 
         # Create worker builder for VllmGenerationWorker
-        worker_builder = RayWorkerBuilder(
-            "nemo_rl.models.generation.vllm_worker.VllmGenerationWorker", config
-        )
+        if self.cfg["vllm_cfg"]["async_engine"]:
+            worker_cls = (
+                "nemo_rl.models.generation.vllm_worker_async.VllmAsyncGenerationWorker"
+            )
+        else:
+            worker_cls = "nemo_rl.models.generation.vllm_worker.VllmGenerationWorker"
+        worker_builder = RayWorkerBuilder(worker_cls, config)
 
         # Check if we need parallelism-aware worker group creation
         if self.model_parallel_size > 1:
@@ -260,15 +264,10 @@ class VllmGeneration(GenerationInterface):
 
     def _report_device_id(self) -> list[list[str]]:
         """Report the device ID of vllm workers."""
-        # Choose the appropriate method based on async_engine setting
-        method_name = (
-            "report_device_id_async"
-            if self.cfg["vllm_cfg"]["async_engine"]
-            else "report_device_id"
-        )
         # Use run_all_workers_single_data for methods that don't need data
         futures = self.worker_group.run_all_workers_single_data(
-            method_name, run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"]
+            method_name="report_device_id",
+            run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
         )
         # Wait for all futures to complete
         results = ray.get(futures)
@@ -281,13 +280,6 @@ class VllmGeneration(GenerationInterface):
         if not self.worker_group or not self.worker_group.workers:
             raise RuntimeError("Worker group is not initialized")
 
-        # Choose the appropriate method based on async_engine setting
-        method_name = (
-            "init_collective_async"
-            if self.cfg["vllm_cfg"]["async_engine"]
-            else "init_collective"
-        )
-
         # Prepare rank
         total_workers = len(self.worker_group.workers)
         if self.dp_size == 0:
@@ -299,7 +291,7 @@ class VllmGeneration(GenerationInterface):
 
         # Send world_size and rank for init collective to all workers
         futures = self.worker_group.run_all_workers_multiple_data(
-            method_name,
+            method_name="init_collective",
             data=rank_prefix_list,
             run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
             common_kwargs={"ip": ip, "port": port, "world_size": world_size},
@@ -312,6 +304,11 @@ class VllmGeneration(GenerationInterface):
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
         """Generate a batch of data using vLLM."""
+        if self.cfg["vllm_cfg"]["async_engine"]:
+            raise RuntimeError(
+                "generate can only be used when async_engine is not enabled in VllmConfig."
+            )
+
         assert isinstance(data, BatchedDataDict), (
             f"data must be a BatchedDataDict, got type: {type(data)}"
         )
@@ -360,6 +357,11 @@ class VllmGeneration(GenerationInterface):
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> BatchedDataDict[GenerationOutputSpec]:
         """Generate text responses using vLLM."""
+        if self.cfg["vllm_cfg"]["async_engine"]:
+            raise RuntimeError(
+                "generate can only be used when async_engine is not enabled in VllmConfig."
+            )
+
         assert isinstance(data, BatchedDataDict), (
             f"data must be a BatchedDataDict, got type: {type(data)}"
         )
@@ -426,9 +428,9 @@ class VllmGeneration(GenerationInterface):
             self.current_generate_dp_shard_idx
         )
 
-        # Run the generate_async method on the selected leader worker. This returns an ObjectRefGenerator.
+        # Run the generate method on the selected leader worker. This returns an ObjectRefGenerator.
         worker_gen_proxy = self.worker_group.run_single_worker_single_data(
-            method_name="generate_async",
+            method_name="generate",
             worker_idx=leader_worker_idx,
             data=data,
             greedy=greedy,
@@ -519,13 +521,9 @@ class VllmGeneration(GenerationInterface):
             return True
 
         try:
-            # Choose the appropriate method based on async_engine setting
-            method_name = (
-                "wake_up_async" if self.cfg["vllm_cfg"]["async_engine"] else "wake_up"
-            )
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(
-                method_name,
+                method_name="wake_up",
                 run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
                 **kwargs,
             )
@@ -539,18 +537,10 @@ class VllmGeneration(GenerationInterface):
     def finish_generation(self, *args: Any, **kwargs: Any) -> bool:
         """Sleep workers and reset prefix cache."""
         try:
-            # Choose the appropriate method based on setting
             # non-colocated only needs reset prefix cache, no need to sleep.
-            if self.cfg["colocated"]["enabled"]:
-                method_name = (
-                    "sleep_async" if self.cfg["vllm_cfg"]["async_engine"] else "sleep"
-                )
-            else:
-                method_name = (
-                    "reset_prefix_cache_async"
-                    if self.cfg["vllm_cfg"]["async_engine"]
-                    else "reset_prefix_cache"
-                )
+            method_name = (
+                "sleep" if self.cfg["colocated"]["enabled"] else "reset_prefix_cache"
+            )
             # Use run_all_workers_single_data for methods that don't need data
             futures = self.worker_group.run_all_workers_single_data(
                 method_name,
@@ -586,13 +576,6 @@ class VllmGeneration(GenerationInterface):
         if not self.worker_group or not self.worker_group.workers:
             return False
 
-        # Choose the appropriate method based on async_engine setting
-        method_name = (
-            "update_weights_from_ipc_handles_async"
-            if self.cfg["vllm_cfg"]["async_engine"]
-            else "update_weights_from_ipc_handles"
-        )
-
         # Only send the ipc handles required by the current worker
         ipc_handles_list = []
         for worker_device_uuids in self.device_uuids:
@@ -605,8 +588,8 @@ class VllmGeneration(GenerationInterface):
         try:
             # Directly pass ipc_handles to the method
             futures = self.worker_group.run_all_workers_multiple_data(
-                method_name,
-                ipc_handles_list,
+                method_name="update_weights_from_ipc_handles",
+                data=ipc_handles_list,
                 run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
             )
             # Wait for all futures to complete
@@ -623,16 +606,9 @@ class VllmGeneration(GenerationInterface):
         if not self.worker_group or not self.worker_group.workers:
             raise RuntimeError("Worker group is not initialized")
 
-        # Choose the appropriate method based on async_engine setting
-        method_name = (
-            "update_weights_from_collective_async"
-            if self.cfg["vllm_cfg"]["async_engine"]
-            else "update_weights_from_collective"
-        )
-
         # Use run_all_workers_single_data to send data to all workers
         futures = self.worker_group.run_all_workers_single_data(
-            method_name,
+            method_name="update_weights_from_collective",
             data=info,
             run_rank_0_only_axes=["tensor_parallel", "pipeline_parallel"],
         )
