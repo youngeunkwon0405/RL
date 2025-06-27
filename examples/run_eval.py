@@ -75,7 +75,7 @@ def setup_data(tokenizer: AutoTokenizer, data_config: MathDataConfig, env_config
         },
     )
 
-    math_env = MathEnvironment.options(
+    math_env = MathEnvironment.options(  # ty: ignore[unresolved-attribute]  # Ray adds .remote/.options dynamically, not visible to static type checkers
         runtime_env={
             "py_executable": get_actor_python_env(
                 "nemo_rl.environments.math_environment.MathEnvironment"

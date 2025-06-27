@@ -362,7 +362,7 @@ class RayVirtualCluster:
         if pg.bundle_specs:
             # Launch port finder on the first bundle of this placement group
             addr, port = ray.get(
-                _get_node_ip_and_free_port.options(
+                _get_node_ip_and_free_port.options(  # ty: ignore[unresolved-attribute]  # Ray adds .remote/.options dynamically, not visible to static type checkers
                     scheduling_strategy=PlacementGroupSchedulingStrategy(
                         placement_group=pg, placement_group_bundle_index=0
                     ),

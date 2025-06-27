@@ -26,7 +26,7 @@ from nemo_rl.environments.math_environment import MathEnvironment
 @pytest.fixture(scope="module")
 def math_env():
     """Create a MathEnvironment actor for testing."""
-    env = MathEnvironment.options(
+    env = MathEnvironment.options(  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
         runtime_env={
             "py_executable": get_actor_python_env(
                 "nemo_rl.environments.math_environment.MathEnvironment"

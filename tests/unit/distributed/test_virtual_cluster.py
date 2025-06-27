@@ -36,7 +36,7 @@ def test_get_node_ip_and_free_port_does_not_start_with_zero():
     # so we leave this test so we can ask users to run on their environment if needed.
 
     node_ip, _ = ray.get(
-        _get_node_ip_and_free_port.options(
+        _get_node_ip_and_free_port.options(  # ty: ignore[unresolved-attribute]  # Ray adds .remote dynamically, not visible to static type checkers
             runtime_env={"py_executable": PY_EXECUTABLES.SYSTEM}
         ).remote()
     )
