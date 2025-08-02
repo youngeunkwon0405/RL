@@ -197,10 +197,12 @@ class AsyncTrajectoryCollector:
         self.replay_buffer = replay_buffer
         self.current_step = start_step
         self.running = False
+        self.paused = False  # Add pause functionality
 
         import threading as _threading
 
         self._pg_lock: _threading.Lock = _threading.Lock()
+        self._pause_lock: _threading.Lock = _threading.Lock()
 
         self.current_weight_version: int = start_step
 
@@ -251,6 +253,15 @@ class AsyncTrajectoryCollector:
         """Run the collection loop in background thread."""
         try:
             for batch in self.dataloader:
+                if not self.running:
+                    break
+
+                # Check if paused and wait
+                while self.paused and self.running:
+                    import time
+
+                    time.sleep(0.1)  # Check every 100ms
+
                 if not self.running:
                     break
 
@@ -313,6 +324,12 @@ class AsyncTrajectoryCollector:
             # Move batch to CPU to avoid consuming GPU memory in replay buffer
             final_batch_cpu = final_batch.to("cpu")
 
+            # Explicit cleanup of GPU tensors
+            del final_batch
+            import gc
+
+            gc.collect()
+
             trajectory = {
                 "batch": final_batch_cpu,
                 "rollout_metrics": rollout_metrics,
@@ -338,10 +355,10 @@ class AsyncTrajectoryCollector:
                 return
 
             print(
-                f"📦 Added trajectory batch (size: {final_batch.size}) to replay buffer (step {self.current_step})"
+                f"📦 Added trajectory batch (size: {final_batch_cpu.size}) to replay buffer (step {self.current_step})"
             )
             print(
-                f"   Trajectory rewards: min={final_batch['total_reward'].min():.3f}, max={final_batch['total_reward'].max():.3f}, mean={final_batch['total_reward'].mean():.3f}"
+                f"   Trajectory rewards: min={final_batch_cpu['total_reward'].min():.3f}, max={final_batch_cpu['total_reward'].max():.3f}, mean={final_batch_cpu['total_reward'].mean():.3f}"
             )
 
             try:
@@ -363,6 +380,18 @@ class AsyncTrajectoryCollector:
     def get_weight_version(self) -> int:
         """Return the current weight version the collector believes it is on."""
         return self.current_weight_version
+
+    def pause(self) -> None:
+        """Pause trajectory collection (e.g., during validation)."""
+        with self._pause_lock:
+            self.paused = True
+        print("⏸️  Trajectory collection paused")
+
+    def resume(self) -> None:
+        """Resume trajectory collection."""
+        with self._pause_lock:
+            self.paused = False
+        print("▶️  Trajectory collection resumed")
 
     def stop(self) -> None:
         """Stop trajectory collection."""

@@ -35,7 +35,7 @@ policy:
     custom_parallel_plan: null
 
   dynamic_batching:
-    enabled: True
+    enabled: False
 
   optimizer:
     name: "torch.optim.AdamW"

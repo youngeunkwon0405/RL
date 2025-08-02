@@ -697,6 +697,12 @@ def grpo_train(
                 )
                 logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
+                # Explicit GPU memory cleanup after validation
+                import gc
+
+                gc.collect()
+                torch.cuda.empty_cache()
+
             ## Checkpointing
             consumed_samples += master_config["grpo"]["num_prompts_per_step"]
             if master_config["checkpointing"]["enabled"] and (
@@ -920,6 +926,12 @@ def validate(
     # Make sure to reset the timer after validation
     timer.reset()
 
+    # Explicit GPU memory cleanup after validation
+    import gc
+
+    gc.collect()
+    torch.cuda.empty_cache()
+
     return val_metrics, timing_metrics
 
 
@@ -1092,6 +1104,9 @@ def async_grpo_train(
     # Run validation at start if configured
     if val_at_start and step == 0:
         print("\n🔍 Running initial validation...")
+        # Pause trajectory collection during initial validation
+        trajectory_collector.pause.remote()
+
         try:
             val_metrics, validation_timings = validate(
                 policy_generation,
@@ -1111,6 +1126,9 @@ def async_grpo_train(
 
             traceback.print_exc()
             # Continue anyway since validation is optional
+        finally:
+            # Resume trajectory collection after initial validation
+            trajectory_collector.resume.remote()
 
     print("✅ All setup complete, starting buffer wait...")
 
@@ -1343,6 +1361,9 @@ def async_grpo_train(
                 is_last_step = step + 1 == master_config["grpo"]["max_num_steps"]
 
                 if val_period > 0 and (step + 1) % val_period == 0:
+                    # Pause trajectory collection during validation to reduce memory pressure
+                    trajectory_collector.pause.remote()
+
                     if NEED_REFIT and POLICY_GENERATION_STALE:
                         refit_policy_generation(
                             policy, policy_generation, colocated_inference
@@ -1363,6 +1384,15 @@ def async_grpo_train(
                         validation_timings, step + 1, prefix="timing/validation"
                     )
                     logger.log_metrics(val_metrics, step + 1, prefix="validation")
+
+                    # Explicit GPU memory cleanup after validation in async mode
+                    import gc
+
+                    gc.collect()
+                    torch.cuda.empty_cache()
+
+                    # Resume trajectory collection after validation
+                    trajectory_collector.resume.remote()
 
                 # Checkpointing (same as sync version)
                 consumed_samples += master_config["grpo"]["num_prompts_per_step"]
