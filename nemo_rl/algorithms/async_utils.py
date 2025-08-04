@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import random
+import threading as _threading
 import time
 from typing import Any, Optional
 
@@ -41,7 +42,7 @@ class ReplayBuffer:
         self.max_size = max_size
         self.trajectories = []
         # Auxiliary metadata for each stored trajectory
-        self.trajectory_steps = []  # collector step when generated  (for debug)
+        self.trajectory_steps = []  # collector step when generated
         self.trajectory_versions = []  # weight-version used for generation
 
     def push(self, trajectory: dict[str, Any], step: int, weight_version: int) -> None:
@@ -49,7 +50,7 @@ class ReplayBuffer:
 
         Args:
             trajectory: data dict
-            step:       collector local step (debug only)
+            step:       collector local step
             weight_version: monotonic counter of the model weights used to generate
         """
         print(f"🔍 ReplayBuffer.push: Adding trajectory for step {step}")
@@ -62,10 +63,10 @@ class ReplayBuffer:
             removed_step = self.trajectory_steps.pop(0)
             self.trajectory_versions.pop(0)
             self.trajectories.pop(0)
-            print(f"🗑️ ReplayBuffer: Removed oldest trajectory (step {removed_step})")
+            print(f"ReplayBuffer: Removed oldest trajectory (step {removed_step})")
 
         print(
-            f"📊 ReplayBuffer state: {len(self.trajectories)} trajectories, steps={self.trajectory_steps}"
+            f"ReplayBuffer state: {len(self.trajectories)} trajectories, steps={self.trajectory_steps}"
         )
 
     def get_debug_info(self) -> dict:
@@ -98,13 +99,13 @@ class ReplayBuffer:
         # Remove in reverse order to maintain indices
         removed_count = 0
         for i in reversed(indices_to_remove):
-            removed_step = self.trajectory_steps.pop(i)
+            self.trajectory_steps.pop(i)
             self.trajectory_versions.pop(i)
             self.trajectories.pop(i)
             removed_count += 1
 
         if removed_count > 0:
-            print(f"🧹 Cleaned {removed_count} old trajectories from buffer")
+            print(f"Cleaned {removed_count} old trajectories from buffer")
 
         return removed_count
 
@@ -151,13 +152,13 @@ class ReplayBuffer:
 
         if not valid_indices:
             print(
-                f"⚠️  No trajectories within age limit ({max_age_steps} steps). Total: {total_trajectories}, Filtered: {filtered_count}"
+                f"No trajectories within age limit ({max_age_steps} steps). Total: {total_trajectories}, Filtered: {filtered_count}"
             )
             return None
 
         if filtered_count > 0:
             print(
-                f"🗑️  Filtered {filtered_count}/{total_trajectories} trajectories outside ±{max_age_steps} step window"
+                f"Filtered {filtered_count}/{total_trajectories} trajectories outside ±{max_age_steps} step window"
             )
 
         sampled_indices = random.sample(
@@ -197,9 +198,7 @@ class AsyncTrajectoryCollector:
         self.replay_buffer = replay_buffer
         self.current_step = start_step
         self.running = False
-        self.paused = False  # Add pause functionality
-
-        import threading as _threading
+        self.paused = False
 
         self._pg_lock: _threading.Lock = _threading.Lock()
         self._pause_lock: _threading.Lock = _threading.Lock()
@@ -215,31 +214,17 @@ class AsyncTrajectoryCollector:
         ):
             self._use_async_rollouts = True
             print(
-                "📦 Trajectory collector: Detected vLLM async engine; enabling async rollouts in collector"
+                "Trajectory collector: Detected vLLM async engine; enabling async rollouts in collector"
             )
 
-    def replace_policy_generation(
-        self, new_policy_generation: GenerationInterface
-    ) -> None:
-        import gc
-
-        with self._pg_lock:
-            self.policy_generation = new_policy_generation
-            gc.collect()
-
-        print(
-            "✅ Trajectory collector's policy generation object has been safely replaced."
-        )
-
     def set_weight_version(self, version: int) -> None:
-        """Update the local record of the model-weight version."""
         self.current_weight_version = version
 
     def start_collection(self, dataloader: StatefulDataLoader) -> None:
         """Start collecting trajectories from dataloader."""
         self.running = True
         self.dataloader = dataloader
-        print("🚀 Started continuous trajectory collection")
+        print("Started continuous trajectory collection")
 
         import threading
 
@@ -247,7 +232,7 @@ class AsyncTrajectoryCollector:
         self.collection_thread.daemon = True
         self.collection_thread.start()
 
-        print("✅ Collection thread started, start_collection returning")
+        print("Collection thread started, start_collection returning")
 
     def _collection_loop(self):
         """Run the collection loop in background thread."""
@@ -260,7 +245,7 @@ class AsyncTrajectoryCollector:
                 while self.paused and self.running:
                     import time
 
-                    time.sleep(0.1)  # Check every 100ms
+                    time.sleep(0.1)
 
                 if not self.running:
                     break
@@ -345,7 +330,7 @@ class AsyncTrajectoryCollector:
                     )
                 )
                 print(
-                    f"✅ Successfully added trajectory to buffer (step {self.current_step}, weight_version {generation_weight_version})"
+                    f"Successfully added trajectory to buffer (step {self.current_step}, weight_version {generation_weight_version})"
                 )
             except Exception as e:
                 print(f"❌ Failed to add trajectory to buffer: {e}")
@@ -378,20 +363,19 @@ class AsyncTrajectoryCollector:
         return self.current_step
 
     def get_weight_version(self) -> int:
-        """Return the current weight version the collector believes it is on."""
         return self.current_weight_version
 
     def pause(self) -> None:
-        """Pause trajectory collection (e.g., during validation)."""
+        """Pause trajectory collection."""
         with self._pause_lock:
             self.paused = True
-        print("⏸️  Trajectory collection paused")
+        print("Trajectory collection paused")
 
     def resume(self) -> None:
         """Resume trajectory collection."""
         with self._pause_lock:
             self.paused = False
-        print("▶️  Trajectory collection resumed")
+        print("Trajectory collection resumed")
 
     def stop(self) -> None:
         """Stop trajectory collection."""
