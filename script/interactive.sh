@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run from the root of NeMo RL repo
-NUM_ACTOR_NODES=3
+NUM_ACTOR_NODES=2
 
 # grpo_math_8b uses Llama-3.1-8B-Instruct model
 HF_HOME=/lustre/fsw/coreai_dlalgo_llm/youngeunk/hf_home

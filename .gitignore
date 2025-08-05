@@ -43,3 +43,4 @@ code_snapshots/
 !default_runtime_env.yaml
 
 *-attach.sh
+*-logs*/

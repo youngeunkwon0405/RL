@@ -11,7 +11,12 @@ WANDB_API_KEY=$WANDB_API_KEY
 huggingface-cli login --token $HF_TOKEN 
 
 
-COMMAND="uv run ./examples/run_grpo_math.py --config examples/configs/grpo_math_8B.yaml cluster.num_nodes=2 checkpointing.checkpoint_dir='results/llama8b_2nodes' logger.wandb_enabled=True logger.wandb.name='grpo-llama8b_math'" \
+COMMAND="uv run ./examples/run_grpo_math.py \
+--config examples/configs/grpo_math_8B.yaml \
+cluster.num_nodes=2 \
+checkpointing.checkpoint_dir='results/llama8b_2nodes' \
+logger.wandb_enabled=True \
+logger.wandb.name='grpo-llama8b_math'" \
 CONTAINER=/lustre/fsw/coreai_dlalgo_llm/youngeunk/sqsh/nemo_rl.sqsh \
 HF_HOME=/lustre/fsw/coreai_dlalgo_llm/youngeunk/hf_home \
 HF_DATASETS_CACHE=/lustre/fsw/coreai_dlalgo_llm/youngeunk/hf_home/cache \
