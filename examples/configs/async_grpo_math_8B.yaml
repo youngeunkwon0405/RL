@@ -5,7 +5,7 @@ defaults: "grpo_math_1B.yaml"
 async_grpo:
   enabled: true            # Enable async training
   buffer_size: 20          # Maximum number of trajectories in replay buffer
-  max_trajectory_age_steps: 0  # Allow trajectories from the last 3 training steps
+  max_trajectory_age_steps: 1  # Allow trajectories from the last 1 training steps
 
 grpo:
   num_prompts_per_step: 64
@@ -91,7 +91,7 @@ logger:
   monitor_gpus: true
   wandb:
     project: "async-grpo-dev"
-    name: "async-grpo-math-1b-07-23-debug-k1-v2-importance-sampling"
+    name: "async-grpo-math"
   tensorboard: {}
   gpu_monitoring:
     collection_interval: 10

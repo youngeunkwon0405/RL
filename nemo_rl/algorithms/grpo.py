@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import gc
 import os
 import time
 import warnings
@@ -709,8 +710,6 @@ def grpo_train(
                 logger.log_metrics(val_metrics, step + 1, prefix="validation")
 
                 # Explicit GPU memory cleanup after validation
-                import gc
-
                 gc.collect()
                 torch.cuda.empty_cache()
 
@@ -960,8 +959,6 @@ def validate(
     timer.reset()
 
     # Explicit GPU memory cleanup after validation
-    import gc
-
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -982,7 +979,7 @@ def async_grpo_train(
     grpo_save_state: GRPOSaveState,
     master_config: MasterConfig,
     buffer_size: int = 100,
-    max_trajectory_age_steps: int = 3,
+    max_trajectory_age_steps: int = 1,
 ) -> None:
     """Run asynchronous GRPO training with replay buffer.
 

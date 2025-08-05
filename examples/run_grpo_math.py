@@ -254,7 +254,6 @@ def main() -> None:
     # Check if async mode is enabled
     async_config = config.get("async_grpo", {})
     if async_config and async_config.get("enabled", False):
-        # Import async_grpo_train only when needed
         from nemo_rl.algorithms.grpo import async_grpo_train
 
         print("🚀 Running async GRPO training")
@@ -274,7 +273,7 @@ def main() -> None:
             grpo_save_state=grpo_state,
             master_config=master_config,
             buffer_size=async_config.get("buffer_size", 100),
-            max_trajectory_age_steps=async_config.get("max_trajectory_age_steps", 3),
+            max_trajectory_age_steps=async_config.get("max_trajectory_age_steps", 1),
         )
     else:
         print("🚀 Running synchronous GRPO training")

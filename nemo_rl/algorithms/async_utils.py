@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import gc
 import random
 import threading as _threading
 import time
@@ -311,8 +312,6 @@ class AsyncTrajectoryCollector:
 
             # Explicit cleanup of GPU tensors
             del final_batch
-            import gc
-
             gc.collect()
 
             trajectory = {
