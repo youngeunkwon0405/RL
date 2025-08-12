@@ -143,9 +143,11 @@ async def generate_responses_async(
     collected_indexed_outputs: list[
         tuple[int, BatchedDataDict[GenerationOutputSpec]]
     ] = []
+    # print(f"[DEBUG][generate_responses_async] generation_input_data['input_ids'].shape: {generation_input_data['input_ids'].shape}")
     async for original_idx, single_item_output in policy_generation.generate_async(
         generation_input_data, greedy=greedy
     ):
+        # print(f"[DEBUG][generate_responses_async] original_idx: {original_idx} | single_item_output['output_ids'].shape: {single_item_output['output_ids'].shape}")
         collected_indexed_outputs.append((original_idx, single_item_output))
 
     # Sort by original_idx to ensure order matches generation_input_data

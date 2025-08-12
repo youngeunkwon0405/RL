@@ -1655,6 +1655,23 @@ class VllmGeneration(GenerationInterface):
         if not data_validation_fn(data):
             return
 
+        # Increment the round-robin worker group index
+        assert data["input_ids"].shape[0] == 1, "input_ids should have batch size 1"
+        if not hasattr(self, "prev_input_length"):
+            self.prev_input_length = data["input_ids"].shape[1]
+        else:
+            # print(f"[DEBUG] self.prev_input_length: {self.prev_input_length} | data['input_ids'].shape[1]: {data['input_ids'].shape[1]}")
+            if not self.prev_input_length == data["input_ids"].shape[1]:
+                # increase the generator worker index only if the input length is different
+                self.current_generate_dp_shard_idx += 1
+                self.current_generate_dp_shard_idx %= self.worker_group.dp_size
+        # Update the previous input length
+        self.prev_input_length = data["input_ids"].shape[1]
+
+        # # old implementation
+        # self.current_generate_dp_shard_idx += 1
+        # self.current_generate_dp_shard_idx %= self.worker_group.dp_size
+
         # Determine the leader worker for the current data parallel shard
         leader_worker_idx = self.worker_group.get_dp_leader_worker_idx(
             self.current_generate_dp_shard_idx
@@ -1668,9 +1685,6 @@ class VllmGeneration(GenerationInterface):
             greedy=greedy,
         )
 
-        # Increment the round-robin worker group index
-        self.current_generate_dp_shard_idx += 1
-        self.current_generate_dp_shard_idx %= self.worker_group.dp_size
 
         # Create a queue to collect sample results from the worker as they complete
         result_queue = asyncio.Queue()
