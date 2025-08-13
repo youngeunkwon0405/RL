@@ -1054,8 +1054,13 @@ def async_grpo_train(
     }
 
     # Calculate optimal buffer size based on generation limits to prevent length bias
+    # Each weight version generates exactly num_prompts_per_step trajectories
+    # With max_age_steps, we keep trajectories from multiple weight versions
     num_prompts_per_step = master_config["grpo"]["num_prompts_per_step"]
-    optimal_buffer_size = num_prompts_per_step * max_trajectory_age_steps
+    late_arrival_slack = 1
+    optimal_buffer_size = (
+        num_prompts_per_step * max_trajectory_age_steps + late_arrival_slack
+    )
 
     replay_buffer = ReplayBuffer.options(runtime_env=_replay_runtime_env).remote(
         max_size=optimal_buffer_size

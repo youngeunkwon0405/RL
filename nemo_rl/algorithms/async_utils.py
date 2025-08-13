@@ -84,14 +84,45 @@ class ReplayBuffer:
         if not self.trajectories:
             return None
 
-        # Treat all trajectories as valid; training will consume and evict
         total_trajectories = len(self.trajectories)
         print("🔍 ReplayBuffer sampling debug:")
         print(
             f"   current_weight_version={current_weight_version}, max_age_steps={max_age_steps}"
         )
         print(f"   trajectory_versions={self.trajectory_versions}")
-        valid_indices = list(range(total_trajectories))
+
+        # For debugging: check for unexpected old trajectories
+        from collections import Counter
+
+        version_counts = Counter(self.trajectory_versions)
+        print(f"   version_counts: {version_counts}")
+
+        # Compute minimum valid version based on age window
+        # max_age_steps=1 means trajectories from the last 1 step are valid
+        min_valid_version = max(0, current_weight_version - max_age_steps)
+        print(f"   min_valid_version={min_valid_version}")
+
+        # Check for unexpected old trajectories
+        old_trajectories = [
+            v for v in self.trajectory_versions if v < min_valid_version
+        ]
+        if old_trajectories:
+            print(
+                f"   ⚠️ WARNING: Found {len(old_trajectories)} trajectories older than min_valid_version {min_valid_version}"
+            )
+            print(
+                "   This suggests previous steps didn't consume all trajectories properly"
+            )
+
+        # Filter for valid trajectories without modifying the buffer
+        valid_indices = [
+            i
+            for i, v in enumerate(self.trajectory_versions)
+            if min_valid_version <= v <= current_weight_version
+        ]
+        print(
+            f"   valid_indices: {len(valid_indices)}/{total_trajectories} trajectories within age window"
+        )
         if not valid_indices:
             print("No trajectories available for sampling.")
             return None
@@ -103,7 +134,7 @@ class ReplayBuffer:
             )
             return None
 
-        # FIFO selection of earliest trajectories to maintain order
+        # FIFO selection of earliest valid trajectories to maintain order
         selected: list[int] = valid_indices[:num_prompt_groups]
 
         from collections import Counter
@@ -113,6 +144,7 @@ class ReplayBuffer:
 
         sampled_items = [self.trajectories[i] for i in selected]
 
+        # Remove selected items in reverse order to maintain correct indices
         for idx in sorted(selected, reverse=True):
             self.trajectory_versions.pop(idx)
             self.trajectories.pop(idx)
@@ -215,7 +247,10 @@ class AsyncTrajectoryCollector:
         """Check if collection should be paused due to generation limits."""
         num_prompts_per_step = self.master_config["grpo"]["num_prompts_per_step"]
         max_age_steps = self.master_config["async_grpo"]["max_trajectory_age_steps"]
-        max_generations_per_version = num_prompts_per_step * max_age_steps
+        if self.current_weight_version == 0:
+            max_generations_per_version = num_prompts_per_step * (max_age_steps + 1)
+        else:
+            max_generations_per_version = num_prompts_per_step * max_age_steps
 
         current_count = self.generations_per_weight_version.get(
             self.current_weight_version, 0
@@ -304,6 +339,25 @@ class AsyncTrajectoryCollector:
             num_generations = self.master_config["grpo"]["num_generations_per_prompt"]
 
             for prompt_idx in range(num_prompts):
+                # Check generation limits before starting each prompt to prevent race conditions
+                with self._gen_count_lock:
+                    if self._should_pause_for_generation_limits():
+                        print(
+                            f"⏸️ Reached generation limit for weight version {generation_weight_version}, stopping batch processing"
+                        )
+                        break
+
+                    # Reserve a slot for this generation
+                    self.generations_per_weight_version[generation_weight_version] = (
+                        self.generations_per_weight_version.get(
+                            generation_weight_version, 0
+                        )
+                        + 1
+                    )
+                    reserved_count = self.generations_per_weight_version[
+                        generation_weight_version
+                    ]
+
                 single_prompt_batch = batch.slice(prompt_idx, prompt_idx + 1)
                 repeated_batch = single_prompt_batch.repeat_interleave(num_generations)
 
@@ -315,6 +369,7 @@ class AsyncTrajectoryCollector:
                         repeated_batch,
                         generation_weight_version,
                         prompt_idx,
+                        reserved_count,  # Pass the reserved count
                     ),
                     daemon=True,
                 )
@@ -363,6 +418,7 @@ class AsyncTrajectoryCollector:
         repeated_batch: BatchedDataDict[DatumSpec],
         generation_weight_version: int,
         prompt_idx: int,
+        reserved_count: int,
     ) -> None:
         try:
             # Run rollout for this prompt group
@@ -417,36 +473,18 @@ class AsyncTrajectoryCollector:
                     )
                     if status == "success":
                         print(f"📦 Buffered per-prompt group (prompt_idx {prompt_idx})")
-                        # Increment generation count for this weight version on successful enqueue
-                        try:
-                            with self._gen_count_lock:
-                                self.generations_per_weight_version[
-                                    generation_weight_version
-                                ] = (
-                                    self.generations_per_weight_version.get(
-                                        generation_weight_version, 0
-                                    )
-                                    + 1
-                                )
-                                current_count = self.generations_per_weight_version[
-                                    generation_weight_version
-                                ]
-                                # Periodic light logging
-                                if current_count == 1 or current_count % 10 == 0:
-                                    num_prompts_per_step = self.master_config["grpo"][
-                                        "num_prompts_per_step"
-                                    ]
-                                    max_age_steps = self.master_config["async_grpo"][
-                                        "max_trajectory_age_steps"
-                                    ]
-                                    max_generations = (
-                                        num_prompts_per_step * max_age_steps
-                                    )
-                                    print(
-                                        f"📊 Weight version {generation_weight_version}: {current_count}/{max_generations} enqueued"
-                                    )
-                        except Exception:
-                            pass
+                        # Log progress using the reserved count
+                        if reserved_count == 1 or reserved_count % 10 == 0:
+                            num_prompts_per_step = self.master_config["grpo"][
+                                "num_prompts_per_step"
+                            ]
+                            max_age_steps = self.master_config["async_grpo"][
+                                "max_trajectory_age_steps"
+                            ]
+                            max_generations = num_prompts_per_step * max_age_steps
+                            print(
+                                f"📊 Weight version {generation_weight_version}: {reserved_count}/{max_generations} enqueued"
+                            )
                         break
                     elif status == "full":
                         # Exponential backoff up to 1 second
