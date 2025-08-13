@@ -1234,7 +1234,9 @@ def async_grpo_train(
                         trajectories is None
                         or len(trajectories) != num_prompt_groups_needed
                     ):
-                        print("⏳ Buffer empty or no fresh trajectories, waiting...")
+                        print(
+                            "⏳ Buffer empty or not enough groups to form a full step, waiting..."
+                        )
 
                         # Get buffer debug info to help diagnose the issue
                         buffer_debug = ray.get(replay_buffer.get_debug_info.remote())
@@ -1242,7 +1244,7 @@ def async_grpo_train(
 
                         if buffer_size > 0:
                             print(
-                                f"🔍 Debug: Buffer has {buffer_size} trajectories but none are valid"
+                                f"🔍 Debug: Buffer has {buffer_size} trajectories but sampling requires exactly {num_prompt_groups_needed}."
                             )
                             print(f"   Current weight version: {weight_version}")
                             print(f"   Max trajectory age: {max_trajectory_age_steps}")

@@ -55,7 +55,7 @@ class ReplayBuffer:
             trajectory: data dict
             weight_version: version of the model weights used for generation
         """
-        if len(self.trajectories) > self.max_size:
+        if len(self.trajectories) >= self.max_size:
             return "full"
 
         print("🔍 ReplayBuffer.push_with_wait_signal: Adding trajectory")
@@ -188,6 +188,8 @@ class AsyncTrajectoryCollector:
         # Limit in-flight generator requests to num_prompts_per_step
         max_inflight = int(self.master_config["grpo"]["num_prompts_per_step"]) or 1
         self._inflight_sema = _threading.Semaphore(max_inflight)
+        # Protect updates to generation counters
+        self._gen_count_lock: _threading.Lock = _threading.Lock()
 
     def set_weight_version(self, version: int) -> None:
         self.current_weight_version = version
@@ -301,20 +303,9 @@ class AsyncTrajectoryCollector:
             num_prompts = batch.size
             num_generations = self.master_config["grpo"]["num_generations_per_prompt"]
 
-            # Track current generation count for this weight version
-            current_count = self.generations_per_weight_version.get(
-                generation_weight_version, 0
-            )
-
             for prompt_idx in range(num_prompts):
                 single_prompt_batch = batch.slice(prompt_idx, prompt_idx + 1)
                 repeated_batch = single_prompt_batch.repeat_interleave(num_generations)
-
-                # Increment generation count for this weight version
-                self.generations_per_weight_version[generation_weight_version] = (
-                    current_count + 1
-                )
-                current_count += 1
 
                 # Prevent flooding generator: at most num_prompts_per_step in-flight
                 self._inflight_sema.acquire()
@@ -333,23 +324,7 @@ class AsyncTrajectoryCollector:
                 # Opportunistically reap finished threads
                 self._cleanup_finished_threads()
 
-            # Log generation status for this weight version (less verbose)
-            final_count = self.generations_per_weight_version.get(
-                generation_weight_version, 0
-            )
-            if (
-                final_count % 10 == 0 or final_count == 1
-            ):  # Log every 10th generation or first one
-                num_prompts_per_step = self.master_config["grpo"][
-                    "num_prompts_per_step"
-                ]
-                max_age_steps = self.master_config["async_grpo"][
-                    "max_trajectory_age_steps"
-                ]
-                max_generations = num_prompts_per_step * max_age_steps
-                print(
-                    f"📊 Weight version {generation_weight_version}: {final_count}/{max_generations} generations"
-                )
+            # Periodic status logging will occur in worker after successful enqueue
 
         except Exception as e:
             print(f"❌ Error processing batch: {e}")
@@ -442,6 +417,36 @@ class AsyncTrajectoryCollector:
                     )
                     if status == "success":
                         print(f"📦 Buffered per-prompt group (prompt_idx {prompt_idx})")
+                        # Increment generation count for this weight version on successful enqueue
+                        try:
+                            with self._gen_count_lock:
+                                self.generations_per_weight_version[
+                                    generation_weight_version
+                                ] = (
+                                    self.generations_per_weight_version.get(
+                                        generation_weight_version, 0
+                                    )
+                                    + 1
+                                )
+                                current_count = self.generations_per_weight_version[
+                                    generation_weight_version
+                                ]
+                                # Periodic light logging
+                                if current_count == 1 or current_count % 10 == 0:
+                                    num_prompts_per_step = self.master_config["grpo"][
+                                        "num_prompts_per_step"
+                                    ]
+                                    max_age_steps = self.master_config["async_grpo"][
+                                        "max_trajectory_age_steps"
+                                    ]
+                                    max_generations = (
+                                        num_prompts_per_step * max_age_steps
+                                    )
+                                    print(
+                                        f"📊 Weight version {generation_weight_version}: {current_count}/{max_generations} enqueued"
+                                    )
+                        except Exception:
+                            pass
                         break
                     elif status == "full":
                         # Exponential backoff up to 1 second

@@ -4,7 +4,7 @@ defaults: "grpo_math_1B.yaml"
 # Async-specific settings
 async_grpo:
   enabled: true        # Enable async training
-  max_trajectory_age_steps: 4  # Allow trajectories from the last 4 training steps
+  max_trajectory_age_steps: 1  # Allow trajectories from the last 4 training steps
 
 grpo:
   num_prompts_per_step: 32
