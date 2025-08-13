@@ -978,7 +978,6 @@ def async_grpo_train(
     checkpointer: CheckpointManager,
     grpo_save_state: GRPOSaveState,
     master_config: MasterConfig,
-    buffer_size: int = 100,
     max_trajectory_age_steps: int = 1,
 ) -> None:
     """Run asynchronous GRPO training with replay buffer.
@@ -996,7 +995,6 @@ def async_grpo_train(
         checkpointer: Checkpoint manager
         grpo_save_state: Training state
         master_config: Master configuration
-        buffer_size: Maximum replay buffer size
         max_trajectory_age_steps: Maximum age (in training steps) for trajectories to be used in training
     """
     # Import async utilities only when needed
@@ -1021,21 +1019,18 @@ def async_grpo_train(
     colocated_inference = master_config["policy"]["generation"]["colocated"]["enabled"]
 
     # Calculate minimum buffer size from training requirements
-    # Each trajectory contains (num_prompts_per_step * num_generations_per_prompt) samples
-    samples_per_trajectory = (
-        master_config["grpo"]["num_prompts_per_step"]
-        * master_config["grpo"]["num_generations_per_prompt"]
-    )
+    # In per-prompt buffer mode, one buffer entry is 1 prompt * num_generations_per_prompt
+    num_prompts_per_step = master_config["grpo"]["num_prompts_per_step"]
+    samples_per_prompt_group = master_config["grpo"]["num_generations_per_prompt"]
     train_gbs = master_config["policy"]["train_global_batch_size"]
 
-    min_trajectories_needed = 1
+    # Ensure the buffer has at least one step worth of prompt-groups before training
+    min_trajectories_needed = num_prompts_per_step
 
     print("📊 Buffer requirements calculation:")
-    print(f"   - num_prompts_per_step: {master_config['grpo']['num_prompts_per_step']}")
-    print(
-        f"   - num_generations_per_prompt: {master_config['grpo']['num_generations_per_prompt']}"
-    )
-    print(f"   - samples_per_trajectory: {samples_per_trajectory}")
+    print(f"   - num_prompts_per_step: {num_prompts_per_step}")
+    print(f"   - num_generations_per_prompt: {samples_per_prompt_group}")
+    print(f"   - samples_per_prompt_group: {samples_per_prompt_group}")
     print(f"   - train_global_batch_size: {train_gbs}")
     print(f"   - min_trajectories_needed: {min_trajectories_needed} (async mode)")
 
@@ -1058,8 +1053,12 @@ def async_grpo_train(
         },
     }
 
+    # Calculate optimal buffer size based on generation limits to prevent length bias
+    num_prompts_per_step = master_config["grpo"]["num_prompts_per_step"]
+    optimal_buffer_size = num_prompts_per_step * max_trajectory_age_steps
+
     replay_buffer = ReplayBuffer.options(runtime_env=_replay_runtime_env).remote(
-        max_size=buffer_size
+        max_size=optimal_buffer_size
     )
 
     _tc_py_exec = get_actor_python_env(
@@ -1101,7 +1100,7 @@ def async_grpo_train(
     print("📦 Started continuous background trajectory collection")
 
     print(
-        f"🚀 Starting async GRPO training with buffer_size={buffer_size}, max_age={max_trajectory_age_steps} steps"
+        f"🚀 Starting async GRPO training with buffer_size={optimal_buffer_size}, max_age={max_trajectory_age_steps} steps"
     )
 
     print("⏳ Preparing policy generation for training...")
@@ -1169,10 +1168,9 @@ def async_grpo_train(
     wait_iterations = 0
     while True:
         buffer_size_current = ray.get(replay_buffer.size.remote())
-        collector_step = ray.get(trajectory_collector.get_current_step.remote())
 
         print(
-            f"  Wait iteration {wait_iterations}: buffer_size={buffer_size_current}/{min_trajectories_needed}, collector_step={collector_step}"
+            f"  Wait iteration {wait_iterations}: buffer_size={buffer_size_current}/{min_trajectories_needed}"
         )
 
         if buffer_size_current >= min_trajectories_needed:
@@ -1188,7 +1186,7 @@ def async_grpo_train(
             # Force sample to see what filtering is happening
             debug_trajectories = ray.get(
                 replay_buffer.sample.remote(
-                    batch_size=1,
+                    num_prompt_groups=1,
                     current_weight_version=weight_version,
                     max_age_steps=max_trajectory_age_steps,
                 )
@@ -1216,22 +1214,26 @@ def async_grpo_train(
                 print("📦 Sampling from replay buffer...")
                 with timer.time("buffer_sampling"):
                     buffer_size_current = ray.get(replay_buffer.size.remote())
-                    collector_step = ray.get(
-                        trajectory_collector.get_current_step.remote()
-                    )
                     print(
-                        f"📊 Step coordination: training_step={step}, collector_step={collector_step}, max_age={max_trajectory_age_steps}, buffer_size={buffer_size_current}"
+                        f"📊 Step coordination: training_step={step}, max_age={max_trajectory_age_steps}, buffer_size={buffer_size_current}"
                     )
 
+                    # Sample the required number of per-prompt groups.
+                    num_prompt_groups_needed = master_config["grpo"][
+                        "num_prompts_per_step"
+                    ]
                     trajectories = ray.get(
                         replay_buffer.sample.remote(
-                            batch_size=1,
+                            num_prompt_groups=num_prompt_groups_needed,
                             current_weight_version=weight_version,
                             max_age_steps=max_trajectory_age_steps,
                         )
                     )
 
-                    if trajectories is None or len(trajectories) == 0:
+                    if (
+                        trajectories is None
+                        or len(trajectories) != num_prompt_groups_needed
+                    ):
                         print("⏳ Buffer empty or no fresh trajectories, waiting...")
 
                         # Get buffer debug info to help diagnose the issue
@@ -1251,9 +1253,37 @@ def async_grpo_train(
                         time.sleep(0.5)
                         continue
 
-                    trajectory = trajectories[0]
-                    repeated_batch = trajectory["batch"]
-                    rollout_metrics = trajectory["rollout_metrics"]
+                    # Concatenate per-prompt groups into a single training batch
+                    per_prompt_batches = [t["batch"] for t in trajectories]
+                    repeated_batch = BatchedDataDict.from_batches(per_prompt_batches)
+                    # Aggregate rollout metrics across groups (simple mean where applicable)
+                    rollout_metrics = {}
+                    for t in trajectories:
+                        for k, v in t["rollout_metrics"].items():
+                            rollout_metrics.setdefault(k, []).append(v)
+                    rollout_metrics = {
+                        k: (sum(v) / len(v) if isinstance(v[0], (int, float)) else v)
+                        for k, v in rollout_metrics.items()
+                    }
+
+                # Enforce fixed training batch: num_prompts_per_step * num_generations_per_prompt
+                expected_batch_size = (
+                    master_config["grpo"]["num_prompts_per_step"]
+                    * master_config["grpo"]["num_generations_per_prompt"]
+                )
+                if repeated_batch.size != expected_batch_size:
+                    print(
+                        f"❌ Unexpected training batch size: got {repeated_batch.size}, expected {expected_batch_size}. Skipping step and waiting for correct buffer content."
+                    )
+                    time.sleep(0.5)
+                    continue
+
+                # Optional sanity: ensure DP divisibility to avoid sharding issues
+                dp_size = policy.sharding_annotations.get_axis_size("data_parallel")
+                if expected_batch_size % dp_size != 0:
+                    raise AssertionError(
+                        f"Configuration error: (num_prompts_per_step * num_generations_per_prompt) = {expected_batch_size} must be divisible by data_parallel size {dp_size}."
+                    )
 
                 print(f"Got trajectory batch (size: {repeated_batch.size})")
 
@@ -1372,7 +1402,9 @@ def async_grpo_train(
 
                 print("▶ Training policy...")
                 with timer.time("policy_training"):
-                    train_results = policy.train(train_data, loss_fn)
+                    train_results = policy.train(
+                        train_data, loss_fn, gbs=repeated_batch.size
+                    )
 
                 print("🔄 Synchronizing policy weights to trajectory collector…")
                 with timer.time("weight_sync"):

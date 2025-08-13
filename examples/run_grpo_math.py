@@ -272,7 +272,6 @@ def main() -> None:
             checkpointer=checkpointer,
             grpo_save_state=grpo_state,
             master_config=master_config,
-            buffer_size=async_config.get("buffer_size", 100),
             max_trajectory_age_steps=async_config.get("max_trajectory_age_steps", 1),
         )
     else:

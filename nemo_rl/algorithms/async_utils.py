@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import gc
-import random
 import threading as _threading
 import time
 from typing import Any, Optional
@@ -37,136 +35,92 @@ TokenizerType = PreTrainedTokenizerBase
 
 @ray.remote
 class ReplayBuffer:
-    """Simple replay buffer for storing trajectories."""
+    """Replay buffer storing per-prompt groups.
+
+    A single entry corresponds to 1 prompt repeated by
+    grpo.num_generations_per_prompt (required to compute per-prompt advantages).
+    """
 
     def __init__(self, max_size: int):
         self.max_size = max_size
         self.trajectories = []
-        # Auxiliary metadata for each stored trajectory
-        self.trajectory_steps = []  # collector step when generated
         self.trajectory_versions = []  # weight-version used for generation
 
-    def push(self, trajectory: dict[str, Any], step: int, weight_version: int) -> None:
-        """Add a trajectory with metadata.
+    def push_with_wait_signal(
+        self, trajectory: dict[str, Any], weight_version: int
+    ) -> str:
+        """Add a per-prompt trajectory group with metadata.
 
         Args:
             trajectory: data dict
-            step:       collector local step
-            weight_version: monotonic counter of the model weights used to generate
+            weight_version: version of the model weights used for generation
         """
-        print(f"🔍 ReplayBuffer.push: Adding trajectory for step {step}")
-        self.trajectories.append(trajectory)
-        self.trajectory_steps.append(step)
-        self.trajectory_versions.append(weight_version)
-
-        # Remove oldest if buffer is full
         if len(self.trajectories) > self.max_size:
-            removed_step = self.trajectory_steps.pop(0)
-            self.trajectory_versions.pop(0)
-            self.trajectories.pop(0)
-            print(f"ReplayBuffer: Removed oldest trajectory (step {removed_step})")
+            return "full"
 
+        print("🔍 ReplayBuffer.push_with_wait_signal: Adding trajectory")
+        self.trajectories.append(trajectory)
+        self.trajectory_versions.append(weight_version)
         print(
-            f"ReplayBuffer state: {len(self.trajectories)} trajectories, steps={self.trajectory_steps}"
+            f"ReplayBuffer state: {len(self.trajectories)} groups, versions={self.trajectory_versions}"
         )
+        return "success"
 
     def get_debug_info(self) -> dict:
         """Get debug information about buffer state."""
         return {
             "total_trajectories": len(self.trajectories),
-            "trajectory_steps": self.trajectory_steps,
             "trajectory_versions": self.trajectory_versions,
             "max_size": self.max_size,
         }
 
-    def clean_old_trajectories(
-        self, current_weight_version: int, max_age_steps: int
-    ) -> int:
-        """Remove trajectories that are too old to be useful.
-
-        Returns:
-            Number of trajectories removed
-        """
-        if not self.trajectories:
-            return 0
-
-        # Find trajectories to remove
-        indices_to_remove = []
-        for i, traj_version in enumerate(self.trajectory_versions):
-            age = current_weight_version - traj_version
-            if age > max_age_steps:
-                indices_to_remove.append(i)
-
-        # Remove in reverse order to maintain indices
-        removed_count = 0
-        for i in reversed(indices_to_remove):
-            self.trajectory_steps.pop(i)
-            self.trajectory_versions.pop(i)
-            self.trajectories.pop(i)
-            removed_count += 1
-
-        if removed_count > 0:
-            print(f"Cleaned {removed_count} old trajectories from buffer")
-
-        return removed_count
-
     def sample(
         self,
-        batch_size: int,
+        num_prompt_groups: int,
         current_weight_version: int,
         max_age_steps: int,
     ) -> Optional[list]:
-        """Sample trajectories that are not too old."""
-        cleaned = self.clean_old_trajectories(current_weight_version, max_age_steps)
-
+        """Sample per-prompt trajectory groups that fit within the age window and removes the sampled groups from the buffer."""
         if not self.trajectories:
             return None
 
-        # Filter trajectories by age
-        valid_indices = []
+        # Treat all trajectories as valid; training will consume and evict
         total_trajectories = len(self.trajectories)
-
         print("🔍 ReplayBuffer sampling debug:")
         print(
             f"   current_weight_version={current_weight_version}, max_age_steps={max_age_steps}"
         )
         print(f"   trajectory_versions={self.trajectory_versions}")
-        print(f"   cleaned_old_trajectories={cleaned}")
-
-        for i, traj_version in enumerate(self.trajectory_versions):
-            age = current_weight_version - traj_version
-
-            valid = age <= max_age_steps
-
-            print(
-                (
-                    f"   trajectory[{i}]: weight_version={traj_version}, age={age}, "
-                    f"window={max_age_steps}, valid={valid}"
-                )
-            )
-
-            if valid:
-                valid_indices.append(i)
-
-        valid_count = len(valid_indices)
-        filtered_count = total_trajectories - valid_count
-
+        valid_indices = list(range(total_trajectories))
         if not valid_indices:
+            print("No trajectories available for sampling.")
+            return None
+
+        # Enforce exact number of groups if available; otherwise, signal to wait
+        if len(valid_indices) < num_prompt_groups:
             print(
-                f"No trajectories within age limit ({max_age_steps} steps). Total: {total_trajectories}, Filtered: {filtered_count}"
+                f"Insufficient valid groups: have {len(valid_indices)}, need {num_prompt_groups}. Waiting for buffer to fill."
             )
             return None
 
-        if filtered_count > 0:
-            print(
-                f"Filtered {filtered_count}/{total_trajectories} trajectories outside ±{max_age_steps} step window"
-            )
+        # FIFO selection of earliest trajectories to maintain order
+        selected: list[int] = valid_indices[:num_prompt_groups]
 
-        sampled_indices = random.sample(
-            valid_indices, min(batch_size, len(valid_indices))
+        from collections import Counter
+
+        sampled_weights = [self.trajectory_versions[i] for i in selected]
+        print(f"✅ Selected counts by weight-version: {Counter(sampled_weights)}")
+
+        sampled_items = [self.trajectories[i] for i in selected]
+
+        for idx in sorted(selected, reverse=True):
+            self.trajectory_versions.pop(idx)
+            self.trajectories.pop(idx)
+        print(
+            f"🗑️ Consumed and removed {len(selected)} groups from buffer, old buffer size: {total_trajectories}, new buffer size: {len(self.trajectories)}"
         )
-        print(f"✅ Sampled trajectory indices: {sampled_indices}")
-        return [self.trajectories[i] for i in sampled_indices]
+
+        return sampled_items
 
     def size(self) -> int:
         """Return current buffer size."""
@@ -175,7 +129,6 @@ class ReplayBuffer:
     def clear(self) -> None:
         """Clear the buffer."""
         self.trajectories.clear()
-        self.trajectory_steps.clear()
         self.trajectory_versions.clear()
 
 
@@ -197,14 +150,25 @@ class AsyncTrajectoryCollector:
         self.task_to_env = task_to_env
         self.master_config = master_config
         self.replay_buffer = replay_buffer
-        self.current_step = start_step
         self.running = False
-        self.paused = False
 
         self._pg_lock: _threading.Lock = _threading.Lock()
-        self._pause_lock: _threading.Lock = _threading.Lock()
+
+        # Event for manual pause/resume control
+        self._manual_pause_cleared = _threading.Event()
+        self._manual_pause_cleared.set()
 
         self.current_weight_version: int = start_step
+
+        # Track generations per weight version to prevent length bias
+        self.generations_per_weight_version: dict[int, int] = {}
+
+        # Track when generation limits cause collection to pause
+        self._last_limit_warning_version = None
+
+        # Event to signal when generation limits are cleared (more efficient than polling)
+        self._generation_limit_cleared = _threading.Event()
+        self._generation_limit_cleared.set()  # Start in cleared state
 
         # Check if we should use async rollouts
         self._use_async_rollouts = False
@@ -218,8 +182,43 @@ class AsyncTrajectoryCollector:
                 "Trajectory collector: Detected vLLM async engine; enabling async rollouts in collector"
             )
 
+        # Track threads
+        self._inflight_threads: set[_threading.Thread] = set()
+        self._threads_lock: _threading.Lock = _threading.Lock()
+        # Limit in-flight generator requests to num_prompts_per_step
+        max_inflight = int(self.master_config["grpo"]["num_prompts_per_step"]) or 1
+        self._inflight_sema = _threading.Semaphore(max_inflight)
+
     def set_weight_version(self, version: int) -> None:
         self.current_weight_version = version
+
+        # # Clean up generation counts for old weight versions outside the window
+        # max_age_steps = self.master_config["async_grpo"]["max_trajectory_age_steps"]
+        # min_valid_version = version - max_age_steps
+
+        # # Remove counts for weight versions that are too old
+        # old_versions = [v for v in self.generations_per_weight_version.keys() if v < min_valid_version]
+        # for old_version in old_versions:
+        #     del self.generations_per_weight_version[old_version]
+
+        # # Resume collection if it was paused due to generation limits
+        was_paused = not self._generation_limit_cleared.is_set()
+        if was_paused:
+            self._generation_limit_cleared.set()  # Signal that collection can resume
+            print(f"🔄 Updated weight version to {version}, resuming collection")
+        else:
+            print(f"🔄 Updated weight version to {version}")
+
+    def _should_pause_for_generation_limits(self) -> bool:
+        """Check if collection should be paused due to generation limits."""
+        num_prompts_per_step = self.master_config["grpo"]["num_prompts_per_step"]
+        max_age_steps = self.master_config["async_grpo"]["max_trajectory_age_steps"]
+        max_generations_per_version = num_prompts_per_step * max_age_steps
+
+        current_count = self.generations_per_weight_version.get(
+            self.current_weight_version, 0
+        )
+        return current_count >= max_generations_per_version
 
     def start_collection(self, dataloader: StatefulDataLoader) -> None:
         """Start collecting trajectories from dataloader."""
@@ -227,9 +226,7 @@ class AsyncTrajectoryCollector:
         self.dataloader = dataloader
         print("Started continuous trajectory collection")
 
-        import threading
-
-        self.collection_thread = threading.Thread(target=self._collection_loop)
+        self.collection_thread = _threading.Thread(target=self._collection_loop)
         self.collection_thread.daemon = True
         self.collection_thread.start()
 
@@ -242,17 +239,45 @@ class AsyncTrajectoryCollector:
                 if not self.running:
                     break
 
-                # Check if paused and wait
-                while self.paused and self.running:
-                    import time
+                # Check if manually paused and wait
+                if not self._manual_pause_cleared.is_set() and self.running:
+                    self._manual_pause_cleared.wait()
 
-                    time.sleep(0.1)
+                # Check if generation limits require pausing collection
+                if self._should_pause_for_generation_limits() and self.running:
+                    # Only log warning once per weight version
+                    if self._last_limit_warning_version != self.current_weight_version:
+                        current_count = self.generations_per_weight_version.get(
+                            self.current_weight_version, 0
+                        )
+                        num_prompts_per_step = self.master_config["grpo"][
+                            "num_prompts_per_step"
+                        ]
+                        max_age_steps = self.master_config["async_grpo"][
+                            "max_trajectory_age_steps"
+                        ]
+                        max_generations = num_prompts_per_step * max_age_steps
+
+                        print(
+                            f"⏸️ Pausing collection: weight version {self.current_weight_version} reached "
+                            f"generation limit ({current_count}/{max_generations}). "
+                            f"Waiting for weight update..."
+                        )
+                        self._last_limit_warning_version = self.current_weight_version
+
+                        self._generation_limit_cleared.clear()  # Clear the event to pause
+
+                    # Efficiently wait for generation limits to be cleared (no polling!)
+                    self._generation_limit_cleared.wait()
+
+                    # Double-check we're still running after being woken up
+                    if not self.running:
+                        break
 
                 if not self.running:
                     break
 
                 self._process_batch(batch)
-                self.current_step += 1
 
         except Exception as e:
             print(f"❌ Error in trajectory collection: {e}")
@@ -264,31 +289,123 @@ class AsyncTrajectoryCollector:
             print("🛑 Trajectory collection stopped")
 
     def _process_batch(self, batch: BatchedDataDict[DatumSpec]) -> None:
-        """Process a single batch and add trajectories to replay buffer."""
+        """Process a single batch and add per-prompt groups to replay buffer.
+
+        This function handles only 1 prompt * num_generations_per_prompt at a time.
+        """
         try:
             generation_weight_version = self.current_weight_version
 
-            repeated_batch = batch.repeat_interleave(
-                self.master_config["grpo"]["num_generations_per_prompt"]
+            # For each prompt in the incoming batch, build a per-prompt group by
+            # repeating it num_generations_per_prompt times, run rollout, then push.
+            num_prompts = batch.size
+            num_generations = self.master_config["grpo"]["num_generations_per_prompt"]
+
+            # Track current generation count for this weight version
+            current_count = self.generations_per_weight_version.get(
+                generation_weight_version, 0
             )
 
+            for prompt_idx in range(num_prompts):
+                single_prompt_batch = batch.slice(prompt_idx, prompt_idx + 1)
+                repeated_batch = single_prompt_batch.repeat_interleave(num_generations)
+
+                # Increment generation count for this weight version
+                self.generations_per_weight_version[generation_weight_version] = (
+                    current_count + 1
+                )
+                current_count += 1
+
+                # Prevent flooding generator: at most num_prompts_per_step in-flight
+                self._inflight_sema.acquire()
+                worker = _threading.Thread(
+                    target=self._run_prompt_group_worker,
+                    args=(
+                        repeated_batch,
+                        generation_weight_version,
+                        prompt_idx,
+                    ),
+                    daemon=True,
+                )
+                with self._threads_lock:
+                    self._inflight_threads.add(worker)
+                worker.start()
+                # Opportunistically reap finished threads
+                self._cleanup_finished_threads()
+
+            # Log generation status for this weight version (less verbose)
+            final_count = self.generations_per_weight_version.get(
+                generation_weight_version, 0
+            )
+            if (
+                final_count % 10 == 0 or final_count == 1
+            ):  # Log every 10th generation or first one
+                num_prompts_per_step = self.master_config["grpo"][
+                    "num_prompts_per_step"
+                ]
+                max_age_steps = self.master_config["async_grpo"][
+                    "max_trajectory_age_steps"
+                ]
+                max_generations = num_prompts_per_step * max_age_steps
+                print(
+                    f"📊 Weight version {generation_weight_version}: {final_count}/{max_generations} generations"
+                )
+
+        except Exception as e:
+            print(f"❌ Error processing batch: {e}")
+            import traceback
+
+            traceback.print_exc()
+
+    def get_weight_version(self) -> int:
+        return self.current_weight_version
+
+    def pause(self) -> None:
+        """Pause trajectory collection."""
+        self._manual_pause_cleared.clear()  # Signal collection to pause
+        print("Trajectory collection paused")
+
+    def resume(self) -> None:
+        """Resume trajectory collection."""
+        self._manual_pause_cleared.set()  # Signal collection to resume
+        print("Trajectory collection resumed")
+
+    def stop(self) -> None:
+        """Stop trajectory collection."""
+        self.running = False
+        # Signal all events to wake up any waiting threads so they can exit cleanly
+        self._manual_pause_cleared.set()
+        self._generation_limit_cleared.set()
+
+    def _cleanup_finished_threads(self) -> None:
+        with self._threads_lock:
+            finished = {t for t in self._inflight_threads if not t.is_alive()}
+            for t in finished:
+                self._inflight_threads.remove(t)
+
+    def _run_prompt_group_worker(
+        self,
+        repeated_batch: BatchedDataDict[DatumSpec],
+        generation_weight_version: int,
+        prompt_idx: int,
+    ) -> None:
+        try:
+            # Run rollout for this prompt group
             if self._use_async_rollouts:
-                with self._pg_lock:
-                    final_batch, rollout_metrics = run_async_multi_turn_rollout(
-                        policy_generation=self.policy_generation,
-                        input_batch=repeated_batch,
-                        tokenizer=self.tokenizer,
-                        task_to_env=self.task_to_env,
-                        max_seq_len=self.master_config["policy"][
-                            "max_total_sequence_length"
-                        ],
-                        max_rollout_turns=self.master_config["grpo"][
-                            "max_rollout_turns"
-                        ],
-                        greedy=False,
-                    )
+                # Async engine supports concurrent generation; avoid locking
+                final_batch, rollout_metrics = run_async_multi_turn_rollout(
+                    policy_generation=self.policy_generation,
+                    input_batch=repeated_batch,
+                    tokenizer=self.tokenizer,
+                    task_to_env=self.task_to_env,
+                    max_seq_len=self.master_config["policy"][
+                        "max_total_sequence_length"
+                    ],
+                    max_rollout_turns=self.master_config["grpo"]["max_rollout_turns"],
+                    greedy=False,
+                )
             else:
-                # Fallback to sync rollout
+                # Fallback to sync rollout; serialize access to generation
                 with self._pg_lock:
                     final_batch, rollout_metrics = run_multi_turn_rollout(
                         policy_generation=self.policy_generation,
@@ -304,78 +421,52 @@ class AsyncTrajectoryCollector:
                         greedy=False,
                     )
 
-            # Trajectory here is the complete batch required for training.
-            # TODO: in future we can see if trajectory is just a prompt * num_generations_per_prompt
-
-            # Move batch to CPU to avoid consuming GPU memory in replay buffer
+            # Move to CPU and push to buffer (avoid blocking on GC/push)
             final_batch_cpu = final_batch.to("cpu")
-
-            # Explicit cleanup of GPU tensors
             del final_batch
-            gc.collect()
 
-            trajectory = {
+            trajectory_group = {
                 "batch": final_batch_cpu,
                 "rollout_metrics": rollout_metrics,
                 "timestamp": time.time(),
-                "collector_step": self.current_step,
             }
 
-            # Add to replay buffer with the weight version that was used for generation
+            # Use exponential backoff when buffer is full
             try:
-                ray.get(
-                    self.replay_buffer.push.remote(
-                        trajectory, self.current_step, generation_weight_version
+                backoff_delay = 0.01
+                while self.running:
+                    status = ray.get(
+                        self.replay_buffer.push_with_wait_signal.remote(
+                            trajectory_group, generation_weight_version
+                        )
                     )
-                )
-                print(
-                    f"Successfully added trajectory to buffer (step {self.current_step}, weight_version {generation_weight_version})"
-                )
+                    if status == "success":
+                        print(f"📦 Buffered per-prompt group (prompt_idx {prompt_idx})")
+                        break
+                    elif status == "full":
+                        # Exponential backoff up to 1 second
+                        time.sleep(min(backoff_delay, 1.0))
+                        backoff_delay *= 1.5
+                    else:
+                        # Unexpected status, wait briefly
+                        time.sleep(0.01)
             except Exception as e:
-                print(f"❌ Failed to add trajectory to buffer: {e}")
+                print(f"❌ Failed to enqueue per-prompt group to buffer: {e}")
                 import traceback
 
                 traceback.print_exc()
-                return
-
-            print(
-                f"📦 Added trajectory batch (size: {final_batch_cpu.size}) to replay buffer (step {self.current_step})"
-            )
-            print(
-                f"   Trajectory rewards: min={final_batch_cpu['total_reward'].min():.3f}, max={final_batch_cpu['total_reward'].max():.3f}, mean={final_batch_cpu['total_reward'].mean():.3f}"
-            )
-
-            try:
-                buffer_size_after_push = ray.get(self.replay_buffer.size.remote())
-                print(f"   Buffer size after push: {buffer_size_after_push}")
-            except Exception as e:
-                print(f"❌ Failed to check buffer size after push: {e}")
-
         except Exception as e:
-            print(f"❌ Error processing batch: {e}")
+            print(f"❌ Error in prompt group worker: {e}")
             import traceback
 
             traceback.print_exc()
-
-    def get_current_step(self) -> int:
-        """Return current step for debugging."""
-        return self.current_step
-
-    def get_weight_version(self) -> int:
-        return self.current_weight_version
-
-    def pause(self) -> None:
-        """Pause trajectory collection."""
-        with self._pause_lock:
-            self.paused = True
-        print("Trajectory collection paused")
-
-    def resume(self) -> None:
-        """Resume trajectory collection."""
-        with self._pause_lock:
-            self.paused = False
-        print("Trajectory collection resumed")
-
-    def stop(self) -> None:
-        """Stop trajectory collection."""
-        self.running = False
+        finally:
+            # Detach thread record when finished
+            with self._threads_lock:
+                current = _threading.current_thread()
+                if current in self._inflight_threads:
+                    self._inflight_threads.remove(current)
+            try:
+                self._inflight_sema.release()
+            except Exception:
+                pass
