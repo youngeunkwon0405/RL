@@ -1057,9 +1057,9 @@ def async_grpo_train(
     # Each weight version generates exactly num_prompts_per_step trajectories
     # With max_age_steps, we keep trajectories from multiple weight versions
     num_prompts_per_step = master_config["grpo"]["num_prompts_per_step"]
-    late_arrival_slack = 1
+    late_arrival_slack = 2
     optimal_buffer_size = (
-        num_prompts_per_step * max_trajectory_age_steps + late_arrival_slack
+        num_prompts_per_step * max_trajectory_age_steps * late_arrival_slack
     )
 
     replay_buffer = ReplayBuffer.options(runtime_env=_replay_runtime_env).remote(
@@ -1181,24 +1181,24 @@ def async_grpo_train(
         if buffer_size_current >= min_trajectories_needed:
             break
 
-        wait_iterations += 1
-        if wait_iterations > 30:
-            print("TIMEOUT: Buffer never filled. Debugging buffer state...")
+        # wait_iterations += 1
+        # if wait_iterations > 30:
+        #     print("TIMEOUT: Buffer never filled. Debugging buffer state...")
 
-            buffer_debug = ray.get(replay_buffer.get_debug_info.remote())
-            print(f"   Buffer debug info: {buffer_debug}")
+        #     buffer_debug = ray.get(replay_buffer.get_debug_info.remote())
+        #     print(f"   Buffer debug info: {buffer_debug}")
 
-            # Force sample to see what filtering is happening
-            debug_trajectories = ray.get(
-                replay_buffer.sample.remote(
-                    num_prompt_groups=1,
-                    current_weight_version=weight_version,
-                    max_age_steps=max_trajectory_age_steps,
-                )
-            )
-            print(f"   Debug sample result: {debug_trajectories}")
+        #     # Force sample to see what filtering is happening
+        #     debug_trajectories = ray.get(
+        #         replay_buffer.sample.remote(
+        #             num_prompt_groups=1,
+        #             current_weight_version=weight_version,
+        #             max_age_steps=max_trajectory_age_steps,
+        #         )
+        #     )
+        #     print(f"   Debug sample result: {debug_trajectories}")
 
-            break
+        #     break
 
         time.sleep(1.0)
 

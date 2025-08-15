@@ -46,6 +46,8 @@ class ReplayBuffer:
         self.trajectories = []
         self.trajectory_versions = []  # weight-version used for generation
         self.target_weight_versions = []  # weight-version this trajectory is targeted for
+        self.last_target_weight_already_generated = -1
+        self._lock = _threading.Lock()
 
     def push_with_wait_signal(
         self,
@@ -60,17 +62,21 @@ class ReplayBuffer:
             weight_version: version of the model weights used for generation
             target_weight_version: version of the model weights this trajectory is intended for training
         """
-        if len(self.trajectories) >= self.max_size:
-            return "full"
+        with self._lock:
+            if len(self.trajectories) >= self.max_size:
+                return "full"
 
-        print("🔍 ReplayBuffer.push_with_wait_signal: Adding trajectory")
-        self.trajectories.append(trajectory)
-        self.trajectory_versions.append(weight_version)
-        self.target_weight_versions.append(target_weight_version)
-        print(
-            f"ReplayBuffer state: {len(self.trajectories)} groups, versions={self.trajectory_versions}, targets={self.target_weight_versions}"
-        )
-        return "success"
+            print("🔍 ReplayBuffer.push_with_wait_signal: Adding trajectory")
+            self.trajectories.append(trajectory)
+            self.trajectory_versions.append(weight_version)
+            self.target_weight_versions.append(target_weight_version)
+            self.last_target_weight_already_generated = max(
+                self.last_target_weight_already_generated, target_weight_version
+            )
+            print(
+                f"ReplayBuffer state: {len(self.trajectories)} groups, versions={self.trajectory_versions}, targets={self.target_weight_versions}, last_target_weight_already_generated={self.last_target_weight_already_generated}"
+            )
+            return "success"
 
     def get_debug_info(self) -> dict:
         """Get debug information about buffer state."""
@@ -81,9 +87,14 @@ class ReplayBuffer:
             "max_size": self.max_size,
         }
 
+    def get_last_target_weight_already_generated(self) -> int:
+        with self._lock:
+            return self.last_target_weight_already_generated
+
     def get_existing_target_weights(self) -> set[int]:
         """Get set of target weight versions that already have trajectories."""
-        return set(self.target_weight_versions)
+        with self._lock:
+            return set(self.target_weight_versions)
 
     def sample(
         self,
@@ -98,116 +109,119 @@ class ReplayBuffer:
         until the remaining trajectories are generated. This ensures no trajectory
         loses its "last chance" to be used for its intended training step.
         """
-        if not self.trajectories:
-            return None
+        with self._lock:
+            if not self.trajectories:
+                return None
 
-        total_trajectories = len(self.trajectories)
-        print("🔍 ReplayBuffer sampling debug:")
-        print(
-            f"   current_weight_version={current_weight_version}, max_age_steps={max_age_steps}"
-        )
-        print(f"   trajectory_versions={self.trajectory_versions}")
-
-        # For debugging: check for unexpected old trajectories
-        from collections import Counter
-
-        version_counts = Counter(self.trajectory_versions)
-        print(f"   version_counts: {version_counts}")
-
-        # Compute minimum valid version based on age window
-        # max_age_steps=1 means trajectories from the last 1 step are valid
-        min_valid_version = max(0, current_weight_version - max_age_steps)
-        print(f"   min_valid_version={min_valid_version}")
-
-        # Check for unexpected old trajectories
-        old_trajectories = [
-            v for v in self.trajectory_versions if v < min_valid_version
-        ]
-        if old_trajectories:
-            raise ValueError(
-                f"Found {len(old_trajectories)} trajectories older than min_valid_version {min_valid_version}"
-            )
-
-        # Filter for valid trajectories without modifying the buffer
-        valid_indices = [
-            i
-            for i, v in enumerate(self.trajectory_versions)
-            if min_valid_version <= v <= current_weight_version
-        ]
-        print(
-            f"   valid_indices: {len(valid_indices)}/{total_trajectories} trajectories within age window"
-        )
-        if not valid_indices:
-            print("No trajectories available for sampling.")
-            return None
-
-        # Enforce exact number of groups if available; otherwise, signal to wait
-        if len(valid_indices) < num_prompt_groups:
+            total_trajectories = len(self.trajectories)
+            print("🔍 ReplayBuffer sampling debug:")
             print(
-                f"Insufficient valid groups: have {len(valid_indices)}, need {num_prompt_groups}. Waiting for buffer to fill."
+                f"   current_weight_version={current_weight_version}, max_age_steps={max_age_steps}"
             )
-            return None
+            print(f"   trajectory_versions={self.trajectory_versions}")
 
-        # Only select trajectories intended for the current training step
-        # This ensures no trajectory loses its "last chance" to be used for its intended step
-        intended_indices = [
-            i
-            for i in valid_indices
-            if self.target_weight_versions[i] == current_weight_version
-        ]
+            # For debugging: check for unexpected old trajectories
+            from collections import Counter
 
-        print(
-            f"   🎯 Found {len(intended_indices)} trajectories intended for current step {current_weight_version}"
-        )
+            version_counts = Counter(self.trajectory_versions)
+            print(f"   version_counts: {version_counts}")
 
-        # Stall training if we don't have enough trajectories intended for this step
-        if len(intended_indices) < num_prompt_groups:
+            # Compute minimum valid version based on age window
+            # max_age_steps=1 means trajectories from the last 1 step are valid
+            min_valid_version = max(0, current_weight_version - max_age_steps)
+            print(f"   min_valid_version={min_valid_version}")
+
+            # Check for unexpected old trajectories
+            old_trajectories = [
+                v for v in self.trajectory_versions if v < min_valid_version
+            ]
+            if old_trajectories:
+                raise ValueError(
+                    f"Found {len(old_trajectories)} trajectories older than min_valid_version {min_valid_version}"
+                )
+
+            # Filter for valid trajectories without modifying the buffer
+            valid_indices = [
+                i
+                for i, v in enumerate(self.trajectory_versions)
+                if min_valid_version <= v <= current_weight_version
+            ]
             print(
-                f"   ⏸️ STALLING: Need {num_prompt_groups} trajectories for step {current_weight_version}, but only {len(intended_indices)} are ready"
+                f"   valid_indices: {len(valid_indices)}/{total_trajectories} trajectories within age window"
+            )
+            if not valid_indices:
+                print("No trajectories available for sampling.")
+                return None
+
+            # Enforce exact number of groups if available; otherwise, signal to wait
+            if len(valid_indices) < num_prompt_groups:
+                print(
+                    f"Insufficient valid groups: have {len(valid_indices)}, need {num_prompt_groups}. Waiting for buffer to fill."
+                )
+                return None
+
+            # Only select trajectories intended for the current training step
+            # This ensures no trajectory loses its "last chance" to be used for its intended step
+            intended_indices = [
+                i
+                for i in valid_indices
+                if self.target_weight_versions[i] == current_weight_version
+            ]
+
+            print(
+                f"   🎯 Found {len(intended_indices)} trajectories intended for current step {current_weight_version}"
+            )
+
+            # Stall training if we don't have enough trajectories intended for this step
+            if len(intended_indices) < num_prompt_groups:
+                print(
+                    f"   ⏸️ STALLING: Need {num_prompt_groups} trajectories for step {current_weight_version}, but only {len(intended_indices)} are ready"
+                )
+                print(
+                    f"   ⏸️ Training will wait for remaining {num_prompt_groups - len(intended_indices)} trajectories to be generated"
+                )
+                return None
+
+            # Select exactly the trajectories intended for this step (FIFO within same target)
+            selected: list[int] = intended_indices[:num_prompt_groups]
+            print(
+                f"   ✅ Selected {len(selected)} trajectories all intended for step {current_weight_version}"
+            )
+
+            from collections import Counter
+
+            sampled_weights = [self.trajectory_versions[i] for i in selected]
+            print(
+                f"✅ Selected counts by generation weight-version: {Counter(sampled_weights)}"
             )
             print(
-                f"   ⏸️ Training will wait for remaining {num_prompt_groups - len(intended_indices)} trajectories to be generated"
+                f"🎯 All selected trajectories target step {current_weight_version} (100% target match)"
             )
-            return None
 
-        # Select exactly the trajectories intended for this step (FIFO within same target)
-        selected: list[int] = intended_indices[:num_prompt_groups]
-        print(
-            f"   ✅ Selected {len(selected)} trajectories all intended for step {current_weight_version}"
-        )
+            sampled_items = [self.trajectories[i] for i in selected]
 
-        from collections import Counter
+            # Remove selected items in reverse order to maintain correct indices
+            for idx in sorted(selected, reverse=True):
+                self.trajectory_versions.pop(idx)
+                self.target_weight_versions.pop(idx)
+                self.trajectories.pop(idx)
+            print(
+                f"🗑️ Consumed and removed {len(selected)} groups from buffer, old buffer size: {total_trajectories}, new buffer size: {len(self.trajectories)}, new target weight versions {self.target_weight_versions}"
+            )
 
-        sampled_weights = [self.trajectory_versions[i] for i in selected]
-        print(
-            f"✅ Selected counts by generation weight-version: {Counter(sampled_weights)}"
-        )
-        print(
-            f"🎯 All selected trajectories target step {current_weight_version} (100% target match)"
-        )
-
-        sampled_items = [self.trajectories[i] for i in selected]
-
-        # Remove selected items in reverse order to maintain correct indices
-        for idx in sorted(selected, reverse=True):
-            self.trajectory_versions.pop(idx)
-            self.target_weight_versions.pop(idx)
-            self.trajectories.pop(idx)
-        print(
-            f"🗑️ Consumed and removed {len(selected)} groups from buffer, old buffer size: {total_trajectories}, new buffer size: {len(self.trajectories)}, new target weight versions {self.target_weight_versions}"
-        )
-
-        return sampled_items
+            return sampled_items
 
     def size(self) -> int:
         """Return current buffer size."""
-        return len(self.trajectories)
+        with self._lock:
+            return len(self.trajectories)
 
     def clear(self) -> None:
         """Clear the buffer."""
-        self.trajectories.clear()
-        self.trajectory_versions.clear()
-        self.target_weight_versions.clear()
+        with self._lock:
+            self.trajectories.clear()
+            self.trajectory_versions.clear()
+            self.target_weight_versions.clear()
 
 
 @ray.remote
@@ -282,30 +296,26 @@ class AsyncTrajectoryCollector:
 
         return [generation_weight_version + i for i in range(1, max_trajectory_age + 1)]
 
-    def _get_targets_needing_generation(
+    def _get_next_target_for_generation(
         self, generation_weight_version: int
-    ) -> list[int]:
-        """Get list of target weights that need generation (don't exist and aren't being generated)."""
+    ) -> Optional[int]:
+        """Get the next target weight that needs generation (if any)."""
         target_weights = self._calculate_target_weights(generation_weight_version)
-
-        existing_targets = ray.get(
-            self.replay_buffer.get_existing_target_weights.remote()
+        last_target_weight_already_generated = ray.get(
+            self.replay_buffer.get_last_target_weight_already_generated.remote()
         )
 
-        targets_needed = []
         with self._generation_check_lock:
             for target_weight in target_weights:
                 if (
-                    target_weight not in existing_targets
+                    target_weight > last_target_weight_already_generated
                     and target_weight not in self._generating_targets
                 ):
                     self._generating_targets.add(target_weight)
-                    targets_needed.append(target_weight)
-                    print(
-                        f"🎯 Reserved target weight {target_weight} for generation from current generation weights {generation_weight_version}"
-                    )
+                    print(f"🎯 Reserved target weight {target_weight} for generation")
+                    return target_weight
 
-        return targets_needed
+        return None
 
     def set_weight_version(self, version: int) -> None:
         self.current_weight_version = version
@@ -328,25 +338,27 @@ class AsyncTrajectoryCollector:
 
     def _should_pause_for_generation_limits(self) -> bool:
         """Check if collection should be paused due to generation limits."""
-        # Simple check: if buffer has any entries for future target weights, pause
         try:
-            existing_targets = ray.get(
-                self.replay_buffer.get_existing_target_weights.remote()
-            )
-            existing_targets = set(existing_targets)
-            print(f"exisiting targets: {existing_targets}")
             target_weights = self._calculate_target_weights(self.current_weight_version)
+            last_target_weight_already_generated = ray.get(
+                self.replay_buffer.get_last_target_weight_already_generated.remote()
+            )
 
-            for target_weight in target_weights:
-                if target_weight not in existing_targets:
-                    return False  # Need to generate for this target
+            # Check if any target weight in our range needs generation
+            with self._generation_check_lock:
+                for target_weight in target_weights:
+                    if (
+                        target_weight > last_target_weight_already_generated
+                        and target_weight not in self._generating_targets
+                    ):
+                        return False  # Found a target that needs generation
 
             print(
-                f"⏸️ All target weights {target_weights} already exist, pausing generation"
+                f"⏸️ All target weights {target_weights} already generated or in progress, pausing"
             )
             return True
         except Exception:
-            return False  # If can't check, don't pause
+            return False
 
     def start_collection(self, dataloader: StatefulDataLoader) -> None:
         """Start collecting trajectories from dataloader."""
@@ -413,53 +425,48 @@ class AsyncTrajectoryCollector:
             print("🛑 Trajectory collection stopped")
 
     def _process_batch(self, batch: BatchedDataDict[DatumSpec]) -> None:
-        """Process a single batch and generate for needed target weights."""
+        """Process a single batch and generate for one target weight."""
         try:
             generation_weight_version = self.current_weight_version
             num_generations = self.master_config["grpo"]["num_generations_per_prompt"]
             num_prompts = batch.size
 
-            # Get targets that need generation (single source of truth)
-            targets_to_generate = self._get_targets_needing_generation(
+            # Get the next target weight that needs generation
+            target_weight = self._get_next_target_for_generation(
                 generation_weight_version
             )
 
-            if not targets_to_generate:
+            if target_weight is None:
                 print(
                     f"🔄 No targets need generation for weight {generation_weight_version}"
                 )
                 return
 
             print(
-                f"🎯 Generating for targets: {targets_to_generate} from current generation_weight_version {generation_weight_version}"
+                f"🎯 Generating for target weight {target_weight} from generation_weight_version {generation_weight_version}"
             )
 
-            # Generate for each target weight
-            for target_weight in targets_to_generate:
-                print(f"🎯 Starting generation for target weight {target_weight}")
+            # Generate for all prompts in this batch for the target weight
+            for prompt_idx in range(num_prompts):
+                single_prompt_batch = batch.slice(prompt_idx, prompt_idx + 1)
+                repeated_batch = single_prompt_batch.repeat_interleave(num_generations)
 
-                for prompt_idx in range(num_prompts):
-                    single_prompt_batch = batch.slice(prompt_idx, prompt_idx + 1)
-                    repeated_batch = single_prompt_batch.repeat_interleave(
-                        num_generations
-                    )
+                self._inflight_sema.acquire()
+                worker = _threading.Thread(
+                    target=self._run_prompt_group_worker,
+                    args=(
+                        repeated_batch,
+                        generation_weight_version,
+                        target_weight,
+                        prompt_idx,
+                    ),
+                    daemon=True,
+                )
+                with self._threads_lock:
+                    self._inflight_threads.add(worker)
+                worker.start()
 
-                    self._inflight_sema.acquire()
-                    worker = _threading.Thread(
-                        target=self._run_prompt_group_worker,
-                        args=(
-                            repeated_batch,
-                            generation_weight_version,
-                            target_weight,
-                            prompt_idx,
-                        ),
-                        daemon=True,
-                    )
-                    with self._threads_lock:
-                        self._inflight_threads.add(worker)
-                    worker.start()
-
-                self._cleanup_finished_threads()
+            self._cleanup_finished_threads()
 
         except Exception as e:
             print(f"❌ Error processing batch: {e}")
