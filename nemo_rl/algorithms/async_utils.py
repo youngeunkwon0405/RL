@@ -91,7 +91,13 @@ class ReplayBuffer:
         current_weight_version: int,
         max_age_steps: int,
     ) -> Optional[list]:
-        """Sample per-prompt trajectory groups that fit within the age window and removes the sampled groups from the buffer."""
+        """Sample per-prompt trajectory groups intended for the current training step.
+
+        Only returns trajectories with target_weight_version == current_weight_version.
+        If insufficient trajectories are available, returns None to stall training
+        until the remaining trajectories are generated. This ensures no trajectory
+        loses its "last chance" to be used for its intended training step.
+        """
         if not self.trajectories:
             return None
 
@@ -142,13 +148,43 @@ class ReplayBuffer:
             )
             return None
 
-        # FIFO selection of earliest valid trajectories to maintain order
-        selected: list[int] = valid_indices[:num_prompt_groups]
+        # Only select trajectories intended for the current training step
+        # This ensures no trajectory loses its "last chance" to be used for its intended step
+        intended_indices = [
+            i
+            for i in valid_indices
+            if self.target_weight_versions[i] == current_weight_version
+        ]
+
+        print(
+            f"   🎯 Found {len(intended_indices)} trajectories intended for current step {current_weight_version}"
+        )
+
+        # Stall training if we don't have enough trajectories intended for this step
+        if len(intended_indices) < num_prompt_groups:
+            print(
+                f"   ⏸️ STALLING: Need {num_prompt_groups} trajectories for step {current_weight_version}, but only {len(intended_indices)} are ready"
+            )
+            print(
+                f"   ⏸️ Training will wait for remaining {num_prompt_groups - len(intended_indices)} trajectories to be generated"
+            )
+            return None
+
+        # Select exactly the trajectories intended for this step (FIFO within same target)
+        selected: list[int] = intended_indices[:num_prompt_groups]
+        print(
+            f"   ✅ Selected {len(selected)} trajectories all intended for step {current_weight_version}"
+        )
 
         from collections import Counter
 
         sampled_weights = [self.trajectory_versions[i] for i in selected]
-        print(f"✅ Selected counts by weight-version: {Counter(sampled_weights)}")
+        print(
+            f"✅ Selected counts by generation weight-version: {Counter(sampled_weights)}"
+        )
+        print(
+            f"🎯 All selected trajectories target step {current_weight_version} (100% target match)"
+        )
 
         sampled_items = [self.trajectories[i] for i in selected]
 
@@ -241,7 +277,7 @@ class AsyncTrajectoryCollector:
             "max_trajectory_age_steps"
         ]
         if generation_weight_version == 0:
-            # specical case that needs to generate of itself and more if required
+            # specical case that needs to generate for itself and more if required
             return [i for i in range(max_trajectory_age + 1)]
 
         return [generation_weight_version + i for i in range(1, max_trajectory_age + 1)]
