@@ -251,6 +251,7 @@ class AsyncTrajectoryCollector:
         self._manual_pause_cleared.set()
 
         self.current_weight_version: int = start_step
+        self.initial_weight_version: int = start_step
 
         # Note: Generation tracking is now done via replay buffer target weight counts
 
@@ -290,9 +291,14 @@ class AsyncTrajectoryCollector:
         max_trajectory_age = self.master_config["async_grpo"][
             "max_trajectory_age_steps"
         ]
-        if generation_weight_version == 0:
-            # specical case that needs to generate for itself and more if required
-            return [i for i in range(max_trajectory_age + 1)]
+        if generation_weight_version == self.initial_weight_version:
+            return [
+                i
+                for i in range(
+                    self.initial_weight_version,
+                    self.initial_weight_version + max_trajectory_age + 1,
+                )
+            ]
 
         return [generation_weight_version + i for i in range(1, max_trajectory_age + 1)]
 
@@ -320,13 +326,13 @@ class AsyncTrajectoryCollector:
     def set_weight_version(self, version: int) -> None:
         self.current_weight_version = version
 
-        # Clear old target weight reservations since weight has advanced
-        with self._generation_check_lock:
-            if self._generating_targets:
-                print(
-                    f"🧹 Clearing {len(self._generating_targets)} old target weight reservations"
-                )
-                self._generating_targets.clear()
+        # # Clear old target weight reservations since weight has advanced
+        # with self._generation_check_lock:
+        #     if self._generating_targets:
+        #         print(
+        #             f"🧹 Clearing {len(self._generating_targets)} old target weight reservations"
+        #         )
+        #         self._generating_targets.clear()
 
         # Resume collection if it was paused due to generation limits
         was_paused = not self._generation_limit_cleared.is_set()
