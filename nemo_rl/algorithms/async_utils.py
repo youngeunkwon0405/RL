@@ -101,13 +101,16 @@ class ReplayBuffer:
         num_prompt_groups: int,
         current_weight_version: int,
         max_age_steps: int,
-    ) -> Optional[list]:
+    ) -> Optional[dict[str, Any]]:
         """Sample per-prompt trajectory groups intended for the current training step.
 
         Only returns trajectories with target_weight_version == current_weight_version.
         If insufficient trajectories are available, returns None to stall training
         until the remaining trajectories are generated. This ensures no trajectory
         loses its "last chance" to be used for its intended training step.
+
+        Returns:
+            Dictionary with 'trajectories' and 'avg_trajectory_age' keys, or None if insufficient data
         """
         with self._lock:
             if not self.trajectories:
@@ -191,9 +194,13 @@ class ReplayBuffer:
             from collections import Counter
 
             sampled_weights = [self.trajectory_versions[i] for i in selected]
+            avg_trajectory_age = current_weight_version - sum(sampled_weights) / len(
+                sampled_weights
+            )
             print(
                 f"✅ Selected counts by generation weight-version: {Counter(sampled_weights)}"
             )
+            print(f"📊 Average trajectory age: {avg_trajectory_age:.2f} steps")
             print(
                 f"🎯 All selected trajectories target step {current_weight_version} (100% target match)"
             )
@@ -209,7 +216,10 @@ class ReplayBuffer:
                 f"🗑️ Consumed and removed {len(selected)} groups from buffer, old buffer size: {total_trajectories}, new buffer size: {len(self.trajectories)}, new target weight versions {self.target_weight_versions}"
             )
 
-            return sampled_items
+            return {
+                "trajectories": sampled_items,
+                "avg_trajectory_age": avg_trajectory_age,
+            }
 
     def size(self) -> int:
         """Return current buffer size."""
@@ -249,6 +259,9 @@ class AsyncTrajectoryCollector:
         # Event for manual pause/resume control
         self._manual_pause_cleared = _threading.Event()
         self._manual_pause_cleared.set()
+
+        self._refit_pause_cleared = _threading.Event()
+        self._refit_pause_cleared.set()  # Start in cleared state
 
         self.current_weight_version: int = start_step
         self.initial_weight_version: int = start_step
@@ -389,6 +402,12 @@ class AsyncTrajectoryCollector:
                 if not self._manual_pause_cleared.is_set() and self.running:
                     self._manual_pause_cleared.wait()
 
+                # Check if refit is in progress and wait
+                if not self._refit_pause_cleared.is_set() and self.running:
+                    print("⏸️ Pausing collection for refit...")
+                    self._refit_pause_cleared.wait()
+                    print("▶️ Refit completed, resuming collection")
+
                 # Check if generation limits require pausing collection
                 if self._should_pause_for_generation_limits() and self.running:
                     # Only log warning once per weight version
@@ -454,6 +473,15 @@ class AsyncTrajectoryCollector:
 
             # Generate for all prompts in this batch for the target weight
             for prompt_idx in range(num_prompts):
+                # Wait for refit to complete if in progress
+                if not self._refit_pause_cleared.is_set() and self.running:
+                    with self._threads_lock:
+                        active_threads = len(self._inflight_threads)
+                    print(
+                        f"⏸️ Waiting for refit to complete before starting new generation ({active_threads} threads still active)"
+                    )
+                    self._refit_pause_cleared.wait()
+
                 single_prompt_batch = batch.slice(prompt_idx, prompt_idx + 1)
                 repeated_batch = single_prompt_batch.repeat_interleave(num_generations)
 
@@ -493,12 +521,57 @@ class AsyncTrajectoryCollector:
         self._manual_pause_cleared.set()  # Signal collection to resume
         print("Trajectory collection resumed")
 
+    def prepare_for_refit(self) -> None:
+        """Pause new generation starts and wait for pending generations to complete before refit."""
+        start_time = time.time()
+        print("🔄 Preparing for refit: pausing new generations...")
+
+        # Pause new generation starts
+        self._refit_pause_cleared.clear()
+        print("⏸️ New generation starts paused")
+
+        # Wait for all pending generations to complete
+        self.wait_for_pending_generations()
+
+        elapsed = time.time() - start_time
+        print(
+            f"✅ All pending generations completed, ready for refit (took {elapsed:.2f}s)"
+        )
+
+    def resume_after_refit(self) -> None:
+        """Resume new generation starts after refit is complete."""
+        print("🔄 Resuming generation starts after refit")
+        self._refit_pause_cleared.set()
+
+    def wait_for_pending_generations(self) -> None:
+        """Wait for all in-flight generation threads to complete."""
+        start_time = time.time()
+
+        while True:
+            with self._threads_lock:
+                finished = {t for t in self._inflight_threads if not t.is_alive()}
+                for t in finished:
+                    self._inflight_threads.remove(t)
+
+                pending_count = len(self._inflight_threads)
+
+            if pending_count == 0:
+                print("✅ All generation threads completed")
+                break
+
+            elapsed = time.time() - start_time
+            print(
+                f"⏳ Waiting for {pending_count} pending generation threads... ({elapsed:.1f}s elapsed)"
+            )
+            time.sleep(0.5)
+
     def stop(self) -> None:
         """Stop trajectory collection."""
         self.running = False
         # Signal all events to wake up any waiting threads so they can exit cleanly
         self._manual_pause_cleared.set()
         self._generation_limit_cleared.set()
+        self._refit_pause_cleared.set()
 
     def _cleanup_finished_threads(self) -> None:
         with self._threads_lock:

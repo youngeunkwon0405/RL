@@ -1227,7 +1227,7 @@ def async_grpo_train(
                     num_prompt_groups_needed = master_config["grpo"][
                         "num_prompts_per_step"
                     ]
-                    trajectories = ray.get(
+                    sample_result = ray.get(
                         replay_buffer.sample.remote(
                             num_prompt_groups=num_prompt_groups_needed,
                             current_weight_version=weight_version,
@@ -1236,8 +1236,9 @@ def async_grpo_train(
                     )
 
                     if (
-                        trajectories is None
-                        or len(trajectories) != num_prompt_groups_needed
+                        sample_result is None
+                        or len(sample_result["trajectories"])
+                        != num_prompt_groups_needed
                     ):
                         print(
                             "⏳ Buffer empty or not enough groups to form a full step, waiting..."
@@ -1259,6 +1260,14 @@ def async_grpo_train(
 
                         time.sleep(0.5)
                         continue
+
+                    # Extract trajectories and metadata from sample result
+                    trajectories = sample_result["trajectories"]
+                    avg_trajectory_age = sample_result["avg_trajectory_age"]
+
+                    print(
+                        f"✅ Sampled {len(trajectories)} trajectory groups from buffer (avg age: {avg_trajectory_age:.2f} steps)"
+                    )
 
                     # Concatenate per-prompt groups into a single training batch
                     per_prompt_batches = [t["batch"] for t in trajectories]
@@ -1416,10 +1425,19 @@ def async_grpo_train(
                 print("🔄 Synchronizing policy weights to trajectory collector…")
                 with timer.time("weight_sync"):
                     if NEED_REFIT:
+                        # Coordinate with trajectory collector before refit
+                        print(
+                            "🔄 Coordinating with trajectory collector before refit..."
+                        )
+                        ray.get(trajectory_collector.prepare_for_refit.remote())
+
+                        print("🔄 Performing policy generation refit...")
                         refit_policy_generation(
                             policy, policy_generation, colocated_inference
                         )
                         POLICY_GENERATION_STALE = False
+
+                        trajectory_collector.resume_after_refit.remote()
 
                         # Notify collector about the new weight version (post-update)
                         weight_version += 1
@@ -1545,11 +1563,13 @@ def async_grpo_train(
             # Add buffer stats
             buffer_size_current = ray.get(replay_buffer.size.remote())
             metrics["buffer_size"] = buffer_size_current
+            metrics["avg_trajectory_age"] = avg_trajectory_age
 
             print("\n📊 Training Results:")
             print(f"  • Loss: {metrics['loss']:.4f}")
             print(f"  • Avg Reward: {np.mean(rewards.numpy()):.4f}")
             print(f"  • Buffer Size: {buffer_size_current}")
+            print(f"  • Avg Trajectory Age: {avg_trajectory_age:.2f} steps")
 
             print("\n⏱️  Timing:")
             total_time = timing_metrics.get("total_step_time", 0)
