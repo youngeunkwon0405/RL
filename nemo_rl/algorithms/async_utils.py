@@ -383,6 +383,7 @@ class AsyncTrajectoryCollector:
         """Start collecting trajectories from dataloader."""
         self.running = True
         self.dataloader = dataloader
+
         print("Started continuous trajectory collection")
 
         self.collection_thread = _threading.Thread(target=self._collection_loop)
@@ -564,6 +565,12 @@ class AsyncTrajectoryCollector:
                 f"⏳ Waiting for {pending_count} pending generation threads... ({elapsed:.1f}s elapsed)"
             )
             time.sleep(0.5)
+
+    def get_dataloader_state(self) -> dict:
+        """Get the current dataloader state for checkpointing."""
+        if hasattr(self, "dataloader") and hasattr(self.dataloader, "state_dict"):
+            return self.dataloader.state_dict()
+        return {}
 
     def stop(self) -> None:
         """Stop trajectory collection."""

@@ -1523,8 +1523,12 @@ def async_grpo_train(
                                 checkpoint_path, "policy", "tokenizer"
                             ),
                         )
+                        # Get dataloader state from trajectory collector
+                        actual_dataloader_state = ray.get(
+                            trajectory_collector.get_dataloader_state.remote()
+                        )
                         torch.save(
-                            dataloader.state_dict(),
+                            actual_dataloader_state,
                             os.path.join(checkpoint_path, "train_dataloader.pt"),
                         )
                         checkpointer.finalize_checkpoint(checkpoint_path)
