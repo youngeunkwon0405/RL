@@ -14,9 +14,14 @@ huggingface-cli login --token $HF_TOKEN
 COMMAND="uv run ./examples/run_grpo_math.py \
 --config examples/configs/grpo_math_8B.yaml \
 cluster.num_nodes=2 \
-checkpointing.checkpoint_dir='results/llama8b_2nodes' \
+policy.generation.colocated.enabled=false \
+policy.generation.colocated.resources.num_nodes=1 \
+policy.generation.colocated.resources.gpus_per_node=8 \
+checkpointing.enabled=false \
+policy.generation.vllm_cfg.async_engine=true \
+grpo.max_num_steps=100 \
 logger.wandb_enabled=True \
-logger.wandb.name='grpo-llama8b_math'" \
+logger.wandb.name='grpo-llama8b_math_1T1G_async'" \
 CONTAINER=/lustre/fsw/coreai_dlalgo_llm/youngeunk/sqsh/nemo_rl.sqsh \
 HF_HOME=/lustre/fsw/coreai_dlalgo_llm/youngeunk/hf_home \
 HF_DATASETS_CACHE=/lustre/fsw/coreai_dlalgo_llm/youngeunk/hf_home/cache \
@@ -27,7 +32,7 @@ sbatch \
     --account=coreai_dlalgo_llm \
     --job-name=coreai_dlalgo_llm-rl.test \
     --partition=batch \
-    --time=0:20:0 \
+    --time=02:30:00 \
     --ntasks-per-node=8 \
     ray.sub
 
