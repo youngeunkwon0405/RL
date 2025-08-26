@@ -268,30 +268,6 @@ class AsyncTrajectoryCollector:
 
                 # Backpressure: throttle collection when valid trajectories (within age window)
                 # are already abundant in the buffer. This avoids over-queuing stale items.
-
-                # NAIVE VERSION:
-                # while (
-                #     self.current_weight_version == self.latest_submitted_version
-                #     and self.num_submitted_requests_from_latest_version >= self.max_trajectory_age_steps
-                # ):
-                #     # If the number of submitted requests from the latest version is greater than or equal to the max trajectory age steps,
-                #     # and the current weight version is the same as the latest submitted version,
-                #     # then we are backpressuring.
-                #     # We wait for the number of submitted requests from the latest version to be less than the max trajectory age steps.
-                #     # This is to avoid over-queuing stale items.
-                #     print(f"⏸️ Backpressure: num_submitted_requests_from_latest_version={self.num_submitted_requests_from_latest_version} >= max_trajectory_age_steps={self.max_trajectory_age_steps}")
-                #     print(f"   current_weight_version={self.current_weight_version}, latest_submitted_version={self.latest_submitted_version}")
-                #     time.sleep(0.5)
-
-                # if self.latest_submitted_version == self.current_weight_version:
-                #     self.num_submitted_requests_from_latest_version += 1
-                # else:
-                #     self.latest_submitted_version = self.current_weight_version
-                #     self.num_submitted_requests_from_latest_version = 0
-
-                # print(f"🔍 Processing batch {self.current_step}, current_weight_version={self.current_weight_version}, latest_submitted_version={self.latest_submitted_version}, num_submitted_requests_from_latest_version={self.num_submitted_requests_from_latest_version}")
-                # self._process_batch(batch)
-                # self.current_step += 1
                 
                 # Backpressure logic: If currently generating batch is not going to be used,
                 # wait for new weights to be updated
