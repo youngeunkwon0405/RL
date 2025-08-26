@@ -106,7 +106,7 @@ class ReplayBuffer:
             removed_count += 1
 
         if removed_count > 0:
-            print(f"Cleaned {removed_count} old trajectories from buffer")
+            print(f"🧹🧹🧹 Cleaned {removed_count} old trajectories from buffer")
 
         return removed_count
 
@@ -116,11 +116,11 @@ class ReplayBuffer:
         current_weight_version: int,
         max_age_steps: int,
     ) -> Optional[list]:
-        """Sample trajectories that are not too old."""
-        cleaned = self.clean_old_trajectories(current_weight_version, max_age_steps)
-
         if not self.trajectories:
             return None
+
+        """Sample trajectories that are not too old."""
+        cleaned = self.clean_old_trajectories(current_weight_version, max_age_steps)
 
         # Filter trajectories by age
         valid_indices = []
@@ -131,7 +131,7 @@ class ReplayBuffer:
             f"   current_weight_version={current_weight_version}, max_age_steps={max_age_steps}"
         )
         print(f"   trajectory_versions={self.trajectory_versions}")
-        print(f"   cleaned_old_trajectories={cleaned}")
+        print(f"🧹  cleaned_old_trajectories={cleaned}")
 
         for i, traj_version in enumerate(self.trajectory_versions):
             age = current_weight_version - traj_version
@@ -166,7 +166,14 @@ class ReplayBuffer:
             valid_indices, min(batch_size, len(valid_indices))
         )
         print(f"✅ Sampled trajectory indices: {sampled_indices}")
-        return [self.trajectories[i] for i in sampled_indices]
+        sampled_trajectories = [self.trajectories[i] for i in sampled_indices]
+        # Remove sampled trajectories from buffer
+        for i in sampled_indices:
+            self.trajectory_steps.pop(i)
+            self.trajectory_versions.pop(i)
+            self.trajectories.pop(i)
+
+        return sampled_trajectories
 
     def size(self) -> int:
         """Return current buffer size."""
@@ -200,6 +207,9 @@ class AsyncTrajectoryCollector:
         self.current_step = start_step
         self.running = False
         self.paused = False
+        self.max_trajectory_age_steps = master_config["async_grpo"]["max_trajectory_age_steps"]
+        self.latest_submitted_version = -1
+        self.num_submitted_requests_from_latest_version = 0
 
         self._pg_lock: _threading.Lock = _threading.Lock()
         self._pause_lock: _threading.Lock = _threading.Lock()
@@ -220,6 +230,11 @@ class AsyncTrajectoryCollector:
 
     def set_weight_version(self, version: int) -> None:
         self.current_weight_version = version
+        """Clean old trajectories after the weight version is updated"""
+        cleaned = ray.get(self.replay_buffer.clean_old_trajectories.remote(version, self.max_trajectory_age_steps))
+
+        print("🔍 ReplayBuffer sampling debug @set_weight_version:")
+        print(f"🧹 cleaned_old_trajectories={cleaned}")
 
     def start_collection(self, dataloader: StatefulDataLoader) -> None:
         """Start collecting trajectories from dataloader."""
@@ -238,19 +253,78 @@ class AsyncTrajectoryCollector:
     def _collection_loop(self):
         """Run the collection loop in background thread."""
         try:
+            import time
             for batch in self.dataloader:
                 if not self.running:
                     break
 
                 # Check if paused and wait
                 while self.paused and self.running:
-                    import time
 
                     time.sleep(0.1)
 
                 if not self.running:
                     break
 
+                # Backpressure: throttle collection when valid trajectories (within age window)
+                # are already abundant in the buffer. This avoids over-queuing stale items.
+
+                # NAIVE VERSION:
+                # while (
+                #     self.current_weight_version == self.latest_submitted_version
+                #     and self.num_submitted_requests_from_latest_version >= self.max_trajectory_age_steps
+                # ):
+                #     # If the number of submitted requests from the latest version is greater than or equal to the max trajectory age steps,
+                #     # and the current weight version is the same as the latest submitted version,
+                #     # then we are backpressuring.
+                #     # We wait for the number of submitted requests from the latest version to be less than the max trajectory age steps.
+                #     # This is to avoid over-queuing stale items.
+                #     print(f"⏸️ Backpressure: num_submitted_requests_from_latest_version={self.num_submitted_requests_from_latest_version} >= max_trajectory_age_steps={self.max_trajectory_age_steps}")
+                #     print(f"   current_weight_version={self.current_weight_version}, latest_submitted_version={self.latest_submitted_version}")
+                #     time.sleep(0.5)
+
+                # if self.latest_submitted_version == self.current_weight_version:
+                #     self.num_submitted_requests_from_latest_version += 1
+                # else:
+                #     self.latest_submitted_version = self.current_weight_version
+                #     self.num_submitted_requests_from_latest_version = 0
+
+                # print(f"🔍 Processing batch {self.current_step}, current_weight_version={self.current_weight_version}, latest_submitted_version={self.latest_submitted_version}, num_submitted_requests_from_latest_version={self.num_submitted_requests_from_latest_version}")
+                # self._process_batch(batch)
+                # self.current_step += 1
+                
+                # Backpressure logic: If currently generating batch is not going to be used,
+                # wait for new weights to be updated
+                try:
+                    replay_buffer_info = ray.get(self.replay_buffer.get_debug_info.remote())
+                    # Count trajectories that fall within the freshness window
+                    policy_weight_version_in_future = self.current_weight_version + 1
+                    future_valid_ct = sum(
+                        1 for v in replay_buffer_info["trajectory_versions"]
+                        if (policy_weight_version_in_future - v) <= self.max_trajectory_age_steps
+                    )
+                    while (
+                        self.running
+                        and not self.paused
+                        and replay_buffer_info["total_trajectories"] > 0
+                        and future_valid_ct >= self.max_trajectory_age_steps
+                    ):
+                        print(f"⏸️ Backpressure: future_valid_ct={future_valid_ct} >= max_trajectory_age_steps={self.max_trajectory_age_steps}")
+                        time.sleep(0.5)
+                        policy_weight_version_in_future = self.current_weight_version + 1
+                        replay_buffer_info = ray.get(self.replay_buffer.get_debug_info.remote())
+                        future_valid_ct = sum(
+                            1 for v in replay_buffer_info["trajectory_versions"]
+                            if (policy_weight_version_in_future - v) <= self.max_trajectory_age_steps
+                        )
+                except Exception:
+                    # Fail open on backpressure checks to avoid stalling collection due to diagnostics
+                    print(f"❌ Error in backpressure check: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    pass
+                
+                print(f"🔍🔍🔍 Processing batch {self.current_step}, replay_buffer_info: {ray.get(self.replay_buffer.get_debug_info.remote())}")
                 self._process_batch(batch)
                 self.current_step += 1
 
@@ -273,7 +347,7 @@ class AsyncTrajectoryCollector:
             )
 
             if self._use_async_rollouts:
-                with self._pg_lock:
+                with self._pg_lock: # @youngeunk: why do we need this lock?
                     final_batch, rollout_metrics = run_async_multi_turn_rollout(
                         policy_generation=self.policy_generation,
                         input_batch=repeated_batch,
