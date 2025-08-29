@@ -1462,9 +1462,7 @@ def async_grpo_train(
 
                 print("▶ Training policy...")
                 with timer.time("policy_training"):
-                    train_results = policy.train(
-                        train_data, loss_fn, gbs=repeated_batch.size
-                    )
+                    train_results = policy.train(train_data, loss_fn)
 
                 print("🔄 Synchronizing policy weights to trajectory collector…")
                 with timer.time("weight_sync"):
