@@ -26,7 +26,6 @@ from nemo_rl.distributed.batched_data_dict import BatchedDataDict
 from nemo_rl.environments.interfaces import EnvironmentInterface
 from nemo_rl.experience.rollouts import (
     run_async_multi_turn_rollout,
-    run_multi_turn_rollout,
 )
 from nemo_rl.models.generation.interfaces import GenerationInterface
 
@@ -274,18 +273,6 @@ class AsyncTrajectoryCollector:
         # Event to signal when generation limits are cleared (more efficient than polling)
         self._generation_limit_cleared = _threading.Event()
         self._generation_limit_cleared.set()  # Start in cleared state
-
-        # Check if we should use async rollouts
-        self._use_async_rollouts = False
-        if (
-            hasattr(policy_generation, "cfg")
-            and "vllm_cfg" in policy_generation.cfg
-            and policy_generation.cfg["vllm_cfg"].get("async_engine", False)
-        ):
-            self._use_async_rollouts = True
-            print(
-                "Trajectory collector: Detected vLLM async engine; enabling async rollouts in collector"
-            )
 
         # Track threads
         self._inflight_threads: set[_threading.Thread] = set()
@@ -595,35 +582,16 @@ class AsyncTrajectoryCollector:
     ) -> None:
         try:
             # Run rollout for this prompt group
-            if self._use_async_rollouts:
-                # Async engine supports concurrent generation; avoid locking
-                final_batch, rollout_metrics = run_async_multi_turn_rollout(
-                    policy_generation=self.policy_generation,
-                    input_batch=repeated_batch,
-                    tokenizer=self.tokenizer,
-                    task_to_env=self.task_to_env,
-                    max_seq_len=self.master_config["policy"][
-                        "max_total_sequence_length"
-                    ],
-                    max_rollout_turns=self.master_config["grpo"]["max_rollout_turns"],
-                    greedy=False,
-                )
-            else:
-                # Fallback to sync rollout; serialize access to generation
-                with self._pg_lock:
-                    final_batch, rollout_metrics = run_multi_turn_rollout(
-                        policy_generation=self.policy_generation,
-                        input_batch=repeated_batch,
-                        tokenizer=self.tokenizer,
-                        task_to_env=self.task_to_env,
-                        max_seq_len=self.master_config["policy"][
-                            "max_total_sequence_length"
-                        ],
-                        max_rollout_turns=self.master_config["grpo"][
-                            "max_rollout_turns"
-                        ],
-                        greedy=False,
-                    )
+            # Async engine supports concurrent generation; avoid locking
+            final_batch, rollout_metrics = run_async_multi_turn_rollout(
+                policy_generation=self.policy_generation,
+                input_batch=repeated_batch,
+                tokenizer=self.tokenizer,
+                task_to_env=self.task_to_env,
+                max_seq_len=self.master_config["policy"]["max_total_sequence_length"],
+                max_rollout_turns=self.master_config["grpo"]["max_rollout_turns"],
+                greedy=False,
+            )
 
             # Move to CPU and push to buffer (avoid blocking on GC/push)
             final_batch_cpu = final_batch.to("cpu")
@@ -696,4 +664,6 @@ class AsyncTrajectoryCollector:
             try:
                 self._inflight_sema.release()
             except Exception:
-                pass
+                import traceback
+
+                traceback.print_exc()

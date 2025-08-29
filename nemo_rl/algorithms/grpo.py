@@ -1041,6 +1041,12 @@ def async_grpo_train(
         master_config: Master configuration
         max_trajectory_age_steps: Maximum age (in training steps) for trajectories to be used in training
     """
+    # Ensure we are running with a compatible async generation backend
+    assert _should_use_async_rollouts(master_config), (
+        "Async GRPO requires vLLM backend with vllm_cfg.async_engine=True. "
+        "Set policy.generation.vllm_cfg.async_engine to true in your config."
+    )
+
     # Import async utilities only when needed
     from nemo_rl.algorithms.async_utils import AsyncTrajectoryCollector, ReplayBuffer
 
