@@ -106,7 +106,7 @@ class ReplayBuffer:
         Only returns trajectories with target_weight_version == current_weight_version.
         If insufficient trajectories are available, returns None to stall training
         until the remaining trajectories are generated. This ensures no trajectory
-        loses its "last chance" to be used for its intended training step.
+        loses its last chance to be used for its intended training step.
 
         Returns:
             Dictionary with 'trajectories' and 'avg_trajectory_age' keys, or None if insufficient data
@@ -265,8 +265,6 @@ class AsyncTrajectoryCollector:
         self.current_weight_version: int = start_step
         self.initial_weight_version: int = start_step
 
-        # Note: Generation tracking is now done via replay buffer target weight counts
-
         # Track when generation limits cause collection to pause
         self._last_limit_warning_version = None
 
@@ -277,6 +275,7 @@ class AsyncTrajectoryCollector:
         # Track threads
         self._inflight_threads: set[_threading.Thread] = set()
         self._threads_lock: _threading.Lock = _threading.Lock()
+
         # Limit in-flight generator requests to num_prompts_per_step
         max_inflight = int(self.master_config["grpo"]["num_prompts_per_step"]) or 1
         self._inflight_sema = _threading.Semaphore(max_inflight)
@@ -325,14 +324,6 @@ class AsyncTrajectoryCollector:
 
     def set_weight_version(self, version: int) -> None:
         self.current_weight_version = version
-
-        # # Clear old target weight reservations since weight has advanced
-        # with self._generation_check_lock:
-        #     if self._generating_targets:
-        #         print(
-        #             f"🧹 Clearing {len(self._generating_targets)} old target weight reservations"
-        #         )
-        #         self._generating_targets.clear()
 
         # Resume collection if it was paused due to generation limits
         was_paused = not self._generation_limit_cleared.is_set()
@@ -469,7 +460,7 @@ class AsyncTrajectoryCollector:
                         f"⏸️ Waiting for refit to complete before starting new generation ({active_threads} threads still active)"
                     )
                     self._refit_pause_cleared.wait()
-                    
+
                     # After refit finishes if weight version has updated, reflect that in the new trajectories
                     generation_weight_version = self.current_weight_version
 
@@ -522,6 +513,9 @@ class AsyncTrajectoryCollector:
         print("⏸️ New generation starts paused")
 
         # Wait for all pending generations to complete
+        # Note that is suboptimal for async performance and will be fixed in a follow-up PR where two more options will be added:
+        # 1. Pause the generations at their current decoding step, update the weights and continue with decoding.
+        # 2. Stop the current generations, store in a buffer and resume them in next iteration with new weights.
         self.wait_for_pending_generations()
 
         elapsed = time.time() - start_time
