@@ -1124,7 +1124,9 @@ def async_grpo_train(
         "Async GRPO requires vLLM backend with vllm_cfg.async_engine=True. "
         "Set policy.generation.vllm_cfg.async_engine to true in your config."
     )
-
+    assert loss_fn["use_importance_sampling_correction"] is True, (
+        "Importance sampling correction must be enabled for async GRPO for good convergence due to off-policy samples!"
+    )
     # Import async utilities only when needed
     from nemo_rl.algorithms.async_utils import AsyncTrajectoryCollector, ReplayBuffer
 
@@ -1145,6 +1147,10 @@ def async_grpo_train(
     val_period = master_config["grpo"]["val_period"]
     val_at_start = master_config["grpo"]["val_at_start"]
     colocated_inference = master_config["policy"]["generation"]["colocated"]["enabled"]
+
+    assert not colocated_inference, (
+        "Colocated inference is not supported for async GRPO. Please use non-colocated inference."
+    )
 
     # Calculate minimum buffer size from training requirements
     # In per-prompt buffer mode, one buffer entry is 1 prompt * num_generations_per_prompt
@@ -1720,7 +1726,6 @@ def async_grpo_train(
         # Clean up
         print("🛑 Stopping trajectory collection...")
         try:
-            ray.get(trajectory_collector.stop.remote())
             ray.kill(trajectory_collector)
         except Exception as e:
             print(f"Error stopping trajectory collector: {e}")

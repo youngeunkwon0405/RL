@@ -43,8 +43,10 @@ class ReplayBuffer:
     def __init__(self, max_size: int):
         self.max_size = max_size
         self.trajectories = []
-        self.trajectory_versions = []  # weight-version used for generation
-        self.target_weight_versions = []  # weight-version this trajectory is targeted for
+        # If trajectory_version is 1 and target_weight_version is 4 it means that weight version 1 was used for generating a trajectory and this trajectory will be used for training when weight version is 4.
+        self.trajectory_versions = []  # it is the weight-version used for generation of a trajectory
+        self.target_weight_versions = []  # it is the weight-version of the trainer where this trajectory will be used.
+
         self.last_target_weight_already_generated = -1
         self._lock = _threading.Lock()
 
@@ -555,14 +557,6 @@ class AsyncTrajectoryCollector:
         if hasattr(self, "dataloader") and hasattr(self.dataloader, "state_dict"):
             return self.dataloader.state_dict()
         return {}
-
-    def stop(self) -> None:
-        """Stop trajectory collection."""
-        self.running = False
-        # Signal all events to wake up any waiting threads so they can exit cleanly
-        self._manual_pause_cleared.set()
-        self._generation_limit_cleared.set()
-        self._refit_pause_cleared.set()
 
     def _cleanup_finished_threads(self) -> None:
         with self._threads_lock:
