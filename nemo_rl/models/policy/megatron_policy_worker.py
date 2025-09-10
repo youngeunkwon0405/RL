@@ -95,6 +95,7 @@ from megatron.inference.text_generation.mcore_engine_server import (
 from megatron.training.utils import get_ltor_masks_and_position_ids
 from ray.util.queue import Queue
 from transformers import PreTrainedTokenizerBase
+from omegaconf import OmegaConf
 
 from nemo_rl.algorithms.interfaces import LossFunction, LossType
 from nemo_rl.distributed.batched_data_dict import BatchedDataDict
@@ -512,8 +513,22 @@ class MegatronPolicyWorker:
                 f"Pretrained run config not found at {pretrained_run_config} on rank={get_rank_safe()}. This usually means that the one-time HF->mcore conversion on rank=0 saved to a directory not being mounted on this node. Please check "
             )
 
-        cfg_from_pretrained = ConfigContainer.from_yaml(
-            pretrained_run_config, mode=InstantiationMode.STRICT
+        # Load and patch the pretrained run config before strict instantiation.
+        # The pretrained config may have sequence_parallel disabled by default,
+        # which violates Megatron constraints when both tensor and expert parallelism are used.
+        conf = OmegaConf.load(pretrained_run_config)
+        cfg_dict = OmegaConf.to_container(conf, resolve=True)
+        model_dict = cfg_dict.get("model", {}) if isinstance(cfg_dict, dict) else {}
+        tp_size = model_dict.get("tensor_model_parallel_size", 1)
+        ep_size = model_dict.get("expert_model_parallel_size", 1)
+        if ep_size > 1 and tp_size > 1 and not model_dict.get("sequence_parallel", False):
+            model_dict["sequence_parallel"] = True
+        # Write back in case model_dict was a shallow copy
+        if isinstance(cfg_dict, dict):
+            cfg_dict["model"] = model_dict
+
+        cfg_from_pretrained = ConfigContainer.from_dict(
+            cfg_dict, mode=InstantiationMode.STRICT
         )
         model_cfg = cfg_from_pretrained.model
         cfg_from_pretrained.logger = LoggerConfig()
