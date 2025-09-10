@@ -19,7 +19,7 @@ policy:
   train_micro_batch_size: 1
   generation_batch_size: 32 # Only used when generating using HF backend
   logprob_batch_size: 2
-  max_total_sequence_length: 1024
+  max_total_sequence_length: 4096
   precision: "bfloat16"
   fsdp_offload_enabled: false
   activation_checkpointing_enabled: false
