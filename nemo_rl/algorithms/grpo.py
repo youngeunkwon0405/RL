@@ -1139,7 +1139,7 @@ def async_grpo_train(
     assert policy_generation is not None
 
     # Training state
-    step = grpo_save_state["step"]
+    step = grpo_save_state["current_step"]
     weight_version = step  # Tracks refitted weight versions
     consumed_samples = grpo_save_state["consumed_samples"]
     val_period = master_config["grpo"]["val_period"]
@@ -1614,7 +1614,7 @@ def async_grpo_train(
                 ):
                     policy.prepare_for_training()
 
-                    grpo_save_state["step"] = step + 1
+                    grpo_save_state["current_step"] = step + 1
                     if val_metrics is not None:
                         grpo_save_state["val_reward"] = val_metrics["accuracy"]
                     elif "val_reward" in grpo_save_state:
