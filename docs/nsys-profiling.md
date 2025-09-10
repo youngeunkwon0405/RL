@@ -101,6 +101,8 @@ To analyze the generated profile files, load the `.nsys-rep` files into the NVID
 
 Nsight Systems supports [multi-report view](https://docs.nvidia.com/nsight-systems/UserGuide/index.html#viewing-multiple-reports-in-the-same-timeline) functionality. If you open the profiles from different workers (e.g., `*policy_worker*.nsys-rep` and `*generation_worker*.nsys-rep`) in a single multi-report view, you can analyze the behavior of the end-to-end RL loop on the same timeline.
 
+<img src="assets/nsys-multi-report-view.png" alt="Pretraining loss curves" width="1000"/>
+
 ## How We Patched Nsight Support in Ray
 
 Ray's Nsight profiling support had a bug where it hardcoded the Python executable path instead of using the actual Python executable from the runtime environment. This caused issues when using virtual environments or custom Python installations (`py_executables`).
