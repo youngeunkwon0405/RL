@@ -1129,7 +1129,7 @@ def async_grpo_train(
         "Async GRPO requires vLLM backend with vllm_cfg.async_engine=True. "
         "Set policy.generation.vllm_cfg.async_engine to true in your config."
     )
-    assert loss_fn["use_importance_sampling_correction"] is True, (
+    assert master_config["loss_fn"]["use_importance_sampling_correction"] is True, (
         "Importance sampling correction must be enabled for async GRPO for good convergence due to off-policy samples!"
     )
     # Import async utilities only when needed
@@ -1146,7 +1146,7 @@ def async_grpo_train(
     assert policy_generation is not None
 
     # Training state
-    step = grpo_save_state["step"]
+    step = grpo_save_state["current_step"]
     weight_version = step  # Tracks refitted weight versions
     consumed_samples = grpo_save_state["consumed_samples"]
     val_period = master_config["grpo"]["val_period"]
@@ -1307,37 +1307,18 @@ def async_grpo_train(
 
     # Wait for initial buffer fill
     print(
-        f"⏳ Waiting for replay buffer to have sufficient trajectories (min={min_trajectories_needed})..."
+        f"⏳ Waiting for replay buffer to have sufficient trajectories ({min_trajectories_needed} trajectories)..."
     )
     wait_iterations = 0
     while True:
         buffer_size_current = ray.get(replay_buffer.size.remote())
 
         print(
-            f"  Wait iteration {wait_iterations}: buffer_size={buffer_size_current}/{min_trajectories_needed}"
+            f"  Wait iteration {wait_iterations}: buffer_filled_ratio={buffer_size_current}/{min_trajectories_needed}"
         )
 
         if buffer_size_current >= min_trajectories_needed:
             break
-
-        # wait_iterations += 1
-        # if wait_iterations > 30:
-        #     print("TIMEOUT: Buffer never filled. Debugging buffer state...")
-
-        #     buffer_debug = ray.get(replay_buffer.get_debug_info.remote())
-        #     print(f"   Buffer debug info: {buffer_debug}")
-
-        #     # Force sample to see what filtering is happening
-        #     debug_trajectories = ray.get(
-        #         replay_buffer.sample.remote(
-        #             num_prompt_groups=1,
-        #             current_weight_version=weight_version,
-        #             max_age_steps=max_trajectory_age_steps,
-        #         )
-        #     )
-        #     print(f"   Debug sample result: {debug_trajectories}")
-
-        #     break
 
         time.sleep(1.0)
 
@@ -1625,7 +1606,7 @@ def async_grpo_train(
                 ):
                     policy.prepare_for_training()
 
-                    grpo_save_state["step"] = step + 1
+                    grpo_save_state["current_step"] = step + 1
                     if val_metrics is not None:
                         grpo_save_state["val_reward"] = val_metrics["accuracy"]
                     elif "val_reward" in grpo_save_state:

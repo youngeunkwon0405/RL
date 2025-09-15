@@ -119,21 +119,19 @@ class ReplayBuffer:
 
             total_trajectories = len(self.trajectories)
             print("🔍 ReplayBuffer sampling debug:")
-            print(
-                f"   current_weight_version={current_weight_version}, max_age_steps={max_age_steps}"
-            )
-            print(f"   trajectory_versions={self.trajectory_versions}")
+            print(f"   {current_weight_version=}, {max_age_steps=}")
+            print(f"   {self.trajectory_versions=}")
 
             # For debugging: check for unexpected old trajectories
             from collections import Counter
 
             version_counts = Counter(self.trajectory_versions)
-            print(f"   version_counts: {version_counts}")
+            print(f"   {version_counts=}")
 
             # Compute minimum valid version based on age window
             # max_age_steps=1 means trajectories from the last 1 step are valid
             min_valid_version = max(0, current_weight_version - max_age_steps)
-            print(f"   min_valid_version={min_valid_version}")
+            print(f"   {min_valid_version=}")
 
             # Check for unexpected old trajectories
             old_trajectories = [
@@ -288,10 +286,23 @@ class AsyncTrajectoryCollector:
         self._generating_targets: set[int] = set()
 
     def _calculate_target_weights(self, generation_weight_version: int) -> list[int]:
-        """Calculate target weight versions for given generation weight version."""
-        max_trajectory_age = self.master_config["async_grpo"][
-            "max_trajectory_age_steps"
-        ]
+        """Calculate target weight versions for given generation weight version.
+
+        The list of versions returned enumerate the possible version a generation
+        server can target. These versions are looped over to see what training
+        step they can target. If all target versions are exhausted, this generation
+        server will remain idle until the next weight update.
+
+        Example:
+        generation_weight_version = 10
+        max_trajectory_age_steps = 4
+
+        Returns:
+            [11, 12, 13, 14]  # Meaning this generation server can create trajectories for training step 11, 12, 13, 14
+        """
+        # Read async config strictly from grpo.async_grpo
+        async_cfg = self.master_config.get("grpo", {}).get("async_grpo", {})
+        max_trajectory_age = async_cfg["max_trajectory_age_steps"]
         if generation_weight_version == self.initial_weight_version:
             return [
                 i
@@ -393,9 +404,10 @@ class AsyncTrajectoryCollector:
                 if self._should_pause_for_generation_limits() and self.running:
                     # Only log warning once per weight version
                     if self._last_limit_warning_version != self.current_weight_version:
-                        max_trajectory_age = self.master_config["async_grpo"][
-                            "max_trajectory_age_steps"
-                        ]
+                        async_cfg = self.master_config.get("grpo", {}).get(
+                            "async_grpo", {}
+                        )
+                        max_trajectory_age = async_cfg["max_trajectory_age_steps"]
                         target_weights = [
                             self.current_weight_version + i
                             for i in range(max_trajectory_age)

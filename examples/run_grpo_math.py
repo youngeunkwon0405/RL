@@ -253,7 +253,7 @@ def main() -> None:
     ) = setup(config, tokenizer, dataset, val_dataset)
 
     # Check if async mode is enabled
-    async_config = config.get("async_grpo", {})
+    async_config = config["grpo"].get("async_grpo", {})
     if async_config and async_config.get("enabled", False):
         from nemo_rl.algorithms.grpo import async_grpo_train
 
