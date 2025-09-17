@@ -30,6 +30,7 @@ from nemo_rl.models.generation.interfaces import (
 from nemo_rl.models.generation.vllm.utils import format_prompt_for_vllm_generation
 from nemo_rl.models.generation.vllm.vllm_worker import BaseVllmGenerationWorker
 
+from nemo_rl.utils.nsys import wrap_with_nvtx_name_async
 
 @ray.remote(
     runtime_env={**get_nsight_config_if_pattern_matches("vllm_async_generation_worker")}
@@ -57,6 +58,7 @@ class VllmAsyncGenerationWorker(BaseVllmGenerationWorker):
             ),
         )
 
+    @wrap_with_nvtx_name_async("vllm_worker_async/generate_async", remove_duplicate=True)
     async def generate_async(
         self,
         data: BatchedDataDict[GenerationDatumSpec],
@@ -277,6 +279,7 @@ class VllmAsyncGenerationWorker(BaseVllmGenerationWorker):
                 await asyncio.gather(*sample_tasks, return_exceptions=True)
                 raise e
 
+    @wrap_with_nvtx_name_async("vllm_worker_async/generate_async", remove_duplicate=True)
     async def generate_text_async(
         self, data: BatchedDataDict[GenerationDatumSpec], greedy: bool = False
     ) -> AsyncGenerator[tuple[int, BatchedDataDict[GenerationOutputSpec]], None]:

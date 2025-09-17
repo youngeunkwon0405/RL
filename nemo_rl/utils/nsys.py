@@ -13,6 +13,8 @@
 # limitations under the License.
 import atexit
 import os
+import inspect
+from contextvars import ContextVar
 from typing import Protocol
 
 import rich
@@ -78,6 +80,52 @@ def maybe_gpu_profile_step(policy: ProfilablePolicy, step: int):
             policy.stop_gpu_profiling()
             policy.__NRL_PROFILE_STARTED = False
 
+# class NVTXRangeContext:
+#     _stack: ContextVar[tuple[str, ...]] = ContextVar("nvtx_stack", default=())
+
+#     def __init__(self, name: str, remove_duplicate: bool = False):
+#         self.name = name
+#         self.remove_duplicate = remove_duplicate
+#         self.duplicate = False
+#         self._token = None
+
+#     def __enter__(self):
+#         stack = self._stack.get()
+#         if self.remove_duplicate and stack and stack[-1] == self.name:
+#             self.duplicate = True
+#             return
+#         torch.cuda.nvtx.range_push(self.name)
+#         self._token = self._stack.set(stack + (self.name,))
+
+#     def __exit__(self, *args):
+#         if self.duplicate:
+#             return
+#         torch.cuda.nvtx.range_pop()
+#         if self._token is not None:
+#             self._stack.reset(self._token)
+
+
+class NVTXRangeContext:
+    _stack = []
+
+    def __init__(self, name: str, remove_duplicate: bool = False):
+        self.name = name
+        self.remove_duplicate = remove_duplicate
+        self.duplicate = False
+    
+    def __enter__(self):
+        stack = self._stack
+        if self.remove_duplicate and stack and stack[-1] == self.name:
+            self.duplicate = True
+            return
+        torch.cuda.nvtx.range_push(self.name)
+        self._stack.append(self.name)
+
+    def __exit__(self, *args):
+        if self.duplicate:
+            return
+        torch.cuda.nvtx.range_pop()
+        self._stack.pop()
 
 def wrap_with_nvtx_name(name: str):
     """A decorator to wrap a function with an NVTX range with the given name."""
@@ -90,5 +138,31 @@ def wrap_with_nvtx_name(name: str):
             return ret
 
         return wrapper
+
+    return decorator
+
+def wrap_with_nvtx_name_async(name: str, remove_duplicate: bool = False):
+    """Decorator to wrap async coroutines or async generators with an NVTX range.
+
+    - If decorating an async coroutine function: push before awaiting, pop in finally.
+    - If decorating an async generator function: push before the first iteration and
+      pop in finally after iteration completes or on error, yielding items through.
+    """
+
+    def decorator(func):
+
+        if inspect.isasyncgenfunction(func):
+            async def wrapper(*args, **kwargs):
+                with NVTXRangeContext(name, remove_duplicate):
+                    async for item in func(*args, **kwargs):
+                        yield item
+
+            return wrapper
+        else:
+            async def wrapper(*args, **kwargs):
+                with NVTXRangeContext(name, remove_duplicate):
+                    return await func(*args, **kwargs)
+                
+            return wrapper
 
     return decorator
