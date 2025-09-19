@@ -905,7 +905,7 @@ def grpo_train(
                     total_steps + 1,
                     name="train/token_mult_prob_error_plot_sample",
                 )
-
+            performance_metrics = {}
             print("\n📊 Training Results:")
 
             print(f"  • Loss: {metrics['loss']:.4f}")
@@ -931,22 +931,19 @@ def grpo_train(
                         f"  • Training Model Floating Point Utilization: {100 * total_tflops / theoretical_tflops:.2f}%",
                         flush=True,
                     )
-                    metrics["train_fp_utilization"] = total_tflops / theoretical_tflops
+                    performance_metrics["train_fp_utilization"] = total_tflops / theoretical_tflops
 
             print("\n⏱️  Timing:", flush=True)
             # Display total time first, separately
             total_time = timing_metrics.get("total_step_time", 0)
 
+            number_of_samples_per_step = (
+                master_config["grpo"]["num_prompts_per_step"] 
+                * master_config["grpo"]["num_generations_per_prompt"]
+            )
             total_num_gpus = (
                 master_config["cluster"]["num_nodes"]
                 * master_config["cluster"]["gpus_per_node"]
-            )
-            metrics.update(
-                {
-                    "tokens_per_sec_per_gpu": metrics["total_num_tokens"]
-                    / total_time
-                    / total_num_gpus
-                }
             )
 
             print(f"  • Total step time: {total_time:.2f}s", flush=True)
@@ -959,7 +956,22 @@ def grpo_train(
                     percent = (v / total_time * 100) if total_time > 0 else 0
                     print(f"  • {k}: {v:.2f}s ({percent:.1f}%)", flush=True)
 
+            print("\n🔍 Performance Metrics:")
+            performance_metrics.update(
+                {
+                    "tokens_per_sec": metrics["total_num_tokens"] / total_time,
+                    "samples_per_sec": number_of_samples_per_step / total_time,
+                    "tokens_per_sec_per_gpu": metrics["total_num_tokens"] / total_time / total_num_gpus,
+                    "samples_per_sec_per_gpu": number_of_samples_per_step / total_time / total_num_gpus,
+                }
+            )
+            print(f"  • Overall Samples/sec: {(performance_metrics['samples_per_sec']):.2f}")
+            print(f"  • Overall Tokens/sec: {(performance_metrics['tokens_per_sec']):.2f}")
+            print(f"  • Overall Samples/sec/gpu: {performance_metrics['samples_per_sec_per_gpu']:.2f}")
+            print(f"  • Overall Tokens/sec/gpu: {performance_metrics['tokens_per_sec_per_gpu']:.2f}")
+            
             logger.log_metrics(metrics, total_steps + 1, prefix="train")
+            logger.log_metrics(performance_metrics, total_steps + 1, prefix="performance")
             logger.log_metrics(timing_metrics, total_steps + 1, prefix="timing/train")
 
             timer.reset()
@@ -1397,6 +1409,7 @@ def async_grpo_train(
                     for t in trajectories:
                         for k, v in t["rollout_metrics"].items():
                             rollout_metrics.setdefault(k, []).append(v)
+                    # TODO: this simple averaging might cause misleading information for such data as max_gen_tokens, etc.
                     rollout_metrics = {
                         k: (sum(v) / len(v) if isinstance(v[0], (int, float)) else v)
                         for k, v in rollout_metrics.items()
@@ -1662,6 +1675,8 @@ def async_grpo_train(
                 "loss": train_results["loss"].numpy(),
                 "reward": rewards.numpy(),
                 "grad_norm": train_results["grad_norm"].numpy(),
+                "mean_prompt_length": repeated_batch["length"].numpy(),
+                "total_num_tokens": input_lengths.numpy(),
             }
             metrics.update(train_results["all_mb_metrics"])
             for k, v in metrics.items():
@@ -1701,7 +1716,13 @@ def async_grpo_train(
                 if k != "total_step_time":
                     percent = (v / total_time * 100) if total_time > 0 else 0
                     print(f"  • {k}: {v:.2f}s ({percent:.1f}%)")
-
+            
+            performance_metrics = print_performance_metrics(train_results, metrics, timing_metrics, master_config)
+            
+            if "performance_metrics" in metrics:
+                del metrics["performance_metrics"]
+            
+            logger.log_metrics(performance_metrics, step + 1, prefix="performance")
             logger.log_metrics(metrics, step + 1, prefix="train")
             logger.log_metrics(timing_metrics, step + 1, prefix="timing/train")
 
@@ -1722,3 +1743,115 @@ def async_grpo_train(
             print(f"Error stopping replay buffer: {e}")
 
         print("Async GRPO training complete!")
+
+
+def print_performance_metrics(train_results: dict[str, float], metrics: dict[str, float], timing_metrics: dict[str, float], master_config: MasterConfig) -> dict[str, float]:
+
+    def visualize_per_worker_load(per_worker_token_counts: dict[int, int]) -> float:
+        if per_worker_token_counts is None:
+            return None
+        per_worker_token_counts = [v for k, v in sorted(per_worker_token_counts.items())]
+        per_worker_load_ratio = [v / max(per_worker_token_counts) for v in per_worker_token_counts]
+        max_rows_to_print = 100
+        for i in range(min(len(per_worker_token_counts), max_rows_to_print)):
+            print(f"  • Generation Worker {i:3.0f} Load: {'■' * int(per_worker_load_ratio[i] * 10)}{'□' * (10 - int(per_worker_load_ratio[i] * 10))} Count: {per_worker_token_counts[i]/1000:.1f}K)")
+        estimated_idle_ratio = 1 - sum(per_worker_load_ratio) / len(per_worker_load_ratio)
+        print(f"  • Estimated Generation Idle Ratio due to the load imbalance: {100 * estimated_idle_ratio:.2f}%")
+        return estimated_idle_ratio
+
+    print("\n🔍 Performance Metrics:")
+    performance_metrics = {}
+
+    if "per_worker_token_counts" in metrics:
+        # Can be a list of each trajectory
+        if isinstance(metrics["per_worker_token_counts"], list):
+            per_worker_token_counts = {}
+            for trajectory_metrics in metrics["per_worker_token_counts"]:
+                for worker_idx, token_count in trajectory_metrics.items():
+                    per_worker_token_counts[worker_idx] = per_worker_token_counts.get(worker_idx, 0) + token_count
+        elif isinstance(metrics["per_worker_token_counts"], dict):
+            per_worker_token_counts = metrics["per_worker_token_counts"]
+        else:
+            per_worker_token_counts = None
+        estimated_generation_idle_ratio = visualize_per_worker_load(per_worker_token_counts)
+
+    performance_metrics["estimated_generation_idle_ratio"] = estimated_generation_idle_ratio
+    
+    policy_and_reference_logprobs_time = timing_metrics["policy_and_reference_logprobs"]
+    policy_training_time = timing_metrics["policy_training"]
+    exposed_generation_time = timing_metrics["exposed_generation"]
+    weight_sync_time = timing_metrics["weight_sync"]
+    total_time = timing_metrics["total_step_time"]
+
+    training_worker_idle_time_ratio = 0 if exposed_generation_time > 0.1 else exposed_generation_time / (policy_training_time + policy_and_reference_logprobs_time + exposed_generation_time + weight_sync_time)
+    print(f"  • Training Worker Idle Time Ratio: {100 * training_worker_idle_time_ratio:.2f}%")
+    performance_metrics["training_worker_idle_time_ratio"] = training_worker_idle_time_ratio
+
+    estimated_generation_time = timing_metrics["exposed_generation"] + timing_metrics["policy_and_reference_logprobs"] + timing_metrics["policy_training"] if exposed_generation_time > 0.1 else None
+
+    # Throughputs
+    num_nodes = master_config["cluster"]["num_nodes"]
+    gpus_per_node = master_config["cluster"]["gpus_per_node"]
+    total_num_gpus = num_nodes * gpus_per_node
+    colocated_inference = master_config["policy"]["generation"]["colocated"]["enabled"]
+
+    number_of_samples_per_step = master_config["grpo"]["num_prompts_per_step"] * master_config["grpo"]["num_generations_per_prompt"]
+    
+    if colocated_inference:
+        training_num_gpus = total_num_gpus
+        generation_num_gpus = total_num_gpus
+    else:
+        generation_num_gpus = master_config["policy"]["generation"]["colocated"]["resources"]["gpus_per_node"] * master_config["policy"]["generation"]["colocated"]["resources"]["num_nodes"]
+        training_num_gpus = total_num_gpus - generation_num_gpus
+
+    overall_samples_per_sec_per_gpu = number_of_samples_per_step / total_time / total_num_gpus
+    
+    overall_tokens_per_sec_per_gpu = metrics["total_num_tokens"] / total_time / total_num_gpus
+    policy_training_tokens_per_sec_per_gpu = metrics["total_num_tokens"] / policy_training_time / training_num_gpus
+    policy_and_reference_logprobs_tokens_per_sec_per_gpu = metrics["total_num_tokens"] / policy_and_reference_logprobs_time / training_num_gpus
+    training_worker_group_tokens_per_sec_per_gpu = metrics["total_num_tokens"] / (policy_training_time + policy_and_reference_logprobs_time) / training_num_gpus
+
+    print(f"  • Overall Samples/sec: {(overall_samples_per_sec_per_gpu * total_num_gpus):.2f}")
+    print(f"  • Overall Tokens/sec: {(overall_tokens_per_sec_per_gpu * total_num_gpus):.2f}")
+    print(f"  • Overall Samples/sec/gpu: {overall_samples_per_sec_per_gpu:.2f}")
+    print(f"  • Overall Tokens/sec/gpu: {overall_tokens_per_sec_per_gpu:.2f}")
+    print(f"  • Policy Training Tokens/sec/gpu: {policy_training_tokens_per_sec_per_gpu:.2f}")
+    print(f"  • Policy and Reference Logprobs Tokens/sec/gpu: {policy_and_reference_logprobs_tokens_per_sec_per_gpu:.2f}")
+    print(f"  • Training Worker Group Tokens/sec/gpu: {training_worker_group_tokens_per_sec_per_gpu:.2f}")
+    
+    if estimated_generation_time:
+        estimated_generation_tokens_per_sec_per_gpu = metrics["total_num_tokens"] / estimated_generation_time / generation_num_gpus
+        print(f"  • Estimated Generation Tokens/sec/gpu: {estimated_generation_tokens_per_sec_per_gpu:.2f}")
+    
+    performance_metrics.update({
+        "samples_per_sec": overall_samples_per_sec_per_gpu * total_num_gpus,
+        "tokens_per_sec": overall_tokens_per_sec_per_gpu * total_num_gpus,
+        "samples_per_sec_per_gpu": overall_samples_per_sec_per_gpu,
+        "tokens_per_sec_per_gpu": overall_tokens_per_sec_per_gpu,
+        "policy_training_tokens_per_sec_per_gpu": policy_training_tokens_per_sec_per_gpu,
+        "policy_and_reference_logprobs_tokens_per_sec_per_gpu": policy_and_reference_logprobs_tokens_per_sec_per_gpu,
+        "training_worker_group_tokens_per_sec_per_gpu": training_worker_group_tokens_per_sec_per_gpu,
+        "estimated_generation_tokens_per_sec_per_gpu": estimated_generation_tokens_per_sec_per_gpu if estimated_generation_time else None,
+    })
+    
+    # FLOPS
+    if "total_flops" in train_results:
+        total_tflops = (
+            train_results["total_flops"]
+            / timing_metrics["policy_training"]
+            / 1e12
+        )
+        num_ranks = train_results["num_ranks"]
+        print(
+            f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)",
+            flush=True,
+        )
+        if "theoretical_tflops" in train_results:
+            theoretical_tflops = train_results["theoretical_tflops"]
+            print(
+                f"  • Training Model Floating Point Utilization: {100 * total_tflops / theoretical_tflops:.2f}%",
+                flush=True,
+            )
+            metrics["train_fp_utilization"] = total_tflops / theoretical_tflops
+    
+    return performance_metrics
