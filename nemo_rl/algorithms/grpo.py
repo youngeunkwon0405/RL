@@ -954,7 +954,6 @@ def grpo_train(
                     total_steps + 1,
                     name="train/token_mult_prob_error_plot_sample",
                 )
-            performance_metrics = {}
             print("\n📊 Training Results:")
 
             print(f"  • Loss: {metrics['loss']:.4f}")
@@ -987,7 +986,7 @@ def grpo_train(
                     percent = (v / total_time * 100) if total_time > 0 else 0
                     print(f"  • {k}: {v:.2f}s ({percent:.1f}%)", flush=True)
 
-            print_performance_metrics(
+            performance_metrics = print_performance_metrics(
                 train_results, metrics, timing_metrics, master_config
             )
 
