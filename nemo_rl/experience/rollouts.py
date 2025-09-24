@@ -207,7 +207,9 @@ async def generate_responses_async(
         # generation_outputs carries this as a 1-length list per row; convert to int
         v = generation_outputs["gen_leader_worker_idx"][0]
         try:
-            gen_metrics["gen_leader_worker_idx"] = int(v[0]) if isinstance(v, list) else int(v)
+            gen_metrics["gen_leader_worker_idx"] = (
+                int(v[0]) if isinstance(v, list) else int(v)
+            )
         except Exception as e:
             print(f"Error occurred while extracting gen_leader_worker_idx: {e}")
 
@@ -647,7 +649,7 @@ async def run_sample_multi_turn_rollout(
     # Track per-turn metrics
     turn_gen_tokens = []
     # Track per-turn per-worker token accounting if available
-    per_worker_token_counts: dict[int, int] = {} # worker_idx -> token_count
+    per_worker_token_counts = {}  # worker_idx -> token_count
 
     for turn in range(max_rollout_turns):
         if terminated or truncated:
@@ -680,7 +682,9 @@ async def run_sample_multi_turn_rollout(
             # Per-worker load accounting
             if "gen_leader_worker_idx" in gen_metrics:
                 worker_idx = int(gen_metrics["gen_leader_worker_idx"])
-                per_worker_token_counts[worker_idx] = per_worker_token_counts.get(worker_idx, 0) + gen_token_count
+                per_worker_token_counts[worker_idx] = (
+                    per_worker_token_counts.get(worker_idx, 0) + gen_token_count
+                )
 
         except Exception as e:
             print(f"Error generating response for sample {sample_idx}: {e}")
