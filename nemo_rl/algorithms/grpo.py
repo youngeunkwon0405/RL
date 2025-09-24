@@ -1962,13 +1962,16 @@ def print_performance_metrics(
             f"  • Training FLOPS: {total_tflops:.2f} TFLOPS ({total_tflops / num_ranks:.2f} TFLOPS per rank)",
             flush=True,
         )
+        performance_metrics["train_flops_per_gpu"] = total_tflops / num_ranks
         if "theoretical_tflops" in train_results:
             theoretical_tflops = train_results["theoretical_tflops"]
             print(
                 f"  • Training Model Floating Point Utilization: {100 * total_tflops / theoretical_tflops:.2f}%",
                 flush=True,
             )
-            metrics["train_fp_utilization"] = total_tflops / theoretical_tflops
+            performance_metrics["train_fp_utilization"] = (
+                total_tflops / theoretical_tflops
+            )
 
     # =====================================================
     # Logging
