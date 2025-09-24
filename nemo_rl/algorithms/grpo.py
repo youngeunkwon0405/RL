@@ -1919,7 +1919,7 @@ def print_performance_metrics(
         metrics["total_num_tokens"] / generation_time / generation_num_gpus
     )
 
-    print("  • Thoroughputs (per GPU):")
+    print("  • Throughputs (per GPU):")
     print(f"    - E2E (Samples/sec/gpu): {e2e_samples_per_sec_per_gpu:.2f}")
     print(f"    - E2E (Tokens/sec/gpu): {e2e_tokens_per_sec_per_gpu:.2f}")
     print(
