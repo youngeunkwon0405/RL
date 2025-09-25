@@ -546,6 +546,10 @@ def print_performance_metrics(
             "policy_and_reference_logprobs_tokens_per_sec_per_gpu": policy_and_reference_logprobs_tokens_per_sec_per_gpu,
             "training_worker_group_tokens_per_sec_per_gpu": training_worker_group_tokens_per_sec_per_gpu,
             "generation_tokens_per_sec_per_gpu": generation_tokens_per_sec_per_gpu,
+            "training_worker_group_tokens_per_sec": training_worker_group_tokens_per_sec_per_gpu
+            * training_num_gpus,
+            "generation_tokens_per_sec": generation_tokens_per_sec_per_gpu
+            * generation_num_gpus,
         }
     )
 
