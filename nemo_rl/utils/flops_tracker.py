@@ -81,8 +81,18 @@ def convert_config_to_flops_config(
 
 
 THEORETICAL_TFLOPS = {
+    ("NVIDIA A100 80GB PCIe", torch.bfloat16): 624 / 2,
+    ("NVIDIA A100 80GB PCIe", torch.float32): 19.5,
     ("NVIDIA H100 80GB HBM3", torch.bfloat16): 1979 / 2,
     ("NVIDIA H100 80GB HBM3", torch.float32): 67.0,
+    ("NVIDIA B200", torch.float32): 80.0,
+    ("NVIDIA B200", torch.bfloat16): 4500 / 2,
+    ("NVIDIA B300", torch.float32): 80.0,
+    ("NVIDIA B300", torch.bfloat16): 4500 / 2,
+    ("NVIDIA GB200", torch.float32): 80.0,
+    ("NVIDIA GB200", torch.bfloat16): 4900 / 2,
+    ("NVIDIA GB300", torch.float32): 80.0,
+    ("NVIDIA GB300", torch.bfloat16): 4900 / 2,
 }
 
 
