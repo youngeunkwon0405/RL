@@ -827,7 +827,8 @@ class MegatronPolicyWorker:
         from vllm.distributed.device_communicators.pynccl import PyNcclCommunicator
         from vllm.distributed.utils import StatelessProcessGroup
 
-        # All training ranks [0..train_world_size-1] join the communicator with their rank
+        # world_size = train_world_size + inference_world_size
+        # variable train_world_size is used in inference cluster
         pg = StatelessProcessGroup.create(
             host=ip, port=port, rank=self.rank, world_size=world_size
         )
