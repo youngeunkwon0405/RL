@@ -128,6 +128,7 @@ from nemo_rl.models.policy.utils import (
     get_runtime_env_for_policy_worker,
 )
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
+from nemo_rl.utils.packed_tensor import get_target_packed_tensor_size, pack_tensor
 
 TokenizerType = TypeVar("TokenizerType", bound=PreTrainedTokenizerBase)
 
@@ -1738,9 +1739,31 @@ class MegatronPolicyWorker:
             [self.model],
             show_progress=False,
         )
-        # broadcast from train rank 0 to all other ranks (training and inference)
-        for _, tensor in hf_params_generator:
-            self.model_update_group.broadcast(tensor, src=0)
+        target_packed_tensor_size = get_target_packed_tensor_size()
+
+        while True:
+            # Form a packed tensor
+            packed_tensor_list = []
+            packed_tensor_sizes = []
+            try:
+                while True:
+                    name, tensor = next(hf_params_generator)
+                    packed_tensor_list.append((name, tensor))
+                    packed_tensor_sizes.append(
+                        tensor.view(torch.uint8).view(-1).numel()
+                    )
+                    if sum(packed_tensor_sizes) > target_packed_tensor_size:
+                        break
+                # Concatenate the tensors into a single tensor and broadcast it
+                packed_tensor = pack_tensor(packed_tensor_list)
+                self.model_update_group.broadcast(packed_tensor, src=0)
+            except StopIteration:
+                break
+            finally:
+                if len(packed_tensor_list) > 0:
+                    # do the last broadcast
+                    packed_tensor = pack_tensor(packed_tensor_list)
+                    self.model_update_group.broadcast(packed_tensor, src=0)
 
     def prepare_for_lp_inference(self):
         self.model = self.move_model(self.model, "cuda", move_grads=False)

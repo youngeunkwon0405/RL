@@ -94,6 +94,7 @@ from nemo_rl.utils.automodel_checkpoint import (
 )
 from nemo_rl.utils.checkpoint import CheckpointingConfig
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
+from nemo_rl.utils.packed_tensor import get_target_packed_tensor_size, pack_tensor
 
 
 @ray.remote(
@@ -1767,11 +1768,33 @@ class DTensorPolicyWorkerV2:
             self.model = self.move_to_cuda(self.model)
 
         # Broadcast the weights for collective communication
-        for _, tensor in self.model.state_dict().items():
-            if isinstance(tensor, DTensor):
-                tensor = tensor.full_tensor()
-            tensor = tensor.to(self.dtype, non_blocking=True)
-            self.model_update_group.broadcast(tensor.data, src=0)
+        target_packed_tensor_size = get_target_packed_tensor_size()
+        weight_iterator = iter(self.model.state_dict().items())
+
+        while True:
+            # Form a packed tensor
+            packed_tensor_list = []
+            packed_tensor_sizes = []
+            try:
+                while True:
+                    name, tensor = next(weight_iterator)
+                    if isinstance(tensor, DTensor):
+                        tensor = tensor.full_tensor()
+                    tensor = tensor.to(self.dtype, non_blocking=True)
+                    packed_tensor_list.append((name, tensor))
+                    packed_tensor_sizes.append(
+                        tensor.view(torch.uint8).view(-1).numel()
+                    )
+                    if sum(packed_tensor_sizes) > target_packed_tensor_size:
+                        break
+                packed_tensor = pack_tensor(packed_tensor_list)
+                self.model_update_group.broadcast(packed_tensor, src=0)
+            except StopIteration:
+                break
+            finally:
+                if len(packed_tensor_list) > 0:
+                    packed_tensor = pack_tensor(packed_tensor_list)
+                    self.model_update_group.broadcast(packed_tensor, src=0)
 
         # Manually move model to cpu for cpu offload case
         # cpu offload needs model on CPU before model forward

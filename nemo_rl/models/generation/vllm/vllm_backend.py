@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import math
 from collections import defaultdict
 from typing import Any, Optional
 
@@ -18,6 +19,7 @@ import torch
 from torch.multiprocessing.reductions import rebuild_cuda_tensor
 
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
+from nemo_rl.utils.packed_tensor import get_target_packed_tensor_size, unpack_tensor
 
 try:
     import vllm  # noqa: F401
@@ -186,23 +188,67 @@ class VllmInternalWorkerExtension:
             "Please call prepare_refit_info when initializing the worker."
         )
 
-        try:
-            for name, (shape, dtype) in self.state_dict_info.items():
-                weight = torch.empty(shape, dtype=dtype, device="cuda")
-                self.model_update_group.broadcast(weight, src=0)
+        def load_model_weights(weights):
+            """Load model weights.
 
-                from nemo_rl.models.generation import fp8
+            Args:
+                weights: List[(name, tensor)]
 
-                if fp8.is_fp8_model(self.model_runner.vllm_config):
-                    # the fp8 load_weights additionally casts bf16 weights into fp8
-                    fp8.load_weights([(name, weight)], self.model_runner)
-                else:
-                    self.model_runner.model.load_weights(weights=[(name, weight)])
-        except Exception as e:
-            print(
-                f"Error in VllmInternalWorkerExtension.update_weights_from_collective: {e}"
-            )
-            return False
+            Returns:
+                None
+            """
+            from nemo_rl.models.generation import fp8
+
+            if fp8.is_fp8_model(self.model_runner.vllm_config):
+                # the fp8 load_weights additionally casts bf16 weights into fp8
+                fp8.load_weights(weights, self.model_runner)
+            else:
+                self.model_runner.model.load_weights(weights=weights)
+
+        target_packed_tensor_size = get_target_packed_tensor_size()
+
+        hf_params_iterator = iter(self.state_dict_info.items())
+
+        while True:
+            # Form a packed tensor
+            packed_tensor_meta_data = []
+            packed_tensor_sizes = []
+            offset = 0
+            try:
+                while True:
+                    # Form a packed tensor
+                    name, (shape, dtype) = next(hf_params_iterator)
+                    tensor_size = math.prod(shape) * dtype.itemsize
+                    packed_tensor_meta_data.append(
+                        (name, shape, dtype, offset, tensor_size)
+                    )
+                    packed_tensor_sizes.append(tensor_size)
+                    offset += tensor_size
+                    if sum(packed_tensor_sizes) > target_packed_tensor_size:
+                        break
+                # Create a packed tensor and broadcast it
+                packed_tensor = torch.empty(
+                    sum(packed_tensor_sizes), dtype=torch.uint8, device="cuda"
+                )
+                self.model_update_group.broadcast(packed_tensor, src=0)
+                # Load the packed tensor into the model
+                load_model_weights(
+                    unpack_tensor(packed_tensor, packed_tensor_meta_data)
+                )
+            except StopIteration:
+                break
+            finally:
+                if len(packed_tensor_meta_data) > 0:
+                    # do the last broadcast
+                    # Create a packed tensor and broadcast it
+                    packed_tensor = torch.empty(
+                        sum(packed_tensor_sizes), dtype=torch.uint8, device="cuda"
+                    )
+                    self.model_update_group.broadcast(packed_tensor, src=0)
+                    # Load the packed tensor into the model
+                    load_model_weights(
+                        unpack_tensor(packed_tensor, packed_tensor_meta_data)
+                    )
 
         return True
 
