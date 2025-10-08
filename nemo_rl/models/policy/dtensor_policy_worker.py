@@ -83,7 +83,7 @@ from nemo_rl.utils.native_checkpoint import (
     save_checkpoint,
 )
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
-from nemo_rl.utils.packed_tensor import get_target_packed_tensor_size, pack_tensor
+from nemo_rl.utils.packed_tensor import packed_broadcast_producer
 
 
 @contextmanager
@@ -1806,34 +1806,21 @@ class DTensorPolicyWorker:
             )
             self.model = self.move_to_cuda(self.model)
 
-        # Broadcast the weights for collective communication
-        target_packed_tensor_size = get_target_packed_tensor_size()
-        weight_iterator = iter(self.model.state_dict().items())
+        def _dtensor_post_iter_func(tensor, dtype):
+            if isinstance(tensor, DTensor):
+                tensor = tensor.full_tensor()
+            tensor = tensor.to(dtype, non_blocking=True)
+            return tensor
 
-        while True:
-            # Form a packed tensor
-            packed_tensor_list = []
-            packed_tensor_sizes = []
-            try:
-                while True:
-                    name, tensor = next(weight_iterator)
-                    if isinstance(tensor, DTensor):
-                        tensor = tensor.full_tensor()
-                    tensor = tensor.to(self.dtype, non_blocking=True)
-                    packed_tensor_list.append((name, tensor))
-                    packed_tensor_sizes.append(
-                        tensor.view(torch.uint8).view(-1).numel()
-                    )
-                    if sum(packed_tensor_sizes) > target_packed_tensor_size:
-                        break
-                packed_tensor = pack_tensor(packed_tensor_list)
-                self.model_update_group.broadcast(packed_tensor, src=0)
-            except StopIteration:
-                break
-            finally:
-                if len(packed_tensor_list) > 0:
-                    packed_tensor = pack_tensor(packed_tensor_list)
-                    self.model_update_group.broadcast(packed_tensor, src=0)
+        # param_iterator will return (name, tensor), we only need tensor
+        dtensor_post_iter_func = lambda x: _dtensor_post_iter_func(x[1], self.dtype)
+
+        packed_broadcast_producer(
+            iterator=iter(self.model.state_dict().items()),
+            group=self.model_update_group,
+            src=0,
+            post_iter_func=dtensor_post_iter_func,
+        )
 
         # Manually move model to cpu for cpu offload case
         # cpu offload needs model on CPU before model forward
