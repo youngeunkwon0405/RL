@@ -14,14 +14,20 @@
 
 import math
 import os
+from functools import lru_cache
 from typing import Any, List, Tuple
 
 import torch
 
 
+@lru_cache(maxsize=1)
 def get_target_packed_tensor_size():
-    packed_tensor_bucket_size = os.getenv("NRL_PACKED_TENSOR_SIZE_TARGET_IN_MB", "500")
-    return int(packed_tensor_bucket_size) * 1024 * 1024
+    memory_ratio = os.getenv("NRL_REFIT_BUFFER_MEMORY_RATIO", "0.01")
+    device = torch.device("cuda")
+    props = torch.cuda.get_device_properties(device)
+    total_memory_bytes = props.total_memory
+    target_size = int(total_memory_bytes * float(memory_ratio))
+    return target_size
 
 
 def packed_broadcast_producer(iterator, group, src, post_iter_func):
@@ -90,19 +96,17 @@ def packed_broadcast_consumer(iterator, group, src, post_unpack_func):
         """
         unpacked_list = []
         # Perform batched split with torch.split_with_sizes
-        packed_tensor_sizes = [
-            tensor_size for _, _, _, _, tensor_size in meta_data_list
-        ]
+        packed_tensor_sizes = list(map(lambda x: x[4], meta_data_list))
         unpacked_tensor = packed_tensor.split_with_sizes(packed_tensor_sizes)
 
-        for i, tensor in enumerate(unpacked_tensor):
-            # unpacked_list = List[(name, torch.Tensor.view(dtype).view(*shape))]
-            unpacked_list.append(
-                (
-                    meta_data_list[i][0],
-                    tensor.view(meta_data_list[i][2]).view(*meta_data_list[i][1]),
-                )
+        # unpacked_list = List[(name, torch.Tensor.view(dtype).view(*shape))]
+        unpacked_list = [
+            (
+                meta_data_list[i][0],
+                tensor.view(meta_data_list[i][2]).view(*meta_data_list[i][1]),
             )
+            for i, tensor in enumerate(unpacked_tensor)
+        ]
 
         return unpacked_list
 
