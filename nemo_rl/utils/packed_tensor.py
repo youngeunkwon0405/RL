@@ -26,7 +26,8 @@ def get_target_packed_tensor_size():
     device = torch.device("cuda")
     props = torch.cuda.get_device_properties(device)
     total_memory_bytes = props.total_memory
-    target_size = int(total_memory_bytes * float(memory_ratio))
+    # max size is 5GB
+    target_size = min(int(total_memory_bytes * float(memory_ratio)), 5 * 1024**3)
     return target_size
 
 
