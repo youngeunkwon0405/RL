@@ -31,6 +31,11 @@ def get_target_packed_tensor_size():
     return target_size
 
 
+@lru_cache(maxsize=1)
+def get_num_buffers():
+    return int(os.getenv("NRL_REFIT_NUM_BUFFERS", "2"))
+
+
 def packed_broadcast_producer(iterator, group, src, post_iter_func):
     """Broadcast a list of tensors in a packed manner.
 
@@ -46,7 +51,7 @@ def packed_broadcast_producer(iterator, group, src, post_iter_func):
     """
     target_packed_tensor_size = get_target_packed_tensor_size()
 
-    num_buffers = 2
+    num_buffers = get_num_buffers()
     streams = [torch.cuda.Stream() for _ in range(num_buffers)]
     buffer_idx = 0
 
@@ -134,7 +139,7 @@ def packed_broadcast_consumer(iterator, group, src, post_unpack_func):
 
     target_packed_tensor_size = get_target_packed_tensor_size()
 
-    num_buffers = 2
+    num_buffers = get_num_buffers()
     streams = [torch.cuda.Stream() for _ in range(num_buffers)]
     buffer_idx = 0
 
