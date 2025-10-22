@@ -161,6 +161,11 @@ class PolicyConfig(TypedDict):
         int
     ]  # used in static batched (framework) generation
     precision: str
+    # offload_optimizer_states_for_logprob:
+    # - True: offload optimizer states while calculating logprobs, can increase
+    # logprob batch size for higher GEMM efficiency but needs to pay offloading/onloading overhead
+    # - False (default): keep optimizer states on GPU, avoid extra offloading/onloading latency penalty
+    offload_optimizer_states_for_logprob: bool
     reward_model_cfg: NotRequired[RewardModelConfig]
     dtensor_cfg: DTensorConfig
     megatron_cfg: NotRequired[MegatronConfig]
