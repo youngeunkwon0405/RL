@@ -77,7 +77,6 @@ from nemo_rl.models.policy.utils import (
     import_class_from_path,
     resolve_model_class,
     sliding_window_overwrite,
-    str_to_bool,
 )
 from nemo_rl.utils.native_checkpoint import (
     load_checkpoint,
@@ -1857,9 +1856,7 @@ class DTensorPolicyWorker:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and not self.cpu_offload
-            and str_to_bool(
-                os.getenv("NRL_OFFLOAD_OPTIMIZER_STATE_FOR_LOGPROB", "False")
-            )
+            and self.cfg["offload_optimizer_states_for_logprob"]
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():
@@ -1876,9 +1873,7 @@ class DTensorPolicyWorker:
         if (
             hasattr(self, "optimizer")
             and self.optimizer is not None
-            and str_to_bool(
-                os.getenv("NRL_OFFLOAD_OPTIMIZER_STATE_FOR_LOGPROB", "False")
-            )
+            and self.cfg["offload_optimizer_states_for_logprob"]
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():

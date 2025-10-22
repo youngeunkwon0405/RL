@@ -126,7 +126,6 @@ from nemo_rl.models.policy.utils import (
     get_handle_from_tensor,
     get_megatron_checkpoint_dir,
     get_runtime_env_for_policy_worker,
-    str_to_bool,
 )
 from nemo_rl.utils.nsys import wrap_with_nvtx_name
 from nemo_rl.utils.packed_tensor import packed_broadcast_producer
@@ -1790,9 +1789,7 @@ class MegatronPolicyWorker:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and (not self.cfg["megatron_cfg"]["optimizer"]["optimizer_cpu_offload"])
-            and str_to_bool(
-                os.getenv("NRL_OFFLOAD_OPTIMIZER_STATE_FOR_LOGPROB", "False")
-            )
+            and self.cfg["offload_optimizer_states_for_logprob"]
         ):
             if isinstance(self.optimizer, ChainedOptimizer):
                 optimizer_state = self.optimizer.state
@@ -1824,9 +1821,7 @@ class MegatronPolicyWorker:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and (not self.cfg["megatron_cfg"]["optimizer"]["optimizer_cpu_offload"])
-            and str_to_bool(
-                os.getenv("NRL_OFFLOAD_OPTIMIZER_STATE_FOR_LOGPROB", "False")
-            )
+            and self.cfg["offload_optimizer_states_for_logprob"]
         ):
             # Iterate through the state dictionaries for each parameter group
             if isinstance(self.optimizer, ChainedOptimizer):

@@ -250,13 +250,3 @@ def get_handle_from_tensor(tensor: torch.Tensor) -> tuple[Any]:
 
     # skip serializing the function for better refit performance
     return reduce_tensor(tensor.detach())[1:]
-
-
-def str_to_bool(value: str) -> bool:
-    """Convert a string to a boolean value."""
-    if value.lower() in ["true", "1", "yes", "y", "on"]:
-        return True
-    elif value.lower() in ["false", "0", "no", "n", "off"]:
-        return False
-    else:
-        raise ValueError(f"Invalid boolean value: {value}")
