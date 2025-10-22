@@ -1817,7 +1817,7 @@ class DTensorPolicyWorkerV2:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and not self.cpu_offload
-            and self.cfg["offload_optimizer_states_for_logprob"]
+            and self.cfg.get("offload_optimizer_states_for_logprob", False)
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():
@@ -1834,7 +1834,7 @@ class DTensorPolicyWorkerV2:
         if (
             hasattr(self, "optimizer")
             and self.optimizer is not None
-            and self.cfg["offload_optimizer_states_for_logprob"]
+            and self.cfg.get("offload_optimizer_states_for_logprob", False)
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():
