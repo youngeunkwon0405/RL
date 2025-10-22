@@ -1789,6 +1789,7 @@ class MegatronPolicyWorker:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and (not self.cfg["megatron_cfg"]["optimizer"]["optimizer_cpu_offload"])
+            and self.is_generation_colocated
         ):
             if isinstance(self.optimizer, ChainedOptimizer):
                 optimizer_state = self.optimizer.state
@@ -1820,6 +1821,7 @@ class MegatronPolicyWorker:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and (not self.cfg["megatron_cfg"]["optimizer"]["optimizer_cpu_offload"])
+            and self.is_generation_colocated
         ):
             # Iterate through the state dictionaries for each parameter group
             if isinstance(self.optimizer, ChainedOptimizer):
