@@ -87,6 +87,7 @@ from nemo_rl.models.policy.utils import (
     get_runtime_env_for_policy_worker,
     import_class_from_path,
     resolve_model_class,
+    str_to_bool,
 )
 from nemo_rl.utils.automodel_checkpoint import (
     load_checkpoint,
@@ -1817,7 +1818,9 @@ class DTensorPolicyWorkerV2:
             hasattr(self, "optimizer")
             and self.optimizer is not None
             and not self.cpu_offload
-            and self.is_generation_colocated
+            and str_to_bool(
+                os.getenv("NRL_OFFLOAD_OPTIMIZER_STATE_FOR_LOGPROB", "False")
+            )
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():
@@ -1834,7 +1837,9 @@ class DTensorPolicyWorkerV2:
         if (
             hasattr(self, "optimizer")
             and self.optimizer is not None
-            and self.is_generation_colocated
+            and str_to_bool(
+                os.getenv("NRL_OFFLOAD_OPTIMIZER_STATE_FOR_LOGPROB", "False")
+            )
         ):
             for state in self.optimizer.state.values():
                 for k, v in state.items():
