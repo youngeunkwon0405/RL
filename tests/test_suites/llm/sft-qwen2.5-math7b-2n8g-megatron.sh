@@ -2,21 +2,24 @@
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd)
 source $SCRIPT_DIR/common.env
 
+# TODO: this config can crash on OOM
+# https://github.com/NVIDIA-NeMo/RL/issues/263
+
 # ===== BEGIN CONFIG =====
-NUM_NODES=4
-STEPS_PER_RUN=30
-MAX_STEPS=30
+NUM_NODES=2
+STEPS_PER_RUN=80  # step_time ~ 29sec
+MAX_STEPS=80
 NUM_RUNS=$(( (MAX_STEPS + STEPS_PER_RUN - 1) / STEPS_PER_RUN ))  # Round up
-NUM_MINUTES=60
+NUM_MINUTES=30
 # ===== END CONFIG =====
 
 exit_if_max_steps_reached
 
 # Run the experiment
 cd $PROJECT_ROOT
-PYTHONPATH=$HF_HOME/modules:$PYTHONPATH uv run examples/run_grpo_math.py \
+uv run examples/run_sft.py \
     --config $CONFIG_PATH \
-    grpo.max_num_steps=$MAX_STEPS \
+    sft.max_num_steps=$MAX_STEPS \
     logger.log_dir=$LOG_DIR \
     logger.wandb_enabled=True \
     logger.wandb.project=nemo-rl \
@@ -25,6 +28,7 @@ PYTHONPATH=$HF_HOME/modules:$PYTHONPATH uv run examples/run_grpo_math.py \
     logger.tensorboard_enabled=True \
     checkpointing.enabled=True \
     checkpointing.checkpoint_dir=$CKPT_DIR \
+    ~policy.tokenizer.chat_template \
     $@ \
     2>&1 | tee $RUN_LOG
 
@@ -34,8 +38,6 @@ uv run tests/json_dump_tb_logs.py $LOG_DIR --output_path $JSON_METRICS
 # Only run metrics if the target step is reached
 if [[ $(jq 'to_entries | .[] | select(.key == "train/loss") | .value | keys | map(tonumber) | max' $JSON_METRICS) -ge $MAX_STEPS ]]; then
     uv run tests/check_metrics.py $JSON_METRICS \
-        'mean(data["train/token_mult_prob_error"]) < 1.1' \
-        'data["train/token_mult_prob_error"]["30"] < 1.1' \
-        'mean(data["train/reward"]) > 0.45' \
-        'mean(data["timing/train/total_step_time"], -11, -1) < 70'
+        'data["train/loss"]["80"] < 0.301' \
+        'data["validation/val_loss"]["80"] < 0.304'
 fi
