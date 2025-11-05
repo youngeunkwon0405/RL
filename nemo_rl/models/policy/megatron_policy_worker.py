@@ -2145,6 +2145,10 @@ class MegatronPolicyWorker:
                         state[k] = v.to("cpu")
                     elif device == "cuda" and not v.is_cuda:
                         state[k] = v.to("cuda")
+                    else:
+                        raise ValueError(
+                            f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported."
+                        )
 
     def save_checkpoint(
         self,
