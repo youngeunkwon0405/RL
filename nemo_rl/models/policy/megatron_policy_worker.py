@@ -2166,10 +2166,12 @@ class MegatronPolicyWorker:
                 # Check if the item is a tensor
                 if torch.is_tensor(v):
                     # Move the tensor to device and update the state dictionary
-                    if device == "cpu" and v.is_cuda:
-                        state[k] = v.to("cpu")
-                    elif device == "cuda" and not v.is_cuda:
-                        state[k] = v.to("cuda")
+                    if device == "cpu":
+                        if v.is_cuda:
+                            state[k] = v.to("cpu")
+                    elif device == "cuda":
+                        if not v.is_cuda:
+                            state[k] = v.to("cuda")
                     else:
                         raise ValueError(
                             f"Invalid device: {device}. Only strings 'cpu' and 'cuda' are supported."
