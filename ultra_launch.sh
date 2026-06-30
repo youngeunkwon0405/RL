@@ -176,6 +176,7 @@ fi
 # =============================================================================
 # W&B configuration
 # =============================================================================
+LAUNCH_LABEL="${LAUNCH_LABEL:-Nemotron 3 Ultra}"
 WANDB_PROJ="${WANDB_PROJ:-nemotron-3-ultra}"
 WANDB_NAME="${EXP_NAME}"
 WANDB_ENABLED=False
@@ -650,7 +651,7 @@ export COMMAND="${TRAIN_CMD}"
 # =============================================================================
 echo ""
 echo "================================================================"
-echo "  Nemotron 3 Ultra — ${EXP_NAME} (${NUM_TOTAL_NODES}-node)"
+echo "  ${LAUNCH_LABEL} — ${EXP_NAME} (${NUM_TOTAL_NODES}-node)"
 echo "================================================================"
 echo "  Job name:    ${JOB_NAME}  (singleton — only one runs at a time)"
 echo "  Config:      ${CONFIG_PATH}"
