@@ -5,6 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 
 EXP_NAME="${EXP_NAME:-ultra-swe-precise-trace-one-step}"
+CONFIG_PATH="${CONFIG_PATH:-examples/configs/ultra/swe_teacher.yaml}"
 MODEL_PATH="${MODEL_PATH:-/lustre/fs1/portfolios/coreai/projects/coreai_dlalgo_llm/users/liding/public/ultra_v3/ultra-green-step42}"
 DATA_DIR="${DATA_DIR:-/lustre/fs1/portfolios/coreai/projects/coreai_dlalgo_llm/users/youngeunk/data/ultra-blends}"
 TRAIN_PATH="${TRAIN_PATH:-${DATA_DIR}/swe.train.jsonl}"
@@ -36,6 +37,7 @@ for required in \
   "${CONTAINER}" \
   "${SANDBOX_CONTAINER}" \
   "${REPO_ROOT}/ultra_launch.sh" \
+  "${REPO_ROOT}/${CONFIG_PATH}" \
   "${REPO_ROOT}/3rdparty/Gym-workspace/Gym/responses_api_agents/swe_agents/app.py"; do
   if [[ ! -e "${required}" ]]; then
     echo "ERROR: required path does not exist: ${required}" >&2
@@ -80,7 +82,7 @@ done < <(
 
 mkdir -p "${PERSISTENT_CACHE}" "${HF_HOME}" "${RESULTS_DIR}"
 
-export EXP_NAME MODEL_PATH TRAIN_PATH VAL_PATH SIF_DIR CONTAINER SANDBOX_CONTAINER
+export EXP_NAME CONFIG_PATH MODEL_PATH TRAIN_PATH VAL_PATH SIF_DIR CONTAINER SANDBOX_CONTAINER
 export PERSISTENT_CACHE HF_HOME RESULTS_DIR
 export SLURM_ACCOUNT SLURM_PARTITION SLURM_QOS WALLTIME
 export NUM_TRAIN_NODES NUM_GEN_NODES NUM_GYM_NODES NRL_MAX_STEPS DRY_RUN
@@ -95,6 +97,7 @@ Ultra SWE precise-trace validation
   NeMo RL:    $(git -C "${REPO_ROOT}" rev-parse HEAD)
   Gym:        $(git -C "${REPO_ROOT}/3rdparty/Gym-workspace/Gym" rev-parse HEAD)
   OpenHands:  ${OPENHANDS_REPO}@${OPENHANDS_COMMIT}
+  Config:     ${CONFIG_PATH}
   Model:      ${MODEL_PATH}
   Data:       ${TRAIN_PATH}
   SIF root:   ${SIF_DIR}
