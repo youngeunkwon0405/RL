@@ -20,3 +20,6 @@ Use `DRY_RUN=1` to print the resolved command without submitting. The wrapper
 disables checkpoint writes because this is a one-step instrumentation
 validation, while retaining the released model parallelism, batch shape, MTP
 inference, context length, dataset, and sandbox configuration.
+
+The wrapper repairs the nightly image's stale Python 3.12 symlink and runs the
+prebuilt environment directly so `uv` does not discard its installed packages.

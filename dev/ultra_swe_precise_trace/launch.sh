@@ -91,6 +91,7 @@ export EXTRA_MOUNTS="${EXTRA_MOUNTS:-/lustre:/lustre}"
 export USE_SNAPSHOT="${USE_SNAPSHOT:-1}"
 export NRL_FORCE_REBUILD_VENVS="${NRL_FORCE_REBUILD_VENVS:-true}"
 export NEMO_GYM_VENV_DIR="${NEMO_GYM_VENV_DIR:-${PERSISTENT_CACHE}/component-venvs}"
+export PYTHON_RUNNER="${PYTHON_RUNNER:-/opt/nemo_rl_venv/bin/python}"
 
 # This validation uses local/public assets and intentionally avoids forwarding
 # login-shell credentials into the generated command or provenance file.

@@ -304,6 +304,7 @@ export RAY_LOG_SYNC_FREQUENCY="${RAY_LOG_SYNC_FREQUENCY:-60}"
 
 CODE_ROOT="/opt/nemo-rl"
 VLLM_ENV_SOURCE="source /opt/nemo-rl/3rdparty/vllm/nemo-rl.env && "
+PYTHON_RUNNER="${PYTHON_RUNNER:-uv run}"
 
 # =============================================================================
 # Persistent cache directories
@@ -509,6 +510,11 @@ fi
 # then seed fresh from Lustre.
 # =============================================================================
 read -r -d '' SETUP_COMMAND <<SETUPEOF || true
+if [ ! -x /opt/nemo_rl_venv/bin/python ] && [ -x /usr/bin/python3.12 ]; then
+  ln -sfn /usr/bin/python3.12 /opt/nemo_rl_venv/bin/python
+  echo "[PYTHON] Repaired /opt/nemo_rl_venv/bin/python with /usr/bin/python3.12"
+fi
+
 command -v zstd >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq zstd; } 2>/dev/null || true
 echo "[CACHE SEED] Clearing stale /tmp caches and seeding from Lustre..."
 WARM_SEED="${NRL_VLLM_CACHE_SEED_DIR}"
@@ -578,7 +584,7 @@ NRL_WG_USE_RAY_REF=1 \
 HF_HOME=${HF_HOME:-} \
 HF_TOKEN=${HF_TOKEN:-} \
 NRL_USE_FASTOKENS=${NRL_USE_FASTOKENS:-1} \
-uv run ./examples/nemo_gym/run_grpo_nemo_gym.py \
+${PYTHON_RUNNER} ./examples/nemo_gym/run_grpo_nemo_gym.py \
 --config ${CONFIG_PATH} \
 policy.model_name=${MODEL_PATH} \
 cluster.num_nodes=${NUM_ACTOR_NODES} \
