@@ -526,6 +526,31 @@ if [ ! -x /opt/nemo_rl_venv/bin/python ] && [ -x /usr/bin/python3.12 ]; then
   echo "[PYTHON] Repaired /opt/nemo_rl_venv/bin/python with /usr/bin/python3.12"
 fi
 
+# Component environments resolve dependencies from the mounted branch. Keep the
+# Ray daemons and driver on that same version before the cluster starts.
+if [ "${NRL_ALIGN_PROJECT_RAY:-true}" = "true" ]; then
+  PROJECT_RAY_VERSION=\$(sed -n 's/^[[:space:]]*"ray\[default\]==\([^"]*\)".*/\1/p' /opt/nemo-rl/pyproject.toml | head -n 1)
+  if [ -z "\$PROJECT_RAY_VERSION" ]; then
+    echo "ERROR: could not read the Ray pin from /opt/nemo-rl/pyproject.toml" >&2
+    exit 1
+  fi
+
+  CURRENT_RAY_VERSION=\$(/opt/nemo_rl_venv/bin/python -c 'import ray; print(ray.__version__)' 2>/dev/null || true)
+  if [ "\$CURRENT_RAY_VERSION" != "\$PROJECT_RAY_VERSION" ]; then
+    UV_BIN=\$(command -v uv || true)
+    if [ -z "\$UV_BIN" ]; then
+      echo "ERROR: uv is required to align Ray \$CURRENT_RAY_VERSION -> \$PROJECT_RAY_VERSION" >&2
+      exit 1
+    fi
+    echo "[RAY] Aligning root runtime \$CURRENT_RAY_VERSION -> \$PROJECT_RAY_VERSION"
+    UV_CACHE_DIR=${PERSISTENT_CACHE}/uv "\$UV_BIN" pip install \
+      --python /opt/nemo_rl_venv/bin/python \
+      "ray[default]==\$PROJECT_RAY_VERSION"
+  else
+    echo "[RAY] Root runtime already matches project pin \$PROJECT_RAY_VERSION"
+  fi
+fi
+
 command -v zstd >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq zstd; } 2>/dev/null || true
 echo "[CACHE SEED] Clearing stale /tmp caches and seeding from Lustre..."
 WARM_SEED="${NRL_VLLM_CACHE_SEED_DIR}"

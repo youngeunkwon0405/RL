@@ -6,7 +6,7 @@ REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 
 EXP_NAME="${EXP_NAME:-ultra-swe-precise-trace-one-step}"
 CONFIG_PATH="${CONFIG_PATH:-examples/configs/ultra/swe_teacher.yaml}"
-MODEL_PATH="${MODEL_PATH:-/lustre/fs1/portfolios/coreai/projects/coreai_dlalgo_llm/users/liding/public/ultra_v3/ultra-green-step42}"
+MODEL_PATH="${MODEL_PATH:-/lustre/fsw/portfolios/llmservice/users/sdevare/repos/ultra/nemo-rl-internal/results/huggingface/e2e_swe_0427/step_83/hf_with_mtp}"
 DATA_DIR="${DATA_DIR:-/lustre/fs1/portfolios/coreai/projects/coreai_dlalgo_llm/users/youngeunk/data/ultra-blends}"
 TRAIN_PATH="${TRAIN_PATH:-${DATA_DIR}/swe.train.jsonl}"
 VAL_PATH="${VAL_PATH:-${DATA_DIR}/swe.val.jsonl}"
@@ -32,6 +32,7 @@ DRY_RUN="${DRY_RUN:-0}"
 
 for required in \
   "${MODEL_PATH}/config.json" \
+  "${MODEL_PATH}/configuration_nemotron_h.py" \
   "${TRAIN_PATH}" \
   "${VAL_PATH}" \
   "${CONTAINER}" \
@@ -80,7 +81,8 @@ done < <(
     jq -r '[.responses_create_params.metadata.dataset_name,.responses_create_params.metadata.instance_id] | @tsv'
 )
 
-mkdir -p "${PERSISTENT_CACHE}" "${HF_HOME}" "${RESULTS_DIR}"
+export NEMO_RL_VENV_DIR="${NEMO_RL_VENV_DIR:-${PERSISTENT_CACHE}/ray-venvs-ultra-v3}"
+mkdir -p "${PERSISTENT_CACHE}" "${HF_HOME}" "${RESULTS_DIR}" "${NEMO_RL_VENV_DIR}"
 
 export EXP_NAME CONFIG_PATH MODEL_PATH TRAIN_PATH VAL_PATH SIF_DIR CONTAINER SANDBOX_CONTAINER
 export PERSISTENT_CACHE HF_HOME RESULTS_DIR
@@ -89,7 +91,7 @@ export NUM_TRAIN_NODES NUM_GEN_NODES NUM_GYM_NODES NRL_MAX_STEPS DRY_RUN
 export ENABLE_MTP_INFERENCE="${ENABLE_MTP_INFERENCE:-1}"
 export EXTRA_MOUNTS="${EXTRA_MOUNTS:-/lustre:/lustre}"
 export USE_SNAPSHOT="${USE_SNAPSHOT:-1}"
-export NRL_FORCE_REBUILD_VENVS="${NRL_FORCE_REBUILD_VENVS:-true}"
+export NRL_FORCE_REBUILD_VENVS="${NRL_FORCE_REBUILD_VENVS:-false}"
 export NEMO_GYM_VENV_DIR="${NEMO_GYM_VENV_DIR:-${PERSISTENT_CACHE}/component-venvs}"
 export PYTHON_RUNNER="${PYTHON_RUNNER:-/opt/nemo_rl_venv/bin/python}"
 
