@@ -118,7 +118,7 @@ cd "${REPO_ROOT}"
 bash ultra_launch.sh \
   checkpointing.enabled=false \
   logger.monitor_gpus=false \
-  "env.nemo_gym.swe_agents_train.responses_api_agents.swe_agents.agent_framework_repo=${OPENHANDS_REPO}" \
-  "env.nemo_gym.swe_agents_train.responses_api_agents.swe_agents.agent_framework_commit=${OPENHANDS_COMMIT}" \
-  "env.nemo_gym.swe_agents_val.responses_api_agents.swe_agents.agent_framework_repo=${OPENHANDS_REPO}" \
-  "env.nemo_gym.swe_agents_val.responses_api_agents.swe_agents.agent_framework_commit=${OPENHANDS_COMMIT}"
+  "+env.nemo_gym.swe_agents_train.responses_api_agents.swe_agents.agent_framework_repo=${OPENHANDS_REPO}" \
+  "+env.nemo_gym.swe_agents_train.responses_api_agents.swe_agents.agent_framework_commit=${OPENHANDS_COMMIT}" \
+  "+env.nemo_gym.swe_agents_val.responses_api_agents.swe_agents.agent_framework_repo=${OPENHANDS_REPO}" \
+  "+env.nemo_gym.swe_agents_val.responses_api_agents.swe_agents.agent_framework_commit=${OPENHANDS_COMMIT}"
