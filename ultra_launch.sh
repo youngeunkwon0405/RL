@@ -439,9 +439,10 @@ fi
 # =============================================================================
 # Container mounts
 # =============================================================================
-# By default, nemo_rl (Python package) and examples/configs (YAML configs) from
-# the code snapshot are overlaid into the container. Everything else uses the
-# container's built-in code at /opt/nemo-rl.
+# By default, the project metadata, nemo_rl (Python package), and
+# examples/configs (YAML configs) from the code snapshot are overlaid into the
+# container. Everything else uses the container's built-in code at
+# /opt/nemo-rl.
 #
 # To overlay additional components (e.g. a local Megatron-LM checkout), pass
 # EXTRA_MOUNTS as a comma-separated list of host:container pairs:
@@ -449,6 +450,8 @@ fi
 #   EXTRA_MOUNTS="/path/to/Megatron-LM:/opt/nemo-rl/3rdparty/Megatron-LM-workspace/Megatron-LM" bash ultra_launch.sh
 #
 # Container paths for reference:
+#   /opt/nemo-rl/pyproject.toml                                      — project dependencies
+#   /opt/nemo-rl/uv.lock                                             — resolved dependencies
 #   /opt/nemo-rl/nemo_rl                                              — Python package
 #   /opt/nemo-rl/examples/configs                                     — YAML configs
 #   /opt/nemo-rl/3rdparty/Megatron-LM-workspace/Megatron-LM           — Megatron-LM
@@ -464,6 +467,14 @@ _append_mount() {
   fi
 }
 
+if [[ -f "${OVERLAY_SOURCE}/pyproject.toml" ]]; then
+  _append_mount "${OVERLAY_SOURCE}/pyproject.toml:/opt/nemo-rl/pyproject.toml"
+  echo "  Mount: pyproject.toml → /opt/nemo-rl/pyproject.toml"
+fi
+if [[ -f "${OVERLAY_SOURCE}/uv.lock" ]]; then
+  _append_mount "${OVERLAY_SOURCE}/uv.lock:/opt/nemo-rl/uv.lock"
+  echo "  Mount: uv.lock → /opt/nemo-rl/uv.lock"
+fi
 if [[ -d "${OVERLAY_SOURCE}/nemo_rl" ]]; then
   _append_mount "${OVERLAY_SOURCE}/nemo_rl:/opt/nemo-rl/nemo_rl"
   echo "  Mount: nemo_rl → /opt/nemo-rl/nemo_rl"
