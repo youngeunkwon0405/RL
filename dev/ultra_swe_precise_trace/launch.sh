@@ -92,6 +92,11 @@ export USE_SNAPSHOT="${USE_SNAPSHOT:-1}"
 export NRL_FORCE_REBUILD_VENVS="${NRL_FORCE_REBUILD_VENVS:-true}"
 export NEMO_GYM_VENV_DIR="${NEMO_GYM_VENV_DIR:-${PERSISTENT_CACHE}/component-venvs}"
 
+# This validation uses local/public assets and intentionally avoids forwarding
+# login-shell credentials into the generated command or provenance file.
+unset WANDB_API_KEY WANDB_ENTITY
+export HF_TOKEN=""
+
 cat <<EOF
 Ultra SWE precise-trace validation
   NeMo RL:    $(git -C "${REPO_ROOT}" rev-parse HEAD)
