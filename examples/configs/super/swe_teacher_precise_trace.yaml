@@ -43,8 +43,8 @@ checkpointing:
 # GRPO Algorithm
 # =============================================================================
 grpo:
-  num_prompts_per_step: 8
-  num_generations_per_prompt: 16
+  num_prompts_per_step: 16
+  num_generations_per_prompt: 32
   num_val_generations_per_prompt: 2
   max_rollout_turns: 1
   max_num_epochs: 1
@@ -133,7 +133,7 @@ policy:
     chat_template_kwargs: null
   hf_config_overrides: {}
 
-  train_global_batch_size: 128
+  train_global_batch_size: 512
   train_micro_batch_size: 1
   generation_batch_size: 64
   logprob_batch_size: 1
