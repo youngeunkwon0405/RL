@@ -101,6 +101,26 @@ export NRL_VLLM_USE_V1="${NRL_VLLM_USE_V1:-1}"
 export VLLM_USE_PRECOMPILED="${VLLM_USE_PRECOMPILED:-1}"
 export VLLM_PRECOMPILED_WHEEL_LOCATION="${VLLM_PRECOMPILED_WHEEL_LOCATION:-https://github.com/vllm-project/vllm/releases/download/v0.17.0/vllm-0.17.0-cp38-abi3-manylinux_2_31_aarch64.whl}"
 
+EXPECTED_RUNTIME_PYTHON="${EXPECTED_RUNTIME_PYTHON:-3.12.12}"
+runtime_pythons=(
+  "${NEMO_RL_VENV_DIR}/nemo_rl.algorithms.async_utils.AsyncTrajectoryCollector/bin/python"
+  "${NEMO_RL_VENV_DIR}/nemo_rl.algorithms.async_utils.ReplayBuffer/bin/python"
+  "${NEMO_RL_VENV_DIR}/nemo_rl.environments.nemo_gym.NemoGym/bin/python"
+  "${NEMO_RL_VENV_DIR}/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker/bin/python"
+  "${NEMO_RL_VENV_DIR}/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker/bin/python"
+  "${NEMO_GYM_VENV_DIR}/responses_api_agents/swe_agents/.venv/bin/python"
+)
+for runtime_python in "${runtime_pythons[@]}"; do
+  if [[ ! -x "${runtime_python}" ]]; then
+    continue
+  fi
+  runtime_version=$("${runtime_python}" -c 'import platform; print(platform.python_version())')
+  if [[ "${runtime_version}" != "${EXPECTED_RUNTIME_PYTHON}" ]]; then
+    echo "ERROR: stale runtime ${runtime_python}: expected Python ${EXPECTED_RUNTIME_PYTHON}, got ${runtime_version}" >&2
+    exit 1
+  fi
+done
+
 # This validation uses local/public assets and intentionally avoids forwarding
 # login-shell credentials into the generated command or provenance file.
 unset WANDB_API_KEY WANDB_ENTITY
