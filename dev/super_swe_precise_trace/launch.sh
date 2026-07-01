@@ -97,6 +97,9 @@ export USE_SNAPSHOT="${USE_SNAPSHOT:-1}"
 export NRL_FORCE_REBUILD_VENVS="${NRL_FORCE_REBUILD_VENVS:-false}"
 export NEMO_GYM_VENV_DIR="${NEMO_GYM_VENV_DIR:-${PERSISTENT_CACHE}/component-venvs}"
 export PYTHON_RUNNER="${PYTHON_RUNNER:-/opt/nemo_rl_venv/bin/python}"
+export NRL_VLLM_USE_V1="${NRL_VLLM_USE_V1:-1}"
+export VLLM_USE_PRECOMPILED="${VLLM_USE_PRECOMPILED:-1}"
+export VLLM_PRECOMPILED_WHEEL_LOCATION="${VLLM_PRECOMPILED_WHEEL_LOCATION:-https://github.com/vllm-project/vllm/releases/download/v0.17.0/vllm-0.17.0-cp38-abi3-manylinux_2_31_aarch64.whl}"
 
 # This validation uses local/public assets and intentionally avoids forwarding
 # login-shell credentials into the generated command or provenance file.

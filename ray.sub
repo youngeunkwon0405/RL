@@ -81,10 +81,6 @@ fi
 # need to be compiled, so NeMo RL has an implementation in nemo_rl/utils/venv.py that does it once per node as opposed to once per task.
 export RAY_ENABLE_UV_RUN_RUNTIME_ENV=0
 
-# Isolated actors may use a different Python patch release than the root
-# runtime. Ray explicitly supports compatibility within the same minor release.
-export RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL="${RAY_DEFAULT_PYTHON_VERSION_MATCH_LEVEL:-minor}"
-
 # Setting ulimit is recommended by ray best practices page
 # @ https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html
 # It's session based and won't affect the system outside the script
