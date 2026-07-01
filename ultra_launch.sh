@@ -76,6 +76,8 @@ set -euo pipefail
 : "${CONTAINER:?CONTAINER is required (NGC image URI or .sqsh path)}"
 : "${SANDBOX_CONTAINER:?SANDBOX_CONTAINER is required (nemo-skills sandbox image)}"
 : "${PERSISTENT_CACHE:?PERSISTENT_CACHE is required (Lustre dir for vLLM/Triton/Inductor caches)}"
+UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-${PERSISTENT_CACHE}/uv-python}"
+export UV_PYTHON_INSTALL_DIR
 : "${SLURM_PARTITION:?SLURM_PARTITION is required}"
 : "${SLURM_ACCOUNT:?SLURM_ACCOUNT is required}"
 # Judge models are recipe-specific. Most teachers (student RLVR, IFBench, RLHF,
@@ -525,6 +527,18 @@ read -r -d '' SETUP_COMMAND <<SETUPEOF || true
 if [ ! -x /opt/nemo_rl_venv/bin/python ] && [ -x /usr/bin/python3.12 ]; then
   ln -sfn /usr/bin/python3.12 /opt/nemo_rl_venv/bin/python
   echo "[PYTHON] Repaired /opt/nemo_rl_venv/bin/python with /usr/bin/python3.12"
+fi
+
+PYTHON_HEADER_DIR=\$(printf '%s\n' "${UV_PYTHON_INSTALL_DIR}"/cpython-3.12.*-linux-aarch64-gnu/include/python3.12 | sort -V | tail -n 1)
+if [ ! -f "\$PYTHON_HEADER_DIR/Python.h" ]; then
+  echo "ERROR: shared Python headers do not exist under ${UV_PYTHON_INSTALL_DIR}" >&2
+  exit 1
+fi
+if [ ! -e /usr/include/python3.12 ]; then
+  ln -s "\$PYTHON_HEADER_DIR" /usr/include/python3.12
+elif [ ! -f /usr/include/python3.12/Python.h ]; then
+  echo "ERROR: /usr/include/python3.12 exists without Python.h" >&2
+  exit 1
 fi
 
 # Component environments resolve dependencies from the mounted branch. Keep the
