@@ -114,7 +114,7 @@ Super SWE precise-trace validation
   Container:  ${CONTAINER}
   Shape:      ${NUM_TRAIN_NODES} train + ${NUM_GEN_NODES} generation + ${NUM_GYM_NODES} Gym nodes
   Batch:      8 prompts x 16 generations = 128 rollouts per step
-  Context:    16,384 tokens
+  Context:    65,536 tokens
   Steps:      ${NRL_MAX_STEPS}
 EOF
 
@@ -125,8 +125,8 @@ bash ultra_launch.sh \
   grpo.num_prompts_per_step=8 \
   grpo.num_generations_per_prompt=16 \
   policy.train_global_batch_size=128 \
-  policy.max_total_sequence_length=16384 \
-  policy.generation.vllm_cfg.max_model_len=16384 \
+  policy.max_total_sequence_length=65536 \
+  policy.generation.vllm_cfg.max_model_len=65536 \
   "+env.nemo_gym.swe_agents_train.responses_api_agents.swe_agents.agent_framework_repo=${OPENHANDS_REPO}" \
   "+env.nemo_gym.swe_agents_train.responses_api_agents.swe_agents.agent_framework_commit=${OPENHANDS_COMMIT}" \
   "+env.nemo_gym.swe_agents_val.responses_api_agents.swe_agents.agent_framework_repo=${OPENHANDS_REPO}" \
