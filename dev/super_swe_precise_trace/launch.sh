@@ -109,6 +109,7 @@ runtime_pythons=(
   "${NEMO_RL_VENV_DIR}/nemo_rl.models.generation.vllm.vllm_worker_async.VllmAsyncGenerationWorker/bin/python"
   "${NEMO_RL_VENV_DIR}/nemo_rl.models.policy.workers.megatron_policy_worker.MegatronPolicyWorker/bin/python"
   "${NEMO_GYM_VENV_DIR}/responses_api_agents/swe_agents/.venv/bin/python"
+  "${NEMO_GYM_VENV_DIR}/responses_api_models/vllm_model/.venv/bin/python"
 )
 for runtime_python in "${runtime_pythons[@]}"; do
   if [[ ! -x "${runtime_python}" ]]; then
